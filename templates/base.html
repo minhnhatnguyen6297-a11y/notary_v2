@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Hệ thống Công chứng{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    :root {
+      --navy:   #0f2443;
+      --navy2:  #1a3a6b;
+      --gold:   #c9a84c;
+      --gold2:  #e8c96a;
+      --cream:  #f8f5f0;
+      --text:   #1e1e2e;
+      --muted:  #6b7280;
+      --sidebar-w: 250px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Be Vietnam Pro', sans-serif;
+      background: var(--cream);
+      color: var(--text);
+      margin: 0;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      position: fixed; top: 0; left: 0;
+      width: var(--sidebar-w); height: 100vh;
+      background: var(--navy);
+      display: flex; flex-direction: column;
+      z-index: 100;
+      box-shadow: 4px 0 20px rgba(0,0,0,.25);
+    }
+    .sidebar-logo {
+      padding: 28px 24px 20px;
+      border-bottom: 1px solid rgba(201,168,76,.25);
+    }
+    .sidebar-logo .logo-icon {
+      font-size: 28px; color: var(--gold);
+    }
+    .sidebar-logo h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: 15px; color: #fff;
+      margin: 8px 0 2px; line-height: 1.3;
+    }
+    .sidebar-logo small { color: rgba(255,255,255,.45); font-size: 11px; }
+
+    .nav-section {
+      font-size: 10px; font-weight: 600; letter-spacing: 1.5px;
+      text-transform: uppercase; color: rgba(255,255,255,.3);
+      padding: 20px 24px 6px;
+    }
+    .sidebar-nav { flex: 1; padding: 4px 12px; overflow-y: auto; }
+    .sidebar-nav a {
+      display: flex; align-items: center; gap: 10px;
+      color: rgba(255,255,255,.7); text-decoration: none;
+      padding: 10px 14px; border-radius: 8px;
+      font-size: 14px; font-weight: 500;
+      margin-bottom: 2px; transition: all .2s;
+    }
+    .sidebar-nav a:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .sidebar-nav a.active {
+      background: linear-gradient(135deg, var(--gold), var(--gold2));
+      color: var(--navy); font-weight: 600;
+    }
+    .sidebar-nav a .bi { font-size: 16px; }
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid rgba(255,255,255,.08);
+      font-size: 11px; color: rgba(255,255,255,.3);
+    }
+
+    /* ── MAIN ── */
+    .main-wrap {
+      margin-left: var(--sidebar-w);
+      min-height: 100vh;
+    }
+    .topbar {
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 0 32px;
+      height: 60px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px; color: var(--navy); font-weight: 700;
+    }
+    .content { padding: 28px 32px; }
+
+    /* ── CARDS ── */
+    .card {
+      border: none;
+      border-radius: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+      background: #fff;
+    }
+    .card-header {
+      background: #fff;
+      border-bottom: 1px solid #f0f0f0;
+      border-radius: 14px 14px 0 0 !important;
+      padding: 18px 24px;
+      font-weight: 600; font-size: 15px; color: var(--navy);
+    }
+    .card-body { padding: 24px; }
+
+    /* ── STAT CARDS ── */
+    .stat-card {
+      border-radius: 14px; padding: 24px;
+      color: #fff; position: relative; overflow: hidden;
+    }
+    .stat-card::after {
+      content: ''; position: absolute;
+      width: 120px; height: 120px; border-radius: 50%;
+      background: rgba(255,255,255,.08);
+      right: -20px; top: -20px;
+    }
+    .stat-card .stat-num { font-size: 2.4rem; font-weight: 700; line-height: 1; }
+    .stat-card .stat-label { font-size: 13px; opacity: .8; margin-top: 4px; }
+    .stat-card .stat-icon { font-size: 32px; opacity: .4; }
+
+    /* ── BUTTONS ── */
+    .btn-primary { background: var(--navy2); border-color: var(--navy2); }
+    .btn-primary:hover { background: var(--navy); border-color: var(--navy); }
+    .btn-gold {
+      background: linear-gradient(135deg, var(--gold), var(--gold2));
+      border: none; color: var(--navy); font-weight: 600;
+    }
+    .btn-gold:hover { opacity: .9; color: var(--navy); }
+    .btn-sm { font-size: 12.5px; }
+
+    /* ── TABLE ── */
+    .table th {
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--muted);
+      background: #fafafa; border-bottom: 2px solid #f0f0f0;
+    }
+    .table td { vertical-align: middle; font-size: 14px; }
+    .table-hover tbody tr:hover { background: #fdf8f0; }
+
+    /* ── BADGES ── */
+    .badge-draft { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .badge-locked { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .badge-alive { background: #dbeafe; color: #1e40af; }
+    .badge-dead  { background: #fee2e2; color: #991b1b; }
+
+    /* ── FORMS ── */
+    .form-label { font-size: 13px; font-weight: 600; color: var(--navy); }
+    .form-control, .form-select {
+      border-radius: 8px; border-color: #e5e7eb;
+      font-size: 14px;
+    }
+    .form-control:focus, .form-select:focus {
+      border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201,168,76,.15);
+    }
+    .required::after { content: ' *'; color: #dc2626; }
+
+    /* ── MISC ── */
+    .page-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .page-header h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 22px; color: var(--navy); margin: 0;
+    }
+    .alert { border-radius: 10px; font-size: 14px; }
+    .divider { border-color: #f0f0f0; margin: 20px 0; }
+
+    /* Detail info grid */
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .info-item label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .info-item span { display: block; font-size: 15px; color: var(--text); margin-top: 2px; }
+
+    /* Progress bar for tỷ lệ */
+    .ratio-bar { height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    .ratio-fill { height: 100%; background: linear-gradient(90deg, var(--gold), var(--gold2)); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon"><i class="bi bi-bank2"></i></div>
+    <h1>Quản lý Hồ sơ<br>Công chứng</h1>
+    <small>v1.0 — Nội bộ</small>
+  </div>
+
+  <div class="sidebar-nav">
+    <div class="nav-section">Tổng quan</div>
+    <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">
+      <i class="bi bi-grid-1x2"></i> Dashboard
+    </a>
+
+    <div class="nav-section">Dữ liệu</div>
+    <a href="/customers" class="{% if '/customers' in request.url.path %}active{% endif %}">
+      <i class="bi bi-people"></i> Danh sách người
+    </a>
+    <a href="/properties" class="{% if '/properties' in request.url.path %}active{% endif %}">
+      <i class="bi bi-house-door"></i> Tài sản / Sổ đỏ
+    </a>
+
+    <div class="nav-section">Nghiệp vụ</div>
+    <a href="/cases" class="{% if '/cases' in request.url.path %}active{% endif %}">
+      <i class="bi bi-folder2-open"></i> Hồ sơ thừa kế
+    </a>
+  </div>
+
+  <div class="sidebar-footer">
+    <i class="bi bi-shield-lock"></i> Dữ liệu được bảo vệ nội bộ
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<div class="main-wrap">
+  <div class="topbar">
+    <span class="topbar-title">{% block topbar_title %}Hệ thống Công chứng{% endblock %}</span>
+    <div class="d-flex align-items-center gap-3">
+      <span style="font-size:13px; color:var(--muted);">
+        <i class="bi bi-calendar3"></i>
+        <span id="today-date"></span>
+      </span>
+    </div>
+  </div>
+
+  <div class="content">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // Hiển thị ngày hôm nay
+  const d = new Date();
+  document.getElementById('today-date').textContent =
+    d.toLocaleDateString('vi-VN', {weekday:'long', day:'2-digit', month:'2-digit', year:'numeric'});
+</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

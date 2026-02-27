@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Danh sách người{% endblock %}
+{% block topbar_title %}Danh sách người{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2><i class="bi bi-people me-2" style="color:var(--gold)"></i>Danh sách người</h2>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/customers/create" class="btn btn-gold">
+      <i class="bi bi-person-plus me-1"></i>Thêm người mới
+    </a>
+    <!-- Nút upload Excel -->
+    <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#modalUpload">
+      <i class="bi bi-file-earmark-arrow-up me-1"></i>Import Excel
+    </button>
+    <a href="/customers/download-template" class="btn btn-outline-secondary">
+      <i class="bi bi-download me-1"></i>Tải file mẫu
+    </a>
+  </div>
+</div>
+
+<!-- Modal Upload Excel -->
+<div class="modal fade" id="modalUpload" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--navy); color:#fff;">
+        <h5 class="modal-title">
+          <i class="bi bi-file-earmark-spreadsheet me-2" style="color:var(--gold)"></i>
+          Import hàng loạt từ Excel
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form action="/customers/upload-excel" method="post" enctype="multipart/form-data">
+        <div class="modal-body">
+          <!-- Hướng dẫn nhanh -->
+          <div class="alert alert-info mb-3" style="font-size:13px;">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Lưu ý:</strong> File phải dùng đúng format.
+            <a href="/customers/download-template" class="alert-link">Tải file mẫu tại đây</a>.
+          </div>
+
+          <!-- Cột bắt buộc -->
+          <div class="mb-3" style="font-size:13px; background:#f8f5f0; border-radius:8px; padding:12px;">
+            <div class="fw-bold mb-2" style="color:var(--navy)">File Excel cần có 7 cột (dòng đầu là tiêu đề):</div>
+            <div class="row g-1">
+              <div class="col-6"><code style="font-size:11px">ho_ten</code> — Họ và tên *</div>
+              <div class="col-6"><code style="font-size:11px">gioi_tinh</code> — Nam/Nữ *</div>
+              <div class="col-6"><code style="font-size:11px">ngay_sinh</code> — Ngày sinh *</div>
+              <div class="col-6"><code style="font-size:11px">ngay_chet</code> — Ngày mất (để trống nếu còn sống)</div>
+              <div class="col-6"><code style="font-size:11px">so_giay_to</code> — Số CCCD *</div>
+              <div class="col-6"><code style="font-size:11px">ngay_cap</code> — Ngày cấp *</div>
+              <div class="col-12"><code style="font-size:11px">dia_chi</code> — Địa chỉ thường trú *</div>
+            </div>
+            <div class="text-muted mt-2" style="font-size:11px">* Bắt buộc | Ngày nhập theo dạng: DD/MM/YYYY</div>
+          </div>
+
+          <!-- Chọn file -->
+          <div class="mb-0">
+            <label class="form-label fw-bold">Chọn file Excel:</label>
+            <input type="file" name="file" accept=".xlsx,.xls" class="form-control" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Huỷ</button>
+          <button type="submit" class="btn btn-gold">
+            <i class="bi bi-upload me-1"></i>Bắt đầu import
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Tìm kiếm -->
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" class="d-flex gap-2">
+      <input type="text" name="q" value="{{ q }}" class="form-control"
+             placeholder="🔍  Tìm theo tên, số giấy tờ, địa chỉ...">
+      <button class="btn btn-primary px-4">Tìm</button>
+      {% if q %}<a href="/customers" class="btn btn-outline-secondary">Xoá bộ lọc</a>{% endif %}
+    </form>
+  </div>
+</div>
+
+<!-- Bảng -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Tổng số: <strong>{{ customers|length }}</strong> người</span>
+    {% if q %}<span class="text-muted" style="font-size:13px">Kết quả tìm kiếm: "{{ q }}"</span>{% endif %}
+  </div>
+  <div class="card-body p-0">
+    {% if customers %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th>Họ và tên</th>
+            <th>Giới tính</th>
+            <th>Ngày sinh</th>
+            <th>Số giấy tờ</th>
+            <th>Trạng thái</th>
+            <th>Địa chỉ</th>
+            <th style="width:120px">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in customers %}
+          <tr>
+            <td class="text-muted" style="font-size:12px">{{ c.id }}</td>
+            <td>
+              <a href="/customers/{{ c.id }}" class="fw-600 text-decoration-none" style="color:var(--navy)">
+                {{ c.ho_ten }}
+              </a>
+            </td>
+            <td>{{ c.gioi_tinh }}</td>
+            <td>{{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh }}</td>
+            <td><code style="font-size:12px">{{ c.so_giay_to }}</code></td>
+            <td>
+              {% if c.con_song %}
+                <span class="badge badge-alive rounded-pill px-2 py-1"><i class="bi bi-circle-fill me-1" style="font-size:8px"></i>Còn sống</span>
+              {% else %}
+                <span class="badge badge-dead rounded-pill px-2 py-1"><i class="bi bi-x-circle-fill me-1" style="font-size:8px"></i>Đã mất ({{ c.ngay_chet.strftime('%d/%m/%Y') }})</span>
+              {% endif %}
+            </td>
+            <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ c.dia_chi }}">
+              {{ c.dia_chi }}
+            </td>
+            <td>
+              <a href="/customers/{{ c.id }}/edit" class="btn btn-sm btn-outline-primary me-1" title="Sửa"><i class="bi bi-pencil"></i></a>
+              <button class="btn btn-sm btn-outline-danger" title="Xoá"
+                onclick="if(confirm('Xoá người này?')) document.getElementById('del-c-{{ c.id }}').submit()">
+                <i class="bi bi-trash"></i>
+              </button>
+              <form id="del-c-{{ c.id }}" action="/customers/{{ c.id }}/delete" method="post" style="display:none"></form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-inbox" style="font-size:48px; color:#d1d5db"></i>
+      <div class="mt-3 text-muted">
+        {% if q %}Không tìm thấy kết quả nào{% else %}Chưa có dữ liệu — hãy thêm người đầu tiên{% endif %}
+      </div>
+      <a href="/customers/create" class="btn btn-gold mt-3">Thêm người mới</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

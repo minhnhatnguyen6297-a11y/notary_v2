@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sửa thông tin' if obj else 'Thêm người mới' }}{% endblock %}
+{% block topbar_title %}{{ 'Sửa thông tin người' if obj else 'Thêm người mới' }}{% endblock %}
+
+{% block content %}
+{% set action = '/customers/' + obj.id|string + '/edit' if obj else '/customers/create' %}
+
+<div class="page-header">
+  <h2>
+    <i class="bi bi-person-{{ 'gear' if obj else 'plus' }} me-2" style="color:var(--gold)"></i>
+    {{ 'Chỉnh sửa: ' + obj.ho_ten if obj else 'Thêm người mới vào hệ thống' }}
+  </h2>
+  <a href="/customers" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+  {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">
+    <i class="bi bi-person-vcard me-2" style="color:var(--gold)"></i>
+    Thông tin cá nhân
+    <small class="text-muted ms-2" style="font-size:12px">Trường có dấu * là bắt buộc</small>
+  </div>
+  <div class="card-body">
+    <form method="post" action="{{ action }}">
+      <div class="row g-3">
+
+        <div class="col-md-8">
+          <label class="form-label required">Họ và tên</label>
+          <input type="text" name="ho_ten" class="form-control"
+                 value="{{ obj.ho_ten if obj else '' }}"
+                 placeholder="Ví dụ: NGUYỄN VĂN A" required>
+          <small class="text-muted">Nhập theo đúng tên trên giấy tờ (viết hoa)</small>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label required">Giới tính</label>
+          <select name="gioi_tinh" class="form-select" required>
+            <option value="">-- Chọn --</option>
+            <option value="Nam" {{ 'selected' if obj and obj.gioi_tinh == 'Nam' }}>Nam</option>
+            <option value="Nữ" {{ 'selected' if obj and obj.gioi_tinh == 'Nữ' }}>Nữ</option>
+          </select>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label required">Ngày sinh</label>
+          <input type="date" name="ngay_sinh" class="form-control"
+                 value="{{ obj.ngay_sinh.isoformat() if obj and obj.ngay_sinh else '' }}" required>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label">Ngày mất <small class="text-muted">(bỏ trống nếu còn sống)</small></label>
+          <input type="date" name="ngay_chet" class="form-control"
+                 value="{{ obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '' }}">
+          <small class="text-muted">Điền vào nếu người này đã qua đời</small>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label required">Số CCCD / Số giấy khai tử</label>
+          <input type="text" name="so_giay_to" class="form-control"
+                 value="{{ obj.so_giay_to if obj else '' }}"
+                 placeholder="012345678901" required>
+        </div>
+
+        <div class="col-md-4">
+          <label class="form-label required">Ngày cấp giấy tờ</label>
+          <input type="date" name="ngay_cap" class="form-control"
+                 value="{{ obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '' }}" required>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label required">Địa chỉ thường trú</label>
+          <textarea name="dia_chi" class="form-control" rows="2"
+                    placeholder="Số nhà, thôn/xóm, xã/phường, huyện/quận, tỉnh/thành phố">{{ obj.dia_chi if obj else '' }}</textarea>
+        </div>
+
+      </div>
+
+      <hr class="divider">
+      <div class="d-flex gap-2 justify-content-end">
+        <a href="/customers" class="btn btn-outline-secondary">Huỷ</a>
+        <button type="submit" class="btn btn-gold px-4">
+          <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Thêm vào hệ thống' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if not obj %}
+<div class="alert alert-info mt-3" style="font-size:13px">
+  <i class="bi bi-lightbulb me-2"></i>
+  <strong>Lưu ý:</strong> Nhập <strong>từng người một</strong> — kể cả người đã mất.
+  Sau đó vào <strong>Hồ sơ thừa kế</strong> để ghép họ lại trong một hồ sơ.
+</div>
+{% endif %}
+{% endblock %}

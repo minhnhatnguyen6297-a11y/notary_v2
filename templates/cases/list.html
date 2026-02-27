@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Hồ sơ thừa kế{% endblock %}
+{% block topbar_title %}Hồ sơ thừa kế{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2><i class="bi bi-folder2-open me-2" style="color:var(--gold)"></i>Hồ sơ thừa kế</h2>
+  <a href="/cases/create" class="btn btn-gold"><i class="bi bi-folder-plus me-1"></i>Tạo hồ sơ mới</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body py-3">
+    <form method="get" class="d-flex gap-2">
+      <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="🔍  Tìm theo tên người mất...">
+      <button class="btn btn-primary px-4">Tìm</button>
+      {% if q %}<a href="/cases" class="btn btn-outline-secondary">Xoá bộ lọc</a>{% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Tổng số: <strong>{{ cases|length }}</strong> hồ sơ</div>
+  <div class="card-body p-0">
+    {% if cases %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Người để lại di sản</th>
+            <th>Tài sản</th>
+            <th>Loại văn bản</th>
+            <th>Ngày lập</th>
+            <th>Người tham gia</th>
+            <th>Trạng thái</th>
+            <th style="width:130px">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in cases %}
+          <tr>
+            <td class="text-muted" style="font-size:12px">{{ c.id }}</td>
+            <td>
+              <a href="/cases/{{ c.id }}" class="fw-bold text-decoration-none" style="color:var(--navy)">
+                {{ c.nguoi_chet.ho_ten }}
+              </a>
+              <div style="font-size:11px; color:var(--muted)">Mất: {{ c.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if c.nguoi_chet.ngay_chet }}</div>
+            </td>
+            <td><code style="font-size:12px">{{ c.tai_san.so_serial }}</code><div style="font-size:11px; color:var(--muted)">Thửa {{ c.tai_san.so_thua_dat }}</div></td>
+            <td>
+              {% if c.loai_van_ban == 'khai_nhan' %}
+                <span class="badge bg-primary bg-opacity-10 text-primary">Khai nhận</span>
+              {% else %}
+                <span class="badge bg-warning bg-opacity-10 text-warning">Thoả thuận</span>
+              {% endif %}
+            </td>
+            <td>{{ c.ngay_lap_ho_so.strftime('%d/%m/%Y') }}</td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary">{{ c.participants|length }} người</span></td>
+            <td>
+              {% if c.trang_thai == 'locked' %}
+                <span class="badge badge-locked rounded-pill px-2"><i class="bi bi-lock-fill me-1"></i>Đã khoá</span>
+              {% else %}
+                <span class="badge badge-draft rounded-pill px-2"><i class="bi bi-pencil me-1"></i>Bản nháp</span>
+              {% endif %}
+            </td>
+            <td>
+              <a href="/cases/{{ c.id }}" class="btn btn-sm btn-outline-primary me-1" title="Xem"><i class="bi bi-eye"></i></a>
+              {% if not c.is_locked %}
+              <a href="/cases/{{ c.id }}/edit" class="btn btn-sm btn-outline-secondary me-1" title="Sửa"><i class="bi bi-pencil"></i></a>
+              {% endif %}
+              <a href="/cases/{{ c.id }}/export-word" class="btn btn-sm btn-outline-success" title="Xuất Word"><i class="bi bi-file-word"></i></a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-folder2-open" style="font-size:48px; color:#d1d5db"></i>
+      <div class="mt-3 text-muted">{% if q %}Không tìm thấy{% else %}Chưa có hồ sơ nào{% endif %}</div>
+      <a href="/cases/create" class="btn btn-gold mt-3">Tạo hồ sơ đầu tiên</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

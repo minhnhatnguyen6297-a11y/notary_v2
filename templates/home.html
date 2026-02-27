@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Công chứng{% endblock %}
+{% block topbar_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2>
+    <i class="bi bi-grid-1x2 me-2" style="color:var(--gold)"></i>
+    Tổng quan hệ thống
+  </h2>
+</div>
+
+<!-- Stat cards -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #0f2443, #1a3a6b);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num" id="cnt-customers">0</div>
+          <div class="stat-label">Người trong hệ thống</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-people"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #065f46, #059669);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num" id="cnt-properties">0</div>
+          <div class="stat-label">Tài sản / Sổ đỏ</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-house-door"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #7c2d12, #b45309);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num" id="cnt-cases">0</div>
+          <div class="stat-label">Hồ sơ thừa kế</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-folder2-open"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #312e81, #4f46e5);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num" id="cnt-locked">0</div>
+          <div class="stat-label">Hồ sơ đã khoá</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-lock"></i></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quick actions -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-lightning-charge-fill me-2" style="color:var(--gold)"></i>
+        Thao tác nhanh
+      </div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2">
+          <a href="/customers/create" class="btn btn-primary">
+            <i class="bi bi-person-plus me-1"></i>Thêm người mới
+          </a>
+          <a href="/properties/create" class="btn btn-primary">
+            <i class="bi bi-plus-circle me-1"></i>Thêm tài sản
+          </a>
+          <a href="/cases/create" class="btn btn-gold">
+            <i class="bi bi-folder-plus me-1"></i>Tạo hồ sơ thừa kế
+          </a>
+          <a href="/customers" class="btn btn-outline-secondary">
+            <i class="bi bi-search me-1"></i>Tìm kiếm người
+          </a>
+          <a href="/cases" class="btn btn-outline-secondary">
+            <i class="bi bi-list-ul me-1"></i>Xem tất cả hồ sơ
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quy trình -->
+<div class="card">
+  <div class="card-header">
+    <i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>
+    Quy trình làm việc chuẩn
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="text-center p-3 rounded" style="background:#f8f5f0; border: 2px dashed #e5e7eb;">
+          <div style="font-size:32px; color:var(--navy)">
+            <i class="bi bi-1-circle-fill"></i>
+          </div>
+          <div class="fw-bold mt-2" style="color:var(--navy)">Nhập người</div>
+          <small class="text-muted">Nhập CCCD / giấy khai tử của từng người</small>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="text-center p-3 rounded" style="background:#f8f5f0; border: 2px dashed #e5e7eb;">
+          <div style="font-size:32px; color:var(--navy)">
+            <i class="bi bi-2-circle-fill"></i>
+          </div>
+          <div class="fw-bold mt-2" style="color:var(--navy)">Nhập tài sản</div>
+          <small class="text-muted">Nhập thông tin sổ đỏ liên quan</small>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="text-center p-3 rounded" style="background:#f8f5f0; border: 2px dashed #e5e7eb;">
+          <div style="font-size:32px; color:var(--navy)">
+            <i class="bi bi-3-circle-fill"></i>
+          </div>
+          <div class="fw-bold mt-2" style="color:var(--navy)">Tạo hồ sơ</div>
+          <small class="text-muted">Thêm người tham gia và phân chia tỷ lệ</small>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="text-center p-3 rounded" style="background:#f8f5f0; border: 2px dashed #e5e7eb;">
+          <div style="font-size:32px; color:var(--gold)">
+            <i class="bi bi-4-circle-fill"></i>
+          </div>
+          <div class="fw-bold mt-2" style="color:var(--navy)">Xuất văn bản</div>
+          <small class="text-muted">Khoá hồ sơ và xuất file Word tự động</small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế' }}{% endblock %}
+{% block topbar_title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế mới' }}{% endblock %}
+
+{% block content %}
+{% set action = '/cases/' + obj.id|string + '/edit' if obj else '/cases/create' %}
+
+<div class="page-header">
+  <h2><i class="bi bi-folder-plus me-2" style="color:var(--gold)"></i>{{ 'Chỉnh sửa hồ sơ #' + obj.id|string if obj else 'Tạo hồ sơ thừa kế mới' }}</h2>
+  <a href="/cases" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+</div>
+
+{% if errors %}<div class="alert alert-danger">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{% endif %}
+
+{% if not deceased %}
+<div class="alert alert-warning">
+  <i class="bi bi-exclamation-triangle me-2"></i>
+  Chưa có người nào được đánh dấu là đã mất.
+  Hãy <a href="/customers/create" class="alert-link">thêm người</a> và điền ngày mất trước.
+</div>
+{% elif not properties %}
+<div class="alert alert-warning">
+  <i class="bi bi-exclamation-triangle me-2"></i>
+  Chưa có tài sản nào.
+  Hãy <a href="/properties/create" class="alert-link">thêm tài sản</a> trước.
+</div>
+{% else %}
+
+<form method="post" action="{{ action }}">
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-person-x me-2" style="color:#dc2626"></i>Người để lại di sản</div>
+      <div class="card-body">
+        <label class="form-label required">Chọn người đã mất</label>
+        <select name="nguoi_chet_id" class="form-select" required>
+          <option value="">-- Chọn người đã mất --</option>
+          {% for c in deceased %}
+          <option value="{{ c.id }}" {{ 'selected' if obj and obj.nguoi_chet_id == c.id }}>
+            {{ c.ho_ten }} (Mất: {{ c.ngay_chet.strftime('%d/%m/%Y') }})
+          </option>
+          {% endfor %}
+        </select>
+        <small class="text-muted mt-1 d-block">Chỉ hiển thị người đã có ngày mất trong hệ thống</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản</div>
+      <div class="card-body">
+        <label class="form-label required">Chọn sổ đỏ / GCN</label>
+        <select name="tai_san_id" class="form-select" required>
+          <option value="">-- Chọn tài sản --</option>
+          {% for p in properties %}
+          <option value="{{ p.id }}" {{ 'selected' if obj and obj.tai_san_id == p.id }}>
+            {{ p.so_serial }} — Thửa {{ p.so_thua_dat or '?' }} ({{ p.dia_chi[:40] }}...)
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <label class="form-label required">Ngày lập hồ sơ</label>
+        <input type="date" name="ngay_lap_ho_so" class="form-control"
+               value="{{ obj.ngay_lap_ho_so.isoformat() if obj else '' }}" required>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <label class="form-label required">Loại văn bản</label>
+        <select name="loai_van_ban" class="form-select">
+          <option value="khai_nhan" {{ 'selected' if not obj or obj.loai_van_ban == 'khai_nhan' }}>Văn bản khai nhận di sản</option>
+          <option value="thoa_thuan" {{ 'selected' if obj and obj.loai_van_ban == 'thoa_thuan' }}>Văn bản thoả thuận phân chia</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <label class="form-label">Ghi chú</label>
+        <input type="text" name="ghi_chu" class="form-control"
+               value="{{ obj.ghi_chu if obj else '' }}" placeholder="Ghi chú tuỳ chọn...">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-info mt-3" style="font-size:13px">
+  <i class="bi bi-info-circle me-2"></i>
+  Sau khi tạo hồ sơ, bạn sẽ được chuyển sang trang chi tiết để <strong>thêm người tham gia</strong> và thiết lập tỷ lệ phân chia.
+</div>
+
+<div class="d-flex gap-2 justify-content-end mt-3">
+  <a href="/cases" class="btn btn-outline-secondary">Huỷ</a>
+  <button type="submit" class="btn btn-gold px-4">
+    <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Tạo hồ sơ' }}
+  </button>
+</div>
+</form>
+
+{% endif %}
+{% endblock %}

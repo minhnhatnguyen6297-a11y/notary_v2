@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ obj.ho_ten }}{% endblock %}
+{% block topbar_title %}Chi tiết người{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>
+    <i class="bi bi-person-circle me-2" style="color:var(--gold)"></i>{{ obj.ho_ten }}
+  </h2>
+  <div class="d-flex gap-2">
+    <a href="/customers/{{ obj.id }}/edit" class="btn btn-primary"><i class="bi bi-pencil me-1"></i>Sửa</a>
+    <a href="/customers" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header">
+        Thông tin cá nhân
+        {% if obj.con_song %}
+          <span class="badge badge-alive ms-2 rounded-pill">Còn sống</span>
+        {% else %}
+          <span class="badge badge-dead ms-2 rounded-pill">Đã mất</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="info-grid">
+          <div class="info-item">
+            <label>Họ và tên</label>
+            <span class="fw-bold">{{ obj.ho_ten }}</span>
+          </div>
+          <div class="info-item">
+            <label>Giới tính</label>
+            <span>{{ obj.gioi_tinh }}</span>
+          </div>
+          <div class="info-item">
+            <label>Ngày sinh</label>
+            <span>{{ obj.ngay_sinh.strftime('%d/%m/%Y') if obj.ngay_sinh }}</span>
+          </div>
+          <div class="info-item">
+            <label>Ngày mất</label>
+            <span>{{ obj.ngay_chet.strftime('%d/%m/%Y') if obj.ngay_chet else '—' }}</span>
+          </div>
+          <div class="info-item">
+            <label>Số giấy tờ (CCCD / Khai tử)</label>
+            <span><code>{{ obj.so_giay_to }}</code></span>
+          </div>
+          <div class="info-item">
+            <label>Ngày cấp</label>
+            <span>{{ obj.ngay_cap.strftime('%d/%m/%Y') if obj.ngay_cap }}</span>
+          </div>
+          <div class="info-item" style="grid-column: 1 / -1">
+            <label>Địa chỉ thường trú</label>
+            <span>{{ obj.dia_chi }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">Tham gia hồ sơ</div>
+      <div class="card-body">
+        {% if obj.participations %}
+          {% for p in obj.participations %}
+          <div class="mb-2 pb-2 border-bottom">
+            <div class="fw-600" style="font-size:13px">
+              <a href="/cases/{{ p.ho_so_id }}" style="color:var(--navy)">
+                Hồ sơ #{{ p.ho_so_id }}
+              </a>
+            </div>
+            <small class="text-muted">Vai trò: {{ p.vai_tro }} • Tỷ lệ: {{ p.ty_le }}%</small>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted text-center py-3" style="font-size:13px">
+            <i class="bi bi-inbox"></i><br>Chưa tham gia hồ sơ nào
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

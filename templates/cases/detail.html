@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}Hồ sơ thừa kế #{{ case.id }}{% endblock %}
+{% block topbar_title %}Chi tiết hồ sơ thừa kế{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>
+    <i class="bi bi-folder2-open me-2" style="color:var(--gold)"></i>
+    Hồ sơ #{{ case.id }} — {{ case.nguoi_chet.ho_ten }}
+    {% if case.is_locked %}
+      <span class="badge badge-locked ms-2 rounded-pill fs-6"><i class="bi bi-lock-fill me-1"></i>Đã khoá</span>
+    {% else %}
+      <span class="badge badge-draft ms-2 rounded-pill fs-6">Bản nháp</span>
+    {% endif %}
+  </h2>
+  <div class="d-flex gap-2">
+    {% if not case.is_locked %}
+      <a href="/cases/{{ case.id }}/edit" class="btn btn-outline-secondary btn-sm"><i class="bi bi-pencil me-1"></i>Sửa</a>
+      <form action="/cases/{{ case.id }}/lock" method="post" style="display:inline">
+        <button class="btn btn-success btn-sm" onclick="return confirm('Khoá hồ sơ? Sau khi khoá sẽ không sửa được nữa.')">
+          <i class="bi bi-lock me-1"></i>Khoá hồ sơ
+        </button>
+      </form>
+    {% else %}
+      <form action="/cases/{{ case.id }}/unlock" method="post" style="display:inline">
+        <button class="btn btn-warning btn-sm"><i class="bi bi-unlock me-1"></i>Mở khoá</button>
+      </form>
+    {% endif %}
+    <a href="/cases/{{ case.id }}/export-word" class="btn btn-gold btn-sm">
+      <i class="bi bi-file-word me-1"></i>Xuất Word
+    </a>
+    <a href="/cases" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+  </div>
+</div>
+
+<!-- Thông tin tổng quan -->
+<div class="row g-3 mb-3">
+  <!-- Người chết -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header" style="border-left: 4px solid #dc2626;">
+        <i class="bi bi-person-x me-2" style="color:#dc2626"></i>Người để lại di sản
+      </div>
+      <div class="card-body">
+        <div class="fw-bold fs-6" style="color:var(--navy)">{{ case.nguoi_chet.ho_ten }}</div>
+        <div class="text-muted mt-1" style="font-size:13px">
+          <div><i class="bi bi-calendar3 me-1"></i>Sinh: {{ case.nguoi_chet.ngay_sinh.strftime('%d/%m/%Y') if case.nguoi_chet.ngay_sinh }}</div>
+          <div><i class="bi bi-calendar-x me-1"></i>Mất: {{ case.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if case.nguoi_chet.ngay_chet }}</div>
+          <div><i class="bi bi-card-text me-1"></i>GT: {{ case.nguoi_chet.so_giay_to }}</div>
+          <div><i class="bi bi-geo-alt me-1"></i>{{ case.nguoi_chet.dia_chi }}</div>
+        </div>
+        <a href="/customers/{{ case.nguoi_chet.id }}" class="btn btn-sm btn-outline-secondary mt-2" style="font-size:11px">Xem chi tiết</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tài sản -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header" style="border-left: 4px solid var(--gold);">
+        <i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản di sản
+      </div>
+      <div class="card-body">
+        <div class="fw-bold" style="color:var(--navy)"><code>{{ case.tai_san.so_serial }}</code></div>
+        <div class="text-muted mt-1" style="font-size:13px">
+          <div>Thửa: <strong>{{ case.tai_san.so_thua_dat or '—' }}</strong> — Tờ BĐ: <strong>{{ case.tai_san.so_to_ban_do or '—' }}</strong></div>
+          <div><i class="bi bi-geo-alt me-1"></i>{{ case.tai_san.dia_chi }}</div>
+          <div>Loại đất: {{ case.tai_san.loai_dat or '—' }}</div>
+          <div>Thời hạn: {{ case.tai_san.thoi_han or '—' }}</div>
+        </div>
+        <a href="/properties/{{ case.tai_san.id }}" class="btn btn-sm btn-outline-secondary mt-2" style="font-size:11px">Xem chi tiết</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thông tin hồ sơ -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header" style="border-left: 4px solid var(--navy2);">
+        <i class="bi bi-info-circle me-2" style="color:var(--navy2)"></i>Thông tin hồ sơ
+      </div>
+      <div class="card-body">
+        <div class="text-muted" style="font-size:13px">
+          <div class="mb-2"><strong>Ngày lập:</strong> {{ case.ngay_lap_ho_so.strftime('%d/%m/%Y') }}</div>
+          <div class="mb-2"><strong>Loại văn bản:</strong>
+            {% if case.loai_van_ban == 'khai_nhan' %}Văn bản khai nhận di sản{% else %}Văn bản thoả thuận phân chia{% endif %}
+          </div>
+          <div class="mb-2"><strong>Trạng thái:</strong>
+            {% if case.is_locked %}
+              <span class="badge badge-locked">Đã khoá</span>
+            {% else %}
+              <span class="badge badge-draft">Bản nháp</span>
+            {% endif %}
+          </div>
+          {% if case.ghi_chu %}<div><strong>Ghi chú:</strong> {{ case.ghi_chu }}</div>{% endif %}
+        </div>
+
+        <!-- Tổng tỷ lệ -->
+        <div class="mt-3 p-3 rounded" style="background:#f8f5f0">
+          <div class="d-flex justify-content-between mb-1">
+            <small class="fw-bold">Tổng tỷ lệ đã phân chia</small>
+            <small class="fw-bold {% if case.tong_ty_le > 100 %}text-danger{% elif case.tong_ty_le == 100 %}text-success{% else %}text-warning{% endif %}">{{ "%.1f"|format(case.tong_ty_le) }}%</small>
+          </div>
+          <div class="ratio-bar">
+            <div class="ratio-fill" style="width: {{ [case.tong_ty_le, 100]|min }}%; {% if case.tong_ty_le > 100 %}background: #dc2626{% endif %}"></div>
+          </div>
+          {% if case.tong_ty_le > 100 %}
+            <small class="text-danger mt-1 d-block"><i class="bi bi-exclamation-triangle"></i> Tỷ lệ vượt quá 100%!</small>
+          {% elif case.tong_ty_le == 100 %}
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-circle"></i> Tỷ lệ hợp lệ</small>
+          {% else %}
+            <small class="text-warning mt-1 d-block"><i class="bi bi-info-circle"></i> Còn {{ "%.1f"|format(100 - case.tong_ty_le) }}% chưa phân chia</small>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Danh sách người tham gia -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-people me-2" style="color:var(--gold)"></i>Người tham gia hồ sơ ({{ case.participants|length }} người)</span>
+  </div>
+  <div class="card-body p-0">
+    {% if case.participants %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>Họ tên</th>
+            <th>Quan hệ / Vai trò</th>
+            <th>Hàng TK</th>
+            <th>Tình trạng</th>
+            <th>Nhận tài sản</th>
+            <th>Tỷ lệ %</th>
+            <th>Ghi chú</th>
+            {% if not case.is_locked %}<th style="width:100px">Thao tác</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in case.participants %}
+          <tr>
+            <td>
+              <a href="/customers/{{ p.customer.id }}" style="color:var(--navy)" class="fw-bold text-decoration-none">{{ p.customer.ho_ten }}</a>
+              <div style="font-size:11px; color:var(--muted)">{{ p.customer.so_giay_to }}</div>
+            </td>
+            <td><span class="badge bg-secondary bg-opacity-10 text-secondary">{{ p.vai_tro }}</span></td>
+            <td class="text-center">Hàng {{ p.hang_thua_ke }}</td>
+            <td>
+              {% if p.customer.con_song %}
+                <span class="badge badge-alive rounded-pill">Còn sống</span>
+              {% else %}
+                <span class="badge badge-dead rounded-pill">Đã mất</span>
+              {% endif %}
+            </td>
+            <td class="text-center">
+              {% if p.co_nhan_tai_san %}
+                <i class="bi bi-check-circle-fill text-success fs-5" title="Nhận tài sản"></i>
+              {% else %}
+                <i class="bi bi-x-circle-fill text-danger fs-5" title="Từ chối"></i>
+              {% endif %}
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <strong>{{ "%.1f"|format(p.ty_le) }}%</strong>
+              </div>
+            </td>
+            <td style="font-size:12px; color:var(--muted)">{{ p.ghi_chu or '—' }}</td>
+            {% if not case.is_locked %}
+            <td>
+              <button class="btn btn-sm btn-outline-primary me-1"
+                      data-bs-toggle="modal"
+                      data-bs-target="#editModal{{ p.id }}"
+                      title="Sửa">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button class="btn btn-sm btn-outline-danger"
+                      onclick="if(confirm('Xoá người này khỏi hồ sơ?')) document.getElementById('del-p-{{ p.id }}').submit()"
+                      title="Xoá">
+                <i class="bi bi-trash"></i>
+              </button>
+              <form id="del-p-{{ p.id }}" action="/participants/{{ p.id }}/delete" method="post" style="display:none"></form>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">
+      <i class="bi bi-people" style="font-size:32px; color:#d1d5db"></i>
+      <div class="mt-2">Chưa có người tham gia. Hãy thêm người thừa kế bên dưới.</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Form thêm người (chỉ khi chưa khoá) -->
+{% if not case.is_locked %}
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-person-plus me-2" style="color:var(--gold)"></i>Thêm người tham gia hồ sơ</div>
+  <div class="card-body">
+    {% if available %}
+    <form method="post" action="/participants/add">
+      <input type="hidden" name="ho_so_id" value="{{ case.id }}">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Chọn người</label>
+          <select name="customer_id" class="form-select" required>
+            <option value="">-- Chọn người --</option>
+            {% for c in available %}
+            <option value="{{ c.id }}">
+              {{ c.ho_ten }} {% if not c.con_song %}(đã mất){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Quan hệ</label>
+          <select name="vai_tro" class="form-select" required>
+            {% for v in vai_tro_options %}
+            <option value="{{ v }}">{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-1">
+          <label class="form-label">Hàng TK</label>
+          <select name="hang_thua_ke" class="form-select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Tỷ lệ (%)</label>
+          <input type="number" name="ty_le" class="form-control" value="0" min="0" max="100" step="0.01">
+        </div>
+        <div class="col-md-2 d-flex align-items-center pt-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="co_nhan_tai_san" id="nhanCheck" checked>
+            <label class="form-check-label" for="nhanCheck">Nhận tài sản</label>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-gold w-100"><i class="bi bi-plus-lg me-1"></i>Thêm</button>
+        </div>
+      </div>
+      <div class="row mt-2">
+        <div class="col-md-6">
+          <input type="text" name="ghi_chu" class="form-control form-control-sm" placeholder="Ghi chú (tuỳ chọn)...">
+        </div>
+      </div>
+    </form>
+    {% else %}
+    <div class="alert alert-secondary mb-0" style="font-size:13px">
+      <i class="bi bi-info-circle me-2"></i>
+      Tất cả người trong hệ thống đã được thêm vào hồ sơ này.
+      <a href="/customers/create">Thêm người mới</a> nếu cần.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if case.is_locked %}
+<div class="alert alert-success mt-3">
+  <i class="bi bi-lock-fill me-2"></i>
+  Hồ sơ đã được khoá. Nhấn <strong>Xuất Word</strong> để tải file hợp đồng.
+</div>
+{% endif %}
+{% endif %}
+
+<!-- Modals sửa người tham gia -->
+{% for p in case.participants %}
+{% if not case.is_locked %}
+<div class="modal fade" id="editModal{{ p.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Sửa: {{ p.customer.ho_ten }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="/participants/{{ p.id }}/edit">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Quan hệ</label>
+              <select name="vai_tro" class="form-select">
+                {% for v in vai_tro_options %}
+                <option value="{{ v }}" {{ 'selected' if p.vai_tro == v }}>{{ v }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Hàng thừa kế</label>
+              <select name="hang_thua_ke" class="form-select">
+                <option value="1" {{ 'selected' if p.hang_thua_ke == 1 }}>Hàng 1</option>
+                <option value="2" {{ 'selected' if p.hang_thua_ke == 2 }}>Hàng 2</option>
+                <option value="3" {{ 'selected' if p.hang_thua_ke == 3 }}>Hàng 3</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Tỷ lệ (%)</label>
+              <input type="number" name="ty_le" class="form-control" value="{{ p.ty_le }}" min="0" max="100" step="0.01">
+            </div>
+            <div class="col-md-6 d-flex align-items-center pt-4">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="co_nhan_tai_san" id="nhan{{ p.id }}" {{ 'checked' if p.co_nhan_tai_san }}>
+                <label class="form-check-label" for="nhan{{ p.id }}">Nhận tài sản</label>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Ghi chú</label>
+              <input type="text" name="ghi_chu" class="form-control" value="{{ p.ghi_chu or '' }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Huỷ</button>
+          <button type="submit" class="btn btn-gold">Lưu thay đổi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+{% endblock %}

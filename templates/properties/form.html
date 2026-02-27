@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Sửa tài sản' if obj else 'Thêm tài sản mới' }}{% endblock %}
+{% block topbar_title %}{{ 'Sửa tài sản' if obj else 'Thêm tài sản mới' }}{% endblock %}
+
+{% block content %}
+{% set action = '/properties/' + obj.id|string + '/edit' if obj else '/properties/create' %}
+
+<div class="page-header">
+  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>{{ 'Sửa tài sản' if obj else 'Thêm Giấy CN QSDĐ mới' }}</h2>
+  <a href="/properties" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thông tin Giấy chứng nhận QSDĐ (Sổ đỏ)</div>
+  <div class="card-body">
+    <form method="post" action="{{ action }}">
+
+      <div class="row g-3">
+        <div class="col-12"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN GIẤY CHỨNG NHẬN</h6></div>
+
+        <div class="col-md-4">
+          <label class="form-label required">Số Serial (Số phát hành GCN)</label>
+          <input type="text" name="so_serial" class="form-control" value="{{ obj.so_serial if obj else '' }}" placeholder="Ví dụ: AQ123456" required>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Số vào sổ cấp GCN</label>
+          <input type="text" name="so_vao_so" class="form-control" value="{{ obj.so_vao_so if obj else '' }}" placeholder="Số vào sổ">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Ngày cấp GCN</label>
+          <input type="date" name="ngay_cap" class="form-control" value="{{ obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '' }}">
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Cơ quan cấp</label>
+          <input type="text" name="co_quan_cap" class="form-control" value="{{ obj.co_quan_cap if obj else '' }}" placeholder="Ví dụ: UBND huyện Ý Yên, tỉnh Nam Định">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Nguồn gốc sử dụng đất</label>
+          <input type="text" name="nguon_goc" class="form-control" value="{{ obj.nguon_goc if obj else '' }}" placeholder="Ví dụ: Do nhà nước giao không thu tiền">
+        </div>
+
+        <div class="col-12 mt-2"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN THỬa ĐẤT</h6></div>
+
+        <div class="col-md-3">
+          <label class="form-label">Số thửa đất</label>
+          <input type="text" name="so_thua_dat" class="form-control" value="{{ obj.so_thua_dat if obj else '' }}" placeholder="Ví dụ: 156">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Số tờ bản đồ</label>
+          <input type="text" name="so_to_ban_do" class="form-control" value="{{ obj.so_to_ban_do if obj else '' }}" placeholder="Ví dụ: 08">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Loại đất</label>
+          <select name="loai_dat" class="form-select">
+            <option value="">-- Chọn --</option>
+            {% for l in ['Đất ở tại nông thôn', 'Đất ở tại đô thị', 'Đất nông nghiệp', 'Đất lâm nghiệp', 'Đất trồng lúa', 'Đất trồng cây hàng năm', 'Đất trồng cây lâu năm', 'Khác'] %}
+            <option value="{{ l }}" {{ 'selected' if obj and obj.loai_dat == l }}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Hình thức sử dụng</label>
+          <select name="hinh_thuc_su_dung" class="form-select">
+            <option value="">-- Chọn --</option>
+            {% for h in ['Riêng', 'Chung vợ chồng', 'Chung khác'] %}
+            <option value="{{ h }}" {{ 'selected' if obj and obj.hinh_thuc_su_dung == h }}>{{ h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-md-6 required">
+          <label class="form-label">Địa chỉ thửa đất</label>
+          <textarea name="dia_chi" class="form-control" rows="2" placeholder="Thôn/xóm, xã/phường, huyện/quận, tỉnh" required>{{ obj.dia_chi if obj else '' }}</textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Thời hạn sử dụng</label>
+          <input type="text" name="thoi_han" class="form-control" value="{{ obj.thoi_han if obj else '' }}" placeholder="Ví dụ: Lâu dài / 50 năm đến 15/10/2060">
+        </div>
+      </div>
+
+      <hr class="divider">
+      <div class="d-flex gap-2 justify-content-end">
+        <a href="/properties" class="btn btn-outline-secondary">Huỷ</a>
+        <button type="submit" class="btn btn-gold px-4">
+          <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Thêm tài sản' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

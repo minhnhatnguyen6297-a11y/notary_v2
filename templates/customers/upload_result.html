@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Kết quả upload Excel{% endblock %}
+{% block topbar_title %}Kết quả import hàng loạt{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2><i class="bi bi-file-earmark-spreadsheet me-2" style="color:var(--gold)"></i>Kết quả import Excel</h2>
+  <div class="d-flex gap-2">
+    <a href="/customers" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Về danh sách</a>
+    <a href="/customers/download-template" class="btn btn-outline-success"><i class="bi bi-download me-1"></i>Tải lại mẫu</a>
+  </div>
+</div>
+
+{% if error_global %}
+<!-- Lỗi toàn cục (file sai, thiếu cột...) -->
+<div class="alert alert-danger">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+  <strong>Không thể xử lý file:</strong> {{ error_global }}
+</div>
+<div class="card">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-file-earmark-x" style="font-size:48px; color:#dc2626"></i>
+    <div class="mt-3 text-muted">Hãy tải file mẫu và nhập dữ liệu đúng định dạng.</div>
+    <div class="d-flex gap-2 justify-content-center mt-3">
+      <a href="/customers/download-template" class="btn btn-gold">
+        <i class="bi bi-download me-1"></i>Tải file mẫu
+      </a>
+      <a href="/customers" class="btn btn-outline-secondary">Quay lại</a>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<!-- Thống kê kết quả -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #065f46, #059669);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num">{{ added }}</div>
+          <div class="stat-label">Thêm thành công</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-check-circle"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #92400e, #d97706);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num">{{ skipped }}</div>
+          <div class="stat-label">Bỏ qua (trùng)</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-skip-forward"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #7f1d1d, #dc2626);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num">{{ errors }}</div>
+          <div class="stat-label">Lỗi dữ liệu</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-x-circle"></i></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card" style="background: linear-gradient(135deg, #1e3a5f, #2563eb);">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="stat-num">{{ total }}</div>
+          <div class="stat-label">Tổng dòng xử lý</div>
+        </div>
+        <div class="stat-icon"><i class="bi bi-list-ul"></i></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Thông báo tổng kết -->
+{% if added > 0 and errors == 0 %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle-fill me-2"></i>
+  <strong>Hoàn thành!</strong> Đã thêm thành công {{ added }} người vào hệ thống.
+  {% if skipped > 0 %} ({{ skipped }} dòng bỏ qua do trùng số giấy tờ){% endif %}
+</div>
+{% elif added > 0 and errors > 0 %}
+<div class="alert alert-warning">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>
+  <strong>Hoàn thành một phần.</strong> Thêm {{ added }} người, {{ errors }} dòng có lỗi cần xem lại.
+</div>
+{% elif added == 0 and errors > 0 %}
+<div class="alert alert-danger">
+  <i class="bi bi-x-circle-fill me-2"></i>
+  <strong>Không thêm được dòng nào.</strong> Tất cả {{ errors }} dòng đều bị lỗi.
+</div>
+{% elif total == 0 %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  File không có dữ liệu nào để xử lý.
+</div>
+{% endif %}
+
+<!-- Chi tiết từng dòng -->
+{% if results %}
+<div class="card">
+  <div class="card-header">
+    <i class="bi bi-list-check me-2" style="color:var(--gold)"></i>
+    Chi tiết từng dòng
+    <small class="text-muted ms-2" style="font-size:12px">
+      <span class="badge" style="background:#d1fae5; color:#065f46">Xanh = OK</span>
+      <span class="badge ms-1" style="background:#fef3c7; color:#92400e">Vàng = Bỏ qua</span>
+      <span class="badge ms-1" style="background:#fee2e2; color:#991b1b">Đỏ = Lỗi</span>
+    </small>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th style="width:70px">Dòng số</th>
+            <th>Họ và tên</th>
+            <th>Kết quả</th>
+            <th>Chi tiết</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+          <tr style="
+            {% if r.status == 'ok' %}background: #f0fdf4{% elif r.status == 'skip' %}background: #fffbeb{% else %}background: #fff5f5{% endif %}
+          ">
+            <td class="text-center text-muted" style="font-size:12px">{{ r.row }}</td>
+            <td class="fw-bold" style="font-size:14px">{{ r.name }}</td>
+            <td>
+              {% if r.status == 'ok' %}
+                <span class="badge" style="background:#d1fae5; color:#065f46; font-size:12px">
+                  <i class="bi bi-check-lg me-1"></i>Thành công
+                </span>
+              {% elif r.status == 'skip' %}
+                <span class="badge" style="background:#fef3c7; color:#92400e; font-size:12px">
+                  <i class="bi bi-arrow-right me-1"></i>Bỏ qua
+                </span>
+              {% else %}
+                <span class="badge" style="background:#fee2e2; color:#991b1b; font-size:12px">
+                  <i class="bi bi-x-lg me-1"></i>Lỗi
+                </span>
+              {% endif %}
+            </td>
+            <td style="font-size:13px; color:var(--muted)">{{ r.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Nút hành động -->
+<div class="d-flex gap-2 mt-3">
+  <a href="/customers" class="btn btn-gold"><i class="bi bi-people me-1"></i>Xem danh sách người</a>
+  {% if errors > 0 %}
+  <a href="/customers/download-template" class="btn btn-outline-secondary">
+    <i class="bi bi-download me-1"></i>Tải file mẫu để sửa lại
+  </a>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

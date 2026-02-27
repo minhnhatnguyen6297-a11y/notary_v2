@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Tài sản: {{ obj.so_serial }}{% endblock %}
+{% block topbar_title %}Chi tiết tài sản{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>GCN: {{ obj.so_serial }}</h2>
+  <div class="d-flex gap-2">
+    <a href="/properties/{{ obj.id }}/edit" class="btn btn-primary"><i class="bi bi-pencil me-1"></i>Sửa</a>
+    <a href="/properties" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Thông tin Giấy chứng nhận QSDĐ</div>
+  <div class="card-body">
+    <div class="info-grid">
+      <div class="info-item"><label>Số Serial</label><span><code>{{ obj.so_serial }}</code></span></div>
+      <div class="info-item"><label>Số vào sổ</label><span>{{ obj.so_vao_so or '—' }}</span></div>
+      <div class="info-item"><label>Số thửa đất</label><span>{{ obj.so_thua_dat or '—' }}</span></div>
+      <div class="info-item"><label>Số tờ bản đồ</label><span>{{ obj.so_to_ban_do or '—' }}</span></div>
+      <div class="info-item"><label>Loại đất</label><span>{{ obj.loai_dat or '—' }}</span></div>
+      <div class="info-item"><label>Hình thức sử dụng</label><span>{{ obj.hinh_thuc_su_dung or '—' }}</span></div>
+      <div class="info-item"><label>Thời hạn sử dụng</label><span>{{ obj.thoi_han or '—' }}</span></div>
+      <div class="info-item"><label>Ngày cấp</label><span>{{ obj.ngay_cap.strftime('%d/%m/%Y') if obj.ngay_cap else '—' }}</span></div>
+      <div class="info-item" style="grid-column:1/-1"><label>Địa chỉ thửa đất</label><span>{{ obj.dia_chi }}</span></div>
+      <div class="info-item" style="grid-column:1/-1"><label>Nguồn gốc</label><span>{{ obj.nguon_goc or '—' }}</span></div>
+      <div class="info-item" style="grid-column:1/-1"><label>Cơ quan cấp</label><span>{{ obj.co_quan_cap or '—' }}</span></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
