@@ -127,7 +127,7 @@ def create(
                     share_val = 0.0
                 co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
                 p = InheritanceParticipant(
-                    case_id=c.id, customer_id=int(cid),
+                    ho_so_id=c.id, customer_id=int(cid),
                     vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
                     ty_le=share_val, co_nhan_tai_san=co_nhan
                 )
@@ -264,7 +264,7 @@ def edit(
                     share_val = 0.0
                 co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
                 p = InheritanceParticipant(
-                    case_id=case.id, customer_id=int(cid),
+                    ho_so_id=case.id, customer_id=int(cid),
                     vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
                     ty_le=share_val, co_nhan_tai_san=co_nhan
                 )
