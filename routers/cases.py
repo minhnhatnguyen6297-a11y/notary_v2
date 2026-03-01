@@ -186,7 +186,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/{cid}/edit")
 def edit(
-    cid: int,
+    cid: int, request: Request,
     nguoi_chet_id: Optional[str] = Form(None), tai_san_id: Optional[str] = Form(None),
     ngay_lap_ho_so: Optional[str] = Form(None), loai_van_ban: Optional[str] = Form("khai_nhan"),
     ghi_chu: Optional[str] = Form(None),
@@ -243,7 +243,7 @@ def edit(
         case.ngay_lap_ho_so = datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         case.loai_van_ban = form["loai_van_ban"]; case.ghi_chu = form["ghi_chu"] or None
         db.commit()
-        db.query(InheritanceParticipant).filter(InheritanceParticipant.case_id == case.id).delete()
+        db.query(InheritanceParticipant).filter(InheritanceParticipant.ho_so_id == case.id).delete()
         db.commit()
         pid_list = _to_list(participant_id)
         role_list = _to_list(participant_role)
