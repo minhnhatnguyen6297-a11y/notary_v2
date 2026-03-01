@@ -43,7 +43,9 @@
   .person-card .name { font-weight: 600; color: var(--navy); }
   .person-card .meta { font-size: 11px; color: var(--muted); }
 
-  .child-list { display: flex; flex-wrap: wrap; gap: 10px; }
+  .child-list { display: flex; flex-wrap: wrap; gap: 10px; min-height: 80px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 10px; background: #f8fafc; }
+  .child-list.dragover { border-color: #2563eb; background: #eff6ff; }
+  .child-placeholder { font-size: 12px; color: var(--muted); }
   .child-card { position: relative; }
   .child-card .spouse-slot { position: absolute; right: -6px; top: -6px; background: #fff; border: 1px dashed #e5e7eb; border-radius: 8px; padding: 4px 6px; font-size: 11px; }
   .grand-zone { margin-top: 8px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 40px; display: none; background: #f8fafc; }
@@ -276,7 +278,9 @@
       <div class="tree-row" style="justify-content:flex-start">
         <div style="width:100%">
           <div class="label">Con đẻ (kéo rời từng người) — thả đè lên con để thêm vợ/chồng con</div>
-          <div class="child-list" id="children-zone"></div>
+          <div class="child-list" id="children-zone">
+            <div class="child-placeholder">Thả con đẻ vào đây</div>
+          </div>
         </div>
       </div>
     </div>
@@ -458,9 +462,14 @@
   // children drop zone
   childrenZone.addEventListener('dragover', (e) => {
     e.preventDefault();
+    childrenZone.classList.add('dragover');
+  });
+  childrenZone.addEventListener('dragleave', () => {
+    childrenZone.classList.remove('dragover');
   });
   childrenZone.addEventListener('drop', (e) => {
     e.preventDefault();
+    childrenZone.classList.remove('dragover');
     if (!dragged) return;
     const id = dragged.dataset.id;
     const data = {
@@ -470,6 +479,8 @@
       death: dragged.dataset.death || ''
     };
     removeExisting(id);
+    const ph = childrenZone.querySelector('.child-placeholder');
+    if (ph) ph.remove();
     const card = createChildCard(data);
     childrenZone.appendChild(card);
     updateGrandZones();
@@ -541,8 +552,10 @@
         }
       }
       if (p.role === 'Con') {
-        const card = createChildCard(data, p.share, p.receive);
-        childrenZone.appendChild(card);
+    const ph = childrenZone.querySelector('.child-placeholder');
+    if (ph) ph.remove();
+    const card = createChildCard(data, p.share, p.receive);
+    childrenZone.appendChild(card);
         return;
       }
     });
