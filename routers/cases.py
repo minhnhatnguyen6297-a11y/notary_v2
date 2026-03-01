@@ -35,8 +35,9 @@ def create_form(request: Request, db: Session = Depends(get_db)):
     # Người chết = có ngày chết
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    from datetime import date as _date
     form = {
-        "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": "",
+        "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": _date.today().isoformat(),
         "loai_van_ban": "khai_nhan", "ghi_chu": ""
     }
     return templates.TemplateResponse("cases/form.html", {
@@ -61,6 +62,12 @@ def create(
     participant_receive: Optional[List[str]] = Form(None),
     db: Session = Depends(get_db)
 ):
+    def _to_list(v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        return [v]
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
@@ -102,17 +109,19 @@ def create(
         loai_van_ban=form["loai_van_ban"], ghi_chu=form["ghi_chu"] or None
     )
     db.add(c); db.commit(); db.refresh(c)
-    if participant_id and participant_role:
-        shares = participant_share or []
-        receives = participant_receive or []
-        for idx, cid in enumerate(participant_id):
+    pid_list = _to_list(participant_id)
+    role_list = _to_list(participant_role)
+    share_list = _to_list(participant_share)
+    recv_list = _to_list(participant_receive)
+    if pid_list and role_list:
+        for idx, cid in enumerate(pid_list):
             if not cid:
                 continue
             if str(cid) == str(c.nguoi_chet_id):
                 continue
-            role = participant_role[idx] if idx < len(participant_role) else ""
-            share_raw = shares[idx] if idx < len(shares) else "0"
-            receive_raw = receives[idx] if idx < len(receives) else "1"
+            role = role_list[idx] if idx < len(role_list) else ""
+            share_raw = share_list[idx] if idx < len(share_list) else "0"
+            receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
             try:
                 share_val = float(share_raw)
             except Exception:
@@ -177,6 +186,12 @@ def edit(
     participant_receive: Optional[List[str]] = Form(None),
     db: Session = Depends(get_db)
 ):
+    def _to_list(v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        return [v]
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if not case or case.is_locked: raise HTTPException(400)
     form = {
@@ -219,17 +234,19 @@ def edit(
     db.commit()
     db.query(InheritanceParticipant).filter(InheritanceParticipant.case_id == case.id).delete()
     db.commit()
-    if participant_id and participant_role:
-        shares = participant_share or []
-        receives = participant_receive or []
-        for idx, cid in enumerate(participant_id):
+    pid_list = _to_list(participant_id)
+    role_list = _to_list(participant_role)
+    share_list = _to_list(participant_share)
+    recv_list = _to_list(participant_receive)
+    if pid_list and role_list:
+        for idx, cid in enumerate(pid_list):
             if not cid:
                 continue
             if str(cid) == str(case.nguoi_chet_id):
                 continue
-            role = participant_role[idx] if idx < len(participant_role) else ""
-            share_raw = shares[idx] if idx < len(shares) else "0"
-            receive_raw = receives[idx] if idx < len(receives) else "1"
+            role = role_list[idx] if idx < len(role_list) else ""
+            share_raw = share_list[idx] if idx < len(share_list) else "0"
+            receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
             try:
                 share_val = float(share_raw)
             except Exception:

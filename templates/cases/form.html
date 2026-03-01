@@ -368,7 +368,7 @@
       <div class="mt-1">
         <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
         <div class="form-check mt-1">
-          <input class="form-check-input receive-input" type="checkbox" ${receiveVal === '1' ? 'checked' : ''}>
+          <input class="form-check-input receive-input" type="checkbox" ${receiveVal === '1' ? 'checked' : ''} ${data.death ? 'disabled' : ''}>
           <label class="form-check-label">Nhận</label>
         </div>
       </div>` : ''}
@@ -685,7 +685,11 @@
       const share = card.querySelector('.share-input');
       const recv = card.querySelector('.receive-input');
       if (share) share.value = val;
-      if (recv) recv.checked = receive;
+      if (recv) {
+        const isDead = !!card.dataset.death;
+        recv.checked = isDead ? false : receive;
+        if (isDead) recv.disabled = true;
+      }
     }
 
     const father = document.querySelector('.slot[data-slot="owner_father"] .person-card');
