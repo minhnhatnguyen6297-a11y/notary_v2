@@ -53,12 +53,11 @@ def inline_create(
     so_thua_dat: Optional[str] = Form(None),
     so_to_ban_do: Optional[str] = Form(None),
     dia_chi: Optional[str] = Form(None),
-    loai_dat: Optional[str] = Form(None),
     hinh_thuc_su_dung: Optional[str] = Form(None),
-    thoi_han: Optional[str] = Form(None),
     nguon_goc: Optional[str] = Form(None),
     ngay_cap: Optional[str] = Form(None),
     co_quan_cap: Optional[str] = Form(None),
+    land_rows: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     form = {
@@ -67,12 +66,11 @@ def inline_create(
         "so_thua_dat": (so_thua_dat or "").strip(),
         "so_to_ban_do": (so_to_ban_do or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
-        "loai_dat": (loai_dat or "").strip(),
         "hinh_thuc_su_dung": (hinh_thuc_su_dung or "").strip(),
-        "thoi_han": (thoi_han or "").strip(),
         "nguon_goc": (nguon_goc or "").strip(),
         "ngay_cap": (ngay_cap or "").strip(),
         "co_quan_cap": (co_quan_cap or "").strip(),
+        "land_rows": (land_rows or "").strip(),
     }
     errors = {}
     if not form["so_serial"]:
@@ -87,11 +85,27 @@ def inline_create(
     if errors:
         return JSONResponse({"ok": False, "errors": errors}, status_code=400)
 
+    loai_dat_val = ""
+    if form["land_rows"]:
+        try:
+            import json
+            rows = json.loads(form["land_rows"])
+            parts = []
+            for r in rows:
+                loai = str(r.get("loai_dat", "")).strip()
+                dien = str(r.get("dien_tich", "")).strip()
+                thoi = str(r.get("thoi_han", "")).strip()
+                if loai or dien or thoi:
+                    parts.append(f"{loai} | {dien}m2 | {thoi}")
+            loai_dat_val = "; ".join(parts)
+        except Exception:
+            loai_dat_val = form["land_rows"]
+
     p = Property(
         so_serial=form["so_serial"], so_vao_so=form["so_vao_so"] or None,
         so_thua_dat=form["so_thua_dat"] or None, so_to_ban_do=form["so_to_ban_do"] or None,
-        dia_chi=form["dia_chi"], loai_dat=form["loai_dat"] or None,
-        hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None, thoi_han=form["thoi_han"] or None,
+        dia_chi=form["dia_chi"], loai_dat=loai_dat_val or None,
+        hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None, thoi_han=None,
         nguon_goc=form["nguon_goc"] or None, ngay_cap=parse_date(form["ngay_cap"]),
         co_quan_cap=form["co_quan_cap"] or None
     )

@@ -20,6 +20,8 @@
 </div>
 
 <form method="post" action="{{ action }}">
+<input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
+<input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
 <style>
   .people-head, .person-row { display: grid; grid-template-columns: 50px 1.6fr .7fr .9fr 1fr 1fr 1.2fr 120px; gap: 10px; align-items: center; }
   .people-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; }
@@ -56,6 +58,32 @@
   .inline-form .form-control, .inline-form .form-select { font-size: 13px; }
   .hint { font-size: 12px; color: var(--muted); }
 </style>
+
+<div class="card mb-3">
+  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thiết lập hồ sơ</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label required">Ngày lập hồ sơ</label>
+        <input type="date" name="ngay_lap_ho_so" class="form-control {% if fe.ngay_lap_ho_so %}is-invalid{% endif %}"
+               value="{{ f.get('ngay_lap_ho_so','') if f else (obj.ngay_lap_ho_so.isoformat() if obj else '') }}" required>
+        {% if fe.ngay_lap_ho_so %}<div class="invalid-feedback">{{ fe.ngay_lap_ho_so }}</div>{% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label required">Loại văn bản</label>
+        <select name="loai_van_ban" class="form-select">
+          <option value="khai_nhan" {{ 'selected' if (f.get('loai_van_ban') == 'khai_nhan') or (not f.get('loai_van_ban') and (not obj or obj.loai_van_ban == 'khai_nhan')) }}>Văn bản khai nhận di sản</option>
+          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thỏa thuận phân chia</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Ghi chú</label>
+        <input type="text" name="ghi_chu" class="form-control"
+               value="{{ f.get('ghi_chu','') if f else (obj.ghi_chu if obj else '') }}" placeholder="Ghi chú tuỳ chọn...">
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="row g-3">
   <div class="col-md-6">
@@ -107,10 +135,60 @@
             <input type="text" class="form-control" id="pr-so-serial" placeholder="Số Serial *">
           </div>
           <div class="col-6">
-            <input type="text" class="form-control" id="pr-so-thua" placeholder="Số thửa">
+            <input type="text" class="form-control" id="pr-so-vao-so" placeholder="Số vào sổ">
           </div>
           <div class="col-12">
-            <input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ thửa đất *">
+            <input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ đất *">
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-so-thua" placeholder="Số thửa đất">
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-so-to" placeholder="Số tờ bản đồ">
+          </div>
+          <div class="col-12">
+            <div class="border rounded p-2 bg-light">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="fw-600" style="font-size:12px; text-transform:uppercase; letter-spacing:.5px;">Diện tích - Loại đất - Thời hạn</div>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-land-row">Thêm dòng</button>
+              </div>
+              <table class="table table-sm mb-1">
+                <thead>
+                  <tr>
+                    <th>Loại đất</th>
+                    <th>Diện tích (m²)</th>
+                    <th>Thời hạn</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="land-rows"></tbody>
+              </table>
+              <input type="hidden" id="pr-land-rows" value="">
+            </div>
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-hinh-thuc" placeholder="Hình thức sử dụng">
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-nguon-goc" placeholder="Nguồn gốc">
+          </div>
+          <div class="col-6">
+            <input type="date" class="form-control" id="pr-ngay-cap" placeholder="Ngày cấp">
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-co-quan" placeholder="Cơ quan cấp">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-bold" style="font-size:12px">Chọn tài sản đã có</label>
+            <select id="pr-tai-san-select" class="form-select">
+              <option value="">-- Chọn tài sản --</option>
+              {% for p in properties %}
+              <option value="{{ p.id }}" {{ 'selected' if (f.get('tai_san_id')|string == p.id|string) or (obj and obj.tai_san_id == p.id and not f.get('tai_san_id')) }}>
+                {{ p.so_serial }} — Thửa {{ p.so_thua_dat or '?' }} ({{ p.dia_chi[:40] }}...)
+              </option>
+              {% endfor %}
+            </select>
+            {% if fe.tai_san_id %}<div class="text-danger" style="font-size:12px">{{ fe.tai_san_id }}</div>{% endif %}
           </div>
         </div>
         <div class="d-flex justify-content-end mt-2">
@@ -204,56 +282,6 @@
     </div>
 
     <div id="participants-hidden"></div>
-  </div>
-</div>
-
-<div class="card mt-3">
-  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thông tin hồ sơ</div>
-  <div class="card-body">
-    <div class="row g-3">
-      <div class="col-md-6">
-        <label class="form-label required">Chọn người đã mất</label>
-        <select name="nguoi_chet_id" class="form-select {% if fe.nguoi_chet_id %}is-invalid{% endif %}" required>
-          <option value="">-- Chọn người đã mất --</option>
-          {% for c in deceased %}
-          <option value="{{ c.id }}" {{ 'selected' if (f.get('nguoi_chet_id')|string == c.id|string) or (obj and obj.nguoi_chet_id == c.id and not f.get('nguoi_chet_id')) }}>
-            {{ c.ho_ten }} (Mất: {{ c.ngay_chet.strftime('%d/%m/%Y') }})
-          </option>
-          {% endfor %}
-        </select>
-        {% if fe.nguoi_chet_id %}<div class="invalid-feedback">{{ fe.nguoi_chet_id }}</div>{% endif %}
-      </div>
-      <div class="col-md-6">
-        <label class="form-label required">Chọn sổ đỏ / GCN</label>
-        <select name="tai_san_id" class="form-select {% if fe.tai_san_id %}is-invalid{% endif %}" required>
-          <option value="">-- Chọn tài sản --</option>
-          {% for p in properties %}
-          <option value="{{ p.id }}" {{ 'selected' if (f.get('tai_san_id')|string == p.id|string) or (obj and obj.tai_san_id == p.id and not f.get('tai_san_id')) }}>
-            {{ p.so_serial }} — Thửa {{ p.so_thua_dat or '?' }} ({{ p.dia_chi[:40] }}...)
-          </option>
-          {% endfor %}
-        </select>
-        {% if fe.tai_san_id %}<div class="invalid-feedback">{{ fe.tai_san_id }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label required">Ngày lập hồ sơ</label>
-        <input type="date" name="ngay_lap_ho_so" class="form-control {% if fe.ngay_lap_ho_so %}is-invalid{% endif %}"
-               value="{{ f.get('ngay_lap_ho_so','') if f else (obj.ngay_lap_ho_so.isoformat() if obj else '') }}" required>
-        {% if fe.ngay_lap_ho_so %}<div class="invalid-feedback">{{ fe.ngay_lap_ho_so }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label required">Loại văn bản</label>
-        <select name="loai_van_ban" class="form-select">
-          <option value="khai_nhan" {{ 'selected' if (f.get('loai_van_ban') == 'khai_nhan') or (not f.get('loai_van_ban') and (not obj or obj.loai_van_ban == 'khai_nhan')) }}>Văn bản khai nhận di sản</option>
-          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thỏa thuận phân chia</option>
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Ghi chú</label>
-        <input type="text" name="ghi_chu" class="form-control"
-               value="{{ f.get('ghi_chu','') if f else (obj.ghi_chu if obj else '') }}" placeholder="Ghi chú tuỳ chọn...">
-      </div>
-    </div>
   </div>
 </div>
 
@@ -420,8 +448,7 @@
       s.appendChild(buildPersonCard(data, s.dataset.role, s.dataset.role !== 'Cha_vc' && s.dataset.role !== 'Me_vc'));
 
       if (s.dataset.slot === 'owner') {
-        const sel = document.querySelector('select[name="nguoi_chet_id"]');
-        if (sel) sel.value = id;
+        if (ownerInput) ownerInput.value = id;
       }
       updateGrandZones();
       recalcShares();
@@ -464,21 +491,13 @@
     });
   }
 
-  const ownerSelect = document.querySelector('select[name="nguoi_chet_id"]');
-  if (ownerSelect) {
-    ownerSelect.addEventListener('change', () => {
-      setOwnerFromSelect();
-      updateGrandZones();
-      recalcShares();
-    });
-  }
+  const ownerInput = document.getElementById('case-nguoi-chet');
 
   document.addEventListener('drop', () => { updateGrandZones(); recalcShares(); });
 
   function setOwnerFromSelect() {
-    const sel = document.querySelector('select[name="nguoi_chet_id"]');
-    if (!sel || !sel.value) return;
-    const row = document.querySelector(`.person-row[data-id="${sel.value}"]`);
+    if (!ownerInput || !ownerInput.value) return;
+    const row = document.querySelector(`.person-row[data-id="${ownerInput.value}"]`);
     if (!row) return;
     const data = {
       id: row.dataset.id,
@@ -574,23 +593,56 @@
     `;
     makeDraggable(row);
     pool.prepend(row);
-    if (c.ngay_chet) {
-      const sel = document.querySelector('select[name="nguoi_chet_id"]');
-      const opt = document.createElement('option');
-      opt.value = c.id;
-      opt.textContent = `${c.ho_ten} (Mất: ${c.ngay_chet})`;
-      sel.appendChild(opt);
+    if (c.ngay_chet && ownerInput && !ownerInput.value) {
+      ownerInput.value = c.id;
+      setOwnerFromSelect();
+      updateGrandZones();
+      recalcShares();
     }
   });
 
   // Inline add property
+  function rebuildLandRowsValue() {
+    const rows = [];
+    document.querySelectorAll('#land-rows tr').forEach(tr => {
+      const loai = tr.querySelector('.land-type')?.value || '';
+      const dien = tr.querySelector('.land-area')?.value || '';
+      const thoi = tr.querySelector('.land-term')?.value || '';
+      if (loai || dien || thoi) rows.push({ loai_dat: loai, dien_tich: dien, thoi_han: thoi });
+    });
+    document.getElementById('pr-land-rows').value = JSON.stringify(rows);
+  }
+
+  document.getElementById('btn-add-land-row')?.addEventListener('click', () => {
+    const tbody = document.getElementById('land-rows');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" class="form-control form-control-sm land-type" placeholder="ONT"></td>
+      <td><input type="text" class="form-control form-control-sm land-area" placeholder="220"></td>
+      <td><input type="text" class="form-control form-control-sm land-term" placeholder="Lâu dài"></td>
+      <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Xoá</button></td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelector('.btn-del-row').addEventListener('click', () => { tr.remove(); rebuildLandRowsValue(); });
+    tr.querySelectorAll('input').forEach(i => i.addEventListener('input', rebuildLandRowsValue));
+    rebuildLandRowsValue();
+  });
+
   document.getElementById('btn-add-prop')?.addEventListener('click', async () => {
     const err = document.getElementById('inline-prop-error');
     err.classList.add('d-none'); err.textContent = '';
+    rebuildLandRowsValue();
     const payload = new URLSearchParams({
       so_serial: document.getElementById('pr-so-serial').value,
+      so_vao_so: document.getElementById('pr-so-vao-so').value,
+      dia_chi: document.getElementById('pr-dia-chi').value,
       so_thua_dat: document.getElementById('pr-so-thua').value,
-      dia_chi: document.getElementById('pr-dia-chi').value
+      so_to_ban_do: document.getElementById('pr-so-to').value,
+      land_rows: document.getElementById('pr-land-rows').value,
+      hinh_thuc_su_dung: document.getElementById('pr-hinh-thuc').value,
+      nguon_goc: document.getElementById('pr-nguon-goc').value,
+      ngay_cap: document.getElementById('pr-ngay-cap').value,
+      co_quan_cap: document.getElementById('pr-co-quan').value
     });
     const res = await fetch('/properties/inline-create', { method: 'POST', body: payload });
     const data = await res.json();
@@ -600,11 +652,14 @@
       return;
     }
     const p = data.property;
-    const sel = document.querySelector('select[name="tai_san_id"]');
+    const sel = document.getElementById('pr-tai-san-select');
     const opt = document.createElement('option');
     opt.value = p.id;
     opt.textContent = `${p.so_serial} — Thửa ${p.so_thua_dat || '?'} (${(p.dia_chi || '').slice(0,40)}...)`;
     sel.appendChild(opt);
+    sel.value = p.id;
+    const hidden = document.getElementById('case-tai-san');
+    if (hidden) hidden.value = p.id;
   });
 
   // Build hidden participant inputs on submit
@@ -666,6 +721,9 @@
   }
 
   document.getElementById('btn-submit-case')?.addEventListener('click', () => {
+    const sel = document.getElementById('pr-tai-san-select');
+    const hidden = document.getElementById('case-tai-san');
+    if (sel && hidden && !hidden.value && sel.value) hidden.value = sel.value;
     const holder = document.getElementById('participants-hidden');
     holder.innerHTML = '';
 
