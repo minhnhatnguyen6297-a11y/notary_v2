@@ -4,6 +4,8 @@
 
 {% block content %}
 {% set action = '/cases/' + obj.id|string + '/edit' if obj else '/cases/create' %}
+{% set fe = field_errors or {} %}
+{% set f = form or {} %}
 
 <div class="page-header">
   <h2><i class="bi bi-folder-plus me-2" style="color:var(--gold)"></i>{{ 'Chỉnh sửa hồ sơ #' + obj.id|string if obj else 'Tạo hồ sơ thừa kế mới' }}</h2>
@@ -33,14 +35,15 @@
       <div class="card-header"><i class="bi bi-person-x me-2" style="color:#dc2626"></i>Người để lại di sản</div>
       <div class="card-body">
         <label class="form-label required">Chọn người đã mất</label>
-        <select name="nguoi_chet_id" class="form-select" required>
+        <select name="nguoi_chet_id" class="form-select {% if fe.nguoi_chet_id %}is-invalid{% endif %}" required>
           <option value="">-- Chọn người đã mất --</option>
           {% for c in deceased %}
-          <option value="{{ c.id }}" {{ 'selected' if obj and obj.nguoi_chet_id == c.id }}>
+          <option value="{{ c.id }}" {{ 'selected' if (f.get('nguoi_chet_id')|string == c.id|string) or (obj and obj.nguoi_chet_id == c.id and not f.get('nguoi_chet_id')) }}>
             {{ c.ho_ten }} (Mất: {{ c.ngay_chet.strftime('%d/%m/%Y') }})
           </option>
           {% endfor %}
         </select>
+        {% if fe.nguoi_chet_id %}<div class="invalid-feedback">{{ fe.nguoi_chet_id }}</div>{% endif %}
         <small class="text-muted mt-1 d-block">Chỉ hiển thị người đã có ngày mất trong hệ thống</small>
       </div>
     </div>
@@ -51,14 +54,15 @@
       <div class="card-header"><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản</div>
       <div class="card-body">
         <label class="form-label required">Chọn sổ đỏ / GCN</label>
-        <select name="tai_san_id" class="form-select" required>
+        <select name="tai_san_id" class="form-select {% if fe.tai_san_id %}is-invalid{% endif %}" required>
           <option value="">-- Chọn tài sản --</option>
           {% for p in properties %}
-          <option value="{{ p.id }}" {{ 'selected' if obj and obj.tai_san_id == p.id }}>
+          <option value="{{ p.id }}" {{ 'selected' if (f.get('tai_san_id')|string == p.id|string) or (obj and obj.tai_san_id == p.id and not f.get('tai_san_id')) }}>
             {{ p.so_serial }} — Thửa {{ p.so_thua_dat or '?' }} ({{ p.dia_chi[:40] }}...)
           </option>
           {% endfor %}
         </select>
+        {% if fe.tai_san_id %}<div class="invalid-feedback">{{ fe.tai_san_id }}</div>{% endif %}
       </div>
     </div>
   </div>
@@ -67,8 +71,9 @@
     <div class="card">
       <div class="card-body">
         <label class="form-label required">Ngày lập hồ sơ</label>
-        <input type="date" name="ngay_lap_ho_so" class="form-control"
-               value="{{ obj.ngay_lap_ho_so.isoformat() if obj else '' }}" required>
+        <input type="date" name="ngay_lap_ho_so" class="form-control {% if fe.ngay_lap_ho_so %}is-invalid{% endif %}"
+               value="{{ f.get('ngay_lap_ho_so','') if f else (obj.ngay_lap_ho_so.isoformat() if obj else '') }}" required>
+        {% if fe.ngay_lap_ho_so %}<div class="invalid-feedback">{{ fe.ngay_lap_ho_so }}</div>{% endif %}
       </div>
     </div>
   </div>
@@ -78,8 +83,8 @@
       <div class="card-body">
         <label class="form-label required">Loại văn bản</label>
         <select name="loai_van_ban" class="form-select">
-          <option value="khai_nhan" {{ 'selected' if not obj or obj.loai_van_ban == 'khai_nhan' }}>Văn bản khai nhận di sản</option>
-          <option value="thoa_thuan" {{ 'selected' if obj and obj.loai_van_ban == 'thoa_thuan' }}>Văn bản thoả thuận phân chia</option>
+          <option value="khai_nhan" {{ 'selected' if (f.get('loai_van_ban') == 'khai_nhan') or (not f.get('loai_van_ban') and (not obj or obj.loai_van_ban == 'khai_nhan')) }}>Văn bản khai nhận di sản</option>
+          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thoả thuận phân chia</option>
         </select>
       </div>
     </div>
@@ -90,7 +95,7 @@
       <div class="card-body">
         <label class="form-label">Ghi chú</label>
         <input type="text" name="ghi_chu" class="form-control"
-               value="{{ obj.ghi_chu if obj else '' }}" placeholder="Ghi chú tuỳ chọn...">
+               value="{{ f.get('ghi_chu','') if f else (obj.ghi_chu if obj else '') }}" placeholder="Ghi chú tuỳ chọn...">
       </div>
     </div>
   </div>

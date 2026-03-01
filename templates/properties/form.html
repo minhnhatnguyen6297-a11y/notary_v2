@@ -4,6 +4,8 @@
 
 {% block content %}
 {% set action = '/properties/' + obj.id|string + '/edit' if obj else '/properties/create' %}
+{% set fe = field_errors or {} %}
+{% set f = form or {} %}
 
 <div class="page-header">
   <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>{{ 'Sửa tài sản' if obj else 'Thêm Giấy CN QSDĐ mới' }}</h2>
@@ -24,42 +26,44 @@
 
         <div class="col-md-4">
           <label class="form-label required">Số Serial (Số phát hành GCN)</label>
-          <input type="text" name="so_serial" class="form-control" value="{{ obj.so_serial if obj else '' }}" placeholder="Ví dụ: AQ123456" required>
+          <input type="text" name="so_serial" class="form-control {% if fe.so_serial %}is-invalid{% endif %}" value="{{ f.get('so_serial','') if f else (obj.so_serial if obj else '') }}" placeholder="Ví dụ: AQ123456" required>
+          {% if fe.so_serial %}<div class="invalid-feedback">{{ fe.so_serial }}</div>{% endif %}
         </div>
         <div class="col-md-4">
           <label class="form-label">Số vào sổ cấp GCN</label>
-          <input type="text" name="so_vao_so" class="form-control" value="{{ obj.so_vao_so if obj else '' }}" placeholder="Số vào sổ">
+          <input type="text" name="so_vao_so" class="form-control" value="{{ f.get('so_vao_so','') if f else (obj.so_vao_so if obj else '') }}" placeholder="Số vào sổ">
         </div>
         <div class="col-md-4">
           <label class="form-label">Ngày cấp GCN</label>
-          <input type="date" name="ngay_cap" class="form-control" value="{{ obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '' }}">
+          <input type="date" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}" value="{{ f.get('ngay_cap','') if f else (obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '') }}">
+          {% if fe.ngay_cap %}<div class="invalid-feedback">{{ fe.ngay_cap }}</div>{% endif %}
         </div>
 
         <div class="col-md-6">
           <label class="form-label">Cơ quan cấp</label>
-          <input type="text" name="co_quan_cap" class="form-control" value="{{ obj.co_quan_cap if obj else '' }}" placeholder="Ví dụ: UBND huyện Ý Yên, tỉnh Nam Định">
+          <input type="text" name="co_quan_cap" class="form-control" value="{{ f.get('co_quan_cap','') if f else (obj.co_quan_cap if obj else '') }}" placeholder="Ví dụ: UBND huyện Ý Yên, tỉnh Nam Định">
         </div>
         <div class="col-md-6">
           <label class="form-label">Nguồn gốc sử dụng đất</label>
-          <input type="text" name="nguon_goc" class="form-control" value="{{ obj.nguon_goc if obj else '' }}" placeholder="Ví dụ: Do nhà nước giao không thu tiền">
+          <input type="text" name="nguon_goc" class="form-control" value="{{ f.get('nguon_goc','') if f else (obj.nguon_goc if obj else '') }}" placeholder="Ví dụ: Do nhà nước giao không thu tiền">
         </div>
 
         <div class="col-12 mt-2"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN THỬa ĐẤT</h6></div>
 
         <div class="col-md-3">
           <label class="form-label">Số thửa đất</label>
-          <input type="text" name="so_thua_dat" class="form-control" value="{{ obj.so_thua_dat if obj else '' }}" placeholder="Ví dụ: 156">
+          <input type="text" name="so_thua_dat" class="form-control" value="{{ f.get('so_thua_dat','') if f else (obj.so_thua_dat if obj else '') }}" placeholder="Ví dụ: 156">
         </div>
         <div class="col-md-3">
           <label class="form-label">Số tờ bản đồ</label>
-          <input type="text" name="so_to_ban_do" class="form-control" value="{{ obj.so_to_ban_do if obj else '' }}" placeholder="Ví dụ: 08">
+          <input type="text" name="so_to_ban_do" class="form-control" value="{{ f.get('so_to_ban_do','') if f else (obj.so_to_ban_do if obj else '') }}" placeholder="Ví dụ: 08">
         </div>
         <div class="col-md-3">
           <label class="form-label">Loại đất</label>
           <select name="loai_dat" class="form-select">
             <option value="">-- Chọn --</option>
             {% for l in ['Đất ở tại nông thôn', 'Đất ở tại đô thị', 'Đất nông nghiệp', 'Đất lâm nghiệp', 'Đất trồng lúa', 'Đất trồng cây hàng năm', 'Đất trồng cây lâu năm', 'Khác'] %}
-            <option value="{{ l }}" {{ 'selected' if obj and obj.loai_dat == l }}>{{ l }}</option>
+            <option value="{{ l }}" {{ 'selected' if (f.get('loai_dat') == l) or (obj and obj.loai_dat == l and not f.get('loai_dat')) }}>{{ l }}</option>
             {% endfor %}
           </select>
         </div>
@@ -68,18 +72,19 @@
           <select name="hinh_thuc_su_dung" class="form-select">
             <option value="">-- Chọn --</option>
             {% for h in ['Riêng', 'Chung vợ chồng', 'Chung khác'] %}
-            <option value="{{ h }}" {{ 'selected' if obj and obj.hinh_thuc_su_dung == h }}>{{ h }}</option>
+            <option value="{{ h }}" {{ 'selected' if (f.get('hinh_thuc_su_dung') == h) or (obj and obj.hinh_thuc_su_dung == h and not f.get('hinh_thuc_su_dung')) }}>{{ h }}</option>
             {% endfor %}
           </select>
         </div>
 
         <div class="col-md-6 required">
           <label class="form-label">Địa chỉ thửa đất</label>
-          <textarea name="dia_chi" class="form-control" rows="2" placeholder="Thôn/xóm, xã/phường, huyện/quận, tỉnh" required>{{ obj.dia_chi if obj else '' }}</textarea>
+          <textarea name="dia_chi" class="form-control {% if fe.dia_chi %}is-invalid{% endif %}" rows="2" placeholder="Thôn/xóm, xã/phường, huyện/quận, tỉnh" required>{{ f.get('dia_chi','') if f else (obj.dia_chi if obj else '') }}</textarea>
+          {% if fe.dia_chi %}<div class="invalid-feedback">{{ fe.dia_chi }}</div>{% endif %}
         </div>
         <div class="col-md-6">
           <label class="form-label">Thời hạn sử dụng</label>
-          <input type="text" name="thoi_han" class="form-control" value="{{ obj.thoi_han if obj else '' }}" placeholder="Ví dụ: Lâu dài / 50 năm đến 15/10/2060">
+          <input type="text" name="thoi_han" class="form-control" value="{{ f.get('thoi_han','') if f else (obj.thoi_han if obj else '') }}" placeholder="Ví dụ: Lâu dài / 50 năm đến 15/10/2060">
         </div>
       </div>
 

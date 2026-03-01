@@ -27,26 +27,63 @@ def create_form(request: Request, db: Session = Depends(get_db)):
     # Người chết = có ngày chết
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    form = {
+        "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": "",
+        "loai_van_ban": "khai_nhan", "ghi_chu": ""
+    }
     return templates.TemplateResponse("cases/form.html", {
         "request": request, "obj": None,
-        "deceased": deceased, "properties": properties, "errors": []
+        "deceased": deceased, "properties": properties, "errors": [],
+        "field_errors": {}, "form": form
     })
 
 
 @router.post("/create")
 def create(
     request: Request,
-    nguoi_chet_id: int = Form(...),
-    tai_san_id: int = Form(...),
-    ngay_lap_ho_so: str = Form(...),
-    loai_van_ban: str = Form("khai_nhan"),
+    nguoi_chet_id: Optional[str] = Form(None),
+    tai_san_id: Optional[str] = Form(None),
+    ngay_lap_ho_so: Optional[str] = Form(None),
+    loai_van_ban: Optional[str] = Form("khai_nhan"),
     ghi_chu: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
+    form = {
+        "nguoi_chet_id": (nguoi_chet_id or "").strip(),
+        "tai_san_id": (tai_san_id or "").strip(),
+        "ngay_lap_ho_so": (ngay_lap_ho_so or "").strip(),
+        "loai_van_ban": (loai_van_ban or "khai_nhan").strip(),
+        "ghi_chu": (ghi_chu or "").strip(),
+    }
+    errors = []
+    field_errors = {}
+    if not form["nguoi_chet_id"]:
+        field_errors["nguoi_chet_id"] = "Bat buoc"
+    if not form["tai_san_id"]:
+        field_errors["tai_san_id"] = "Bat buoc"
+    if not form["ngay_lap_ho_so"]:
+        field_errors["ngay_lap_ho_so"] = "Bat buoc"
+    if form["ngay_lap_ho_so"]:
+        try:
+            datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
+        except ValueError:
+            field_errors["ngay_lap_ho_so"] = "Ngay khong hop le"
+
+    all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
+    deceased = [c for c in all_customers if c.ngay_chet is not None]
+    properties = db.query(Property).order_by(Property.id.desc()).all()
+
+    if field_errors:
+        return templates.TemplateResponse("cases/form.html", {
+            "request": request, "obj": None,
+            "deceased": deceased, "properties": properties,
+            "errors": errors, "field_errors": field_errors, "form": form
+        })
+
     c = InheritanceCase(
-        nguoi_chet_id=nguoi_chet_id, tai_san_id=tai_san_id,
-        ngay_lap_ho_so=datetime.strptime(ngay_lap_ho_so, "%Y-%m-%d").date(),
-        loai_van_ban=loai_van_ban, ghi_chu=ghi_chu or None
+        nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
+        ngay_lap_ho_so=datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date(),
+        loai_van_ban=form["loai_van_ban"], ghi_chu=form["ghi_chu"] or None
     )
     db.add(c); db.commit(); db.refresh(c)
     return RedirectResponse(f"/cases/{c.id}", status_code=302)
@@ -74,25 +111,64 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    form = {
+        "nguoi_chet_id": str(case.nguoi_chet_id) if case.nguoi_chet_id else "",
+        "tai_san_id": str(case.tai_san_id) if case.tai_san_id else "",
+        "ngay_lap_ho_so": case.ngay_lap_ho_so.isoformat() if case.ngay_lap_ho_so else "",
+        "loai_van_ban": case.loai_van_ban or "khai_nhan",
+        "ghi_chu": case.ghi_chu or "",
+    }
     return templates.TemplateResponse("cases/form.html", {
         "request": request, "obj": case,
-        "deceased": deceased, "properties": properties, "errors": []
+        "deceased": deceased, "properties": properties, "errors": [],
+        "field_errors": {}, "form": form
     })
 
 
 @router.post("/{cid}/edit")
 def edit(
     cid: int,
-    nguoi_chet_id: int = Form(...), tai_san_id: int = Form(...),
-    ngay_lap_ho_so: str = Form(...), loai_van_ban: str = Form("khai_nhan"),
+    nguoi_chet_id: Optional[str] = Form(None), tai_san_id: Optional[str] = Form(None),
+    ngay_lap_ho_so: Optional[str] = Form(None), loai_van_ban: Optional[str] = Form("khai_nhan"),
     ghi_chu: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if not case or case.is_locked: raise HTTPException(400)
-    case.nguoi_chet_id = nguoi_chet_id; case.tai_san_id = tai_san_id
-    case.ngay_lap_ho_so = datetime.strptime(ngay_lap_ho_so, "%Y-%m-%d").date()
-    case.loai_van_ban = loai_van_ban; case.ghi_chu = ghi_chu or None
+    form = {
+        "nguoi_chet_id": (nguoi_chet_id or "").strip(),
+        "tai_san_id": (tai_san_id or "").strip(),
+        "ngay_lap_ho_so": (ngay_lap_ho_so or "").strip(),
+        "loai_van_ban": (loai_van_ban or "khai_nhan").strip(),
+        "ghi_chu": (ghi_chu or "").strip(),
+    }
+    errors = []
+    field_errors = {}
+    if not form["nguoi_chet_id"]:
+        field_errors["nguoi_chet_id"] = "Bat buoc"
+    if not form["tai_san_id"]:
+        field_errors["tai_san_id"] = "Bat buoc"
+    if not form["ngay_lap_ho_so"]:
+        field_errors["ngay_lap_ho_so"] = "Bat buoc"
+    if form["ngay_lap_ho_so"]:
+        try:
+            datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
+        except ValueError:
+            field_errors["ngay_lap_ho_so"] = "Ngay khong hop le"
+
+    all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
+    deceased = [c for c in all_customers if c.ngay_chet is not None]
+    properties = db.query(Property).order_by(Property.id.desc()).all()
+    if field_errors:
+        return templates.TemplateResponse("cases/form.html", {
+            "request": request, "obj": case,
+            "deceased": deceased, "properties": properties,
+            "errors": errors, "field_errors": field_errors, "form": form
+        })
+
+    case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
+    case.ngay_lap_ho_so = datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
+    case.loai_van_ban = form["loai_van_ban"]; case.ghi_chu = form["ghi_chu"] or None
     db.commit()
     return RedirectResponse(f"/cases/{cid}", status_code=302)
 

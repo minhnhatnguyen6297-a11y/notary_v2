@@ -236,23 +236,66 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
 
 @router.get("/create")
 def create_form(request: Request):
-    return templates.TemplateResponse("customers/form.html", {"request": request, "obj": None, "errors": []})
+    form = {
+        "ho_ten": "", "gioi_tinh": "", "ngay_sinh": "", "ngay_chet": "",
+        "so_giay_to": "", "ngay_cap": "", "dia_chi": ""
+    }
+    return templates.TemplateResponse("customers/form.html", {
+        "request": request, "obj": None, "errors": [], "field_errors": {}, "form": form
+    })
 
 
 @router.post("/create")
 def create(
     request: Request,
-    ho_ten: str = Form(...), gioi_tinh: str = Form(...),
-    ngay_sinh: str = Form(...), ngay_chet: Optional[str] = Form(None),
-    so_giay_to: str = Form(...), ngay_cap: str = Form(...),
-    dia_chi: str = Form(...),
+    ho_ten: Optional[str] = Form(None), gioi_tinh: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None), ngay_chet: Optional[str] = Form(None),
+    so_giay_to: Optional[str] = Form(None), ngay_cap: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
+    form = {
+        "ho_ten": (ho_ten or "").strip(),
+        "gioi_tinh": (gioi_tinh or "").strip(),
+        "ngay_sinh": (ngay_sinh or "").strip(),
+        "ngay_chet": (ngay_chet or "").strip(),
+        "so_giay_to": (so_giay_to or "").strip(),
+        "ngay_cap": (ngay_cap or "").strip(),
+        "dia_chi": (dia_chi or "").strip(),
+    }
     errors = []
-    if db.query(Customer).filter(Customer.so_giay_to == so_giay_to.strip()).first():
-        errors.append(f"Số giấy tờ '{so_giay_to}' đã tồn tại!")
-    if errors:
-        return templates.TemplateResponse("customers/form.html", {"request": request, "obj": None, "errors": errors})
+    field_errors = {}
+
+    if not form["ho_ten"]:
+        field_errors["ho_ten"] = "Bat buoc"
+    if form["gioi_tinh"] not in ("Nam", "Nữ"):
+        field_errors["gioi_tinh"] = "Chon gioi tinh"
+    if not form["ngay_sinh"]:
+        field_errors["ngay_sinh"] = "Bat buoc"
+    if not form["so_giay_to"]:
+        field_errors["so_giay_to"] = "Bat buoc"
+    if not form["ngay_cap"]:
+        field_errors["ngay_cap"] = "Bat buoc"
+    if not form["dia_chi"]:
+        field_errors["dia_chi"] = "Bat buoc"
+
+    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
+        field_errors["ngay_sinh"] = "Ngay khong hop le"
+    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
+        field_errors["ngay_cap"] = "Ngay khong hop le"
+    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
+        field_errors["ngay_chet"] = "Ngay khong hop le"
+
+    if form["so_giay_to"] and db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"]).first():
+        field_errors["so_giay_to"] = "So giay to da ton tai"
+        errors.append(f"Số giấy tờ '{form['so_giay_to']}' đã tồn tại!")
+
+    if field_errors:
+        return templates.TemplateResponse("customers/form.html", {
+            "request": request, "obj": None,
+            "errors": errors, "field_errors": field_errors, "form": form
+        })
+
     c = Customer(ho_ten=ho_ten.strip(), gioi_tinh=gioi_tinh, ngay_sinh=parse_date(ngay_sinh),
                  ngay_chet=parse_date(ngay_chet), so_giay_to=so_giay_to.strip(),
                  ngay_cap=parse_date(ngay_cap), dia_chi=dia_chi.strip())
@@ -271,25 +314,74 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
 def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     c = db.query(Customer).filter(Customer.id == cid).first()
     if not c: raise HTTPException(404)
-    return templates.TemplateResponse("customers/form.html", {"request": request, "obj": c, "errors": []})
+    form = {
+        "ho_ten": c.ho_ten or "",
+        "gioi_tinh": c.gioi_tinh or "",
+        "ngay_sinh": c.ngay_sinh.isoformat() if c.ngay_sinh else "",
+        "ngay_chet": c.ngay_chet.isoformat() if c.ngay_chet else "",
+        "so_giay_to": c.so_giay_to or "",
+        "ngay_cap": c.ngay_cap.isoformat() if c.ngay_cap else "",
+        "dia_chi": c.dia_chi or "",
+    }
+    return templates.TemplateResponse("customers/form.html", {
+        "request": request, "obj": c, "errors": [], "field_errors": {}, "form": form
+    })
 
 
 @router.post("/{cid}/edit")
 def edit(
     cid: int, request: Request,
-    ho_ten: str = Form(...), gioi_tinh: str = Form(...),
-    ngay_sinh: str = Form(...), ngay_chet: Optional[str] = Form(None),
-    so_giay_to: str = Form(...), ngay_cap: str = Form(...),
-    dia_chi: str = Form(...),
+    ho_ten: Optional[str] = Form(None), gioi_tinh: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None), ngay_chet: Optional[str] = Form(None),
+    so_giay_to: Optional[str] = Form(None), ngay_cap: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     c = db.query(Customer).filter(Customer.id == cid).first()
     if not c: raise HTTPException(404)
+    form = {
+        "ho_ten": (ho_ten or "").strip(),
+        "gioi_tinh": (gioi_tinh or "").strip(),
+        "ngay_sinh": (ngay_sinh or "").strip(),
+        "ngay_chet": (ngay_chet or "").strip(),
+        "so_giay_to": (so_giay_to or "").strip(),
+        "ngay_cap": (ngay_cap or "").strip(),
+        "dia_chi": (dia_chi or "").strip(),
+    }
     errors = []
-    dup = db.query(Customer).filter(Customer.so_giay_to == so_giay_to.strip(), Customer.id != cid).first()
-    if dup: errors.append(f"Số giấy tờ '{so_giay_to}' đã tồn tại!")
-    if errors:
-        return templates.TemplateResponse("customers/form.html", {"request": request, "obj": c, "errors": errors})
+    field_errors = {}
+
+    if not form["ho_ten"]:
+        field_errors["ho_ten"] = "Bat buoc"
+    if form["gioi_tinh"] not in ("Nam", "Nữ"):
+        field_errors["gioi_tinh"] = "Chon gioi tinh"
+    if not form["ngay_sinh"]:
+        field_errors["ngay_sinh"] = "Bat buoc"
+    if not form["so_giay_to"]:
+        field_errors["so_giay_to"] = "Bat buoc"
+    if not form["ngay_cap"]:
+        field_errors["ngay_cap"] = "Bat buoc"
+    if not form["dia_chi"]:
+        field_errors["dia_chi"] = "Bat buoc"
+
+    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
+        field_errors["ngay_sinh"] = "Ngay khong hop le"
+    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
+        field_errors["ngay_cap"] = "Ngay khong hop le"
+    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
+        field_errors["ngay_chet"] = "Ngay khong hop le"
+
+    if form["so_giay_to"]:
+        dup = db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"], Customer.id != cid).first()
+        if dup:
+            field_errors["so_giay_to"] = "So giay to da ton tai"
+            errors.append(f"Số giấy tờ '{form['so_giay_to']}' đã tồn tại!")
+
+    if field_errors:
+        return templates.TemplateResponse("customers/form.html", {
+            "request": request, "obj": c, "errors": errors,
+            "field_errors": field_errors, "form": form
+        })
     c.ho_ten = ho_ten.strip(); c.gioi_tinh = gioi_tinh
     c.ngay_sinh = parse_date(ngay_sinh); c.ngay_chet = parse_date(ngay_chet)
     c.so_giay_to = so_giay_to.strip(); c.ngay_cap = parse_date(ngay_cap)

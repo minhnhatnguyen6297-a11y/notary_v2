@@ -4,6 +4,8 @@
 
 {% block content %}
 {% set action = '/customers/' + obj.id|string + '/edit' if obj else '/customers/create' %}
+{% set fe = field_errors or {} %}
+{% set f = form or {} %}
 
 <div class="page-header">
   <h2>
@@ -32,51 +34,58 @@
 
         <div class="col-md-8">
           <label class="form-label required">Họ và tên</label>
-          <input type="text" name="ho_ten" class="form-control"
-                 value="{{ obj.ho_ten if obj else '' }}"
+          <input type="text" name="ho_ten" class="form-control {% if fe.ho_ten %}is-invalid{% endif %}"
+                 value="{{ f.get('ho_ten','') if f else (obj.ho_ten if obj else '') }}"
                  placeholder="Ví dụ: NGUYỄN VĂN A" required>
+          {% if fe.ho_ten %}<div class="invalid-feedback">{{ fe.ho_ten }}</div>{% endif %}
           <small class="text-muted">Nhập theo đúng tên trên giấy tờ (viết hoa)</small>
         </div>
 
         <div class="col-md-4">
           <label class="form-label required">Giới tính</label>
-          <select name="gioi_tinh" class="form-select" required>
+          <select name="gioi_tinh" class="form-select {% if fe.gioi_tinh %}is-invalid{% endif %}" required>
             <option value="">-- Chọn --</option>
-            <option value="Nam" {{ 'selected' if obj and obj.gioi_tinh == 'Nam' }}>Nam</option>
-            <option value="Nữ" {{ 'selected' if obj and obj.gioi_tinh == 'Nữ' }}>Nữ</option>
+            <option value="Nam" {{ 'selected' if (f.get('gioi_tinh') == 'Nam') or (obj and obj.gioi_tinh == 'Nam' and not f.get('gioi_tinh')) }}>Nam</option>
+            <option value="Nữ" {{ 'selected' if (f.get('gioi_tinh') == 'Nữ') or (obj and obj.gioi_tinh == 'Nữ' and not f.get('gioi_tinh')) }}>Nữ</option>
           </select>
+          {% if fe.gioi_tinh %}<div class="invalid-feedback">{{ fe.gioi_tinh }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
           <label class="form-label required">Ngày sinh</label>
-          <input type="date" name="ngay_sinh" class="form-control"
-                 value="{{ obj.ngay_sinh.isoformat() if obj and obj.ngay_sinh else '' }}" required>
+          <input type="date" name="ngay_sinh" class="form-control {% if fe.ngay_sinh %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_sinh','') if f else (obj.ngay_sinh.isoformat() if obj and obj.ngay_sinh else '') }}" required>
+          {% if fe.ngay_sinh %}<div class="invalid-feedback">{{ fe.ngay_sinh }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
           <label class="form-label">Ngày mất <small class="text-muted">(bỏ trống nếu còn sống)</small></label>
-          <input type="date" name="ngay_chet" class="form-control"
-                 value="{{ obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '' }}">
+          <input type="date" name="ngay_chet" class="form-control {% if fe.ngay_chet %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_chet','') if f else (obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '') }}">
+          {% if fe.ngay_chet %}<div class="invalid-feedback">{{ fe.ngay_chet }}</div>{% endif %}
           <small class="text-muted">Điền vào nếu người này đã qua đời</small>
         </div>
 
         <div class="col-md-4">
           <label class="form-label required">Số CCCD / Số giấy khai tử</label>
-          <input type="text" name="so_giay_to" class="form-control"
-                 value="{{ obj.so_giay_to if obj else '' }}"
+          <input type="text" name="so_giay_to" class="form-control {% if fe.so_giay_to %}is-invalid{% endif %}"
+                 value="{{ f.get('so_giay_to','') if f else (obj.so_giay_to if obj else '') }}"
                  placeholder="012345678901" required>
+          {% if fe.so_giay_to %}<div class="invalid-feedback">{{ fe.so_giay_to }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
           <label class="form-label required">Ngày cấp giấy tờ</label>
-          <input type="date" name="ngay_cap" class="form-control"
-                 value="{{ obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '' }}" required>
+          <input type="date" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_cap','') if f else (obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '') }}" required>
+          {% if fe.ngay_cap %}<div class="invalid-feedback">{{ fe.ngay_cap }}</div>{% endif %}
         </div>
 
         <div class="col-12">
           <label class="form-label required">Địa chỉ thường trú</label>
-          <textarea name="dia_chi" class="form-control" rows="2"
-                    placeholder="Số nhà, thôn/xóm, xã/phường, huyện/quận, tỉnh/thành phố">{{ obj.dia_chi if obj else '' }}</textarea>
+          <textarea name="dia_chi" class="form-control {% if fe.dia_chi %}is-invalid{% endif %}" rows="2"
+                    placeholder="Số nhà, thôn/xóm, xã/phường, huyện/quận, tỉnh/thành phố">{{ f.get('dia_chi','') if f else (obj.dia_chi if obj else '') }}</textarea>
+          {% if fe.dia_chi %}<div class="invalid-feedback">{{ fe.dia_chi }}</div>{% endif %}
         </div>
 
       </div>
