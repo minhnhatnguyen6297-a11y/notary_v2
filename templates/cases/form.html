@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế' }}{% endblock %}
 {% block topbar_title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế mới' }}{% endblock %}
 
@@ -14,26 +14,160 @@
 
 {% if errors %}<div class="alert alert-danger">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{% endif %}
 
-{% if not deceased %}
-<div class="alert alert-warning">
-  <i class="bi bi-exclamation-triangle me-2"></i>
-  Chưa có người nào được đánh dấu là đã mất.
-  Hãy <a href="/customers/create" class="alert-link">thêm người</a> và điền ngày mất trước.
+<div class="alert alert-info" style="font-size:13px">
+  <i class="bi bi-info-circle me-2"></i>
+  Nhập người và tài sản ngay trên hồ sơ. Dữ liệu vẫn được lưu vào danh mục chung.
 </div>
-{% elif not properties %}
-<div class="alert alert-warning">
-  <i class="bi bi-exclamation-triangle me-2"></i>
-  Chưa có tài sản nào.
-  Hãy <a href="/properties/create" class="alert-link">thêm tài sản</a> trước.
-</div>
-{% else %}
 
 <form method="post" action="{{ action }}">
+<style>
+  .people-head, .person-row { display: grid; grid-template-columns: 50px 1.6fr .7fr .9fr 1fr 1fr 1.2fr 120px; gap: 10px; align-items: center; }
+  .people-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; }
+  .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; }
+  .person-row.dragging { opacity: .5; }
+  .person-row .badge { font-size: 11px; }
+  .dropzone { border: 2px dashed #e5e7eb; border-radius: 12px; padding: 12px; min-height: 120px; background: #fafafa; }
+  .dropzone.dragover { border-color: var(--gold); background: #fff7df; }
+  .person-block { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fff; margin-bottom: 8px; }
+  .person-block .row { row-gap: 6px; }
+  .inline-form .form-control, .inline-form .form-select { font-size: 13px; }
+  .hint { font-size: 12px; color: var(--muted); }
+</style>
+
 <div class="row g-3">
   <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-header"><i class="bi bi-person-x me-2" style="color:#dc2626"></i>Người để lại di sản</div>
-      <div class="card-body">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-person-plus me-2" style="color:var(--gold)"></i>Nhập nhanh người</div>
+      <div class="card-body inline-form">
+        <div id="inline-person-error" class="alert alert-danger d-none"></div>
+        <div class="row g-2">
+          <div class="col-8">
+            <input type="text" class="form-control" id="p-ho-ten" placeholder="Họ và tên *">
+          </div>
+          <div class="col-4">
+            <select class="form-select" id="p-gioi-tinh">
+              <option value="">Giới tính *</option>
+              <option value="Nam">Nam</option>
+              <option value="Nữ">Nữ</option>
+            </select>
+          </div>
+          <div class="col-4">
+            <input type="date" class="form-control" id="p-ngay-sinh" placeholder="Ngày sinh *">
+          </div>
+          <div class="col-4">
+            <input type="date" class="form-control" id="p-ngay-chet" placeholder="Ngày mất">
+          </div>
+          <div class="col-4">
+            <input type="text" class="form-control" id="p-so-giay-to" placeholder="Số giấy tờ *">
+          </div>
+          <div class="col-4">
+            <input type="date" class="form-control" id="p-ngay-cap" placeholder="Ngày cấp *">
+          </div>
+          <div class="col-8">
+            <input type="text" class="form-control" id="p-dia-chi" placeholder="Địa chỉ *">
+          </div>
+        </div>
+        <div class="d-flex justify-content-end mt-2">
+          <button type="button" id="btn-add-person" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm người</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-house-add me-2" style="color:var(--gold)"></i>Nhập nhanh tài sản</div>
+      <div class="card-body inline-form">
+        <div id="inline-prop-error" class="alert alert-danger d-none"></div>
+        <div class="row g-2">
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-so-serial" placeholder="Số Serial *">
+          </div>
+          <div class="col-6">
+            <input type="text" class="form-control" id="pr-so-thua" placeholder="Số thửa">
+          </div>
+          <div class="col-12">
+            <input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ thửa đất *">
+          </div>
+        </div>
+        <div class="d-flex justify-content-end mt-2">
+          <button type="button" id="btn-add-prop" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm tài sản</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-people me-2" style="color:var(--gold)"></i>Danh sách người</div>
+  <div class="card-body p-0">
+    <div class="people-head">
+      <div>#</div><div>Họ và tên</div><div>Giới tính</div><div>Ngày sinh</div><div>Số giấy tờ</div><div>Trạng thái</div><div>Địa chỉ</div><div>Thao tác</div>
+    </div>
+    <div id="people-pool">
+      {% for c in all_customers %}
+      {% if c.id not in participant_ids %}
+      <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}">
+        <div>{{ loop.index }}</div>
+        <div class="fw-600" style="color:var(--navy)">{{ c.ho_ten }}</div>
+        <div>{{ c.gioi_tinh }}</div>
+        <div>{{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '' }}</div>
+        <div class="text-danger">{{ c.so_giay_to }}</div>
+        <div>
+          {% if c.ngay_chet %}
+            <span class="badge rounded-pill badge-dead">Đã mất ({{ c.ngay_chet.strftime('%d/%m/%Y') }})</span>
+          {% else %}
+            <span class="badge rounded-pill badge-alive">Còn sống</span>
+          {% endif %}
+        </div>
+        <div>{{ c.dia_chi }}</div>
+        <div><span class="hint">Kéo sang khu vực</span></div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>Phân bổ vai trò (kéo thả)</div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% set roles = ["Vợ/Chồng", "Con", "Cha/Mẹ", "Anh/Chị/Em", "Khác"] %}
+      {% for r in roles %}
+      <div class="col-md-4">
+        <div class="mb-2 fw-600">{{ r }}</div>
+        <div class="dropzone" data-role="{{ r }}">
+          {% for p in participants %}
+          {% if p.vai_tro == r %}
+          <div class="person-block" draggable="true" data-id="{{ p.customer_id }}" data-name="{{ p.customer.ho_ten }}">
+            <div class="fw-600" style="color:var(--navy)">{{ p.customer.ho_ten }}</div>
+            <div class="hint">{{ p.customer.so_giay_to }}</div>
+            <div class="row mt-2">
+              <div class="col-6">
+                <input type="number" class="form-control form-control-sm share-input" value="{{ p.ty_le }}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
+              </div>
+              <div class="col-6 form-check">
+                <input class="form-check-input receive-input" type="checkbox" {{ 'checked' if p.co_nhan_tai_san }}>
+                <label class="form-check-label">Nhận</label>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div id="participants-hidden"></div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thông tin hồ sơ</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
         <label class="form-label required">Chọn người đã mất</label>
         <select name="nguoi_chet_id" class="form-select {% if fe.nguoi_chet_id %}is-invalid{% endif %}" required>
           <option value="">-- Chọn người đã mất --</option>
@@ -44,15 +178,8 @@
           {% endfor %}
         </select>
         {% if fe.nguoi_chet_id %}<div class="invalid-feedback">{{ fe.nguoi_chet_id }}</div>{% endif %}
-        <small class="text-muted mt-1 d-block">Chỉ hiển thị người đã có ngày mất trong hệ thống</small>
       </div>
-    </div>
-  </div>
-
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-header"><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản</div>
-      <div class="card-body">
+      <div class="col-md-6">
         <label class="form-label required">Chọn sổ đỏ / GCN</label>
         <select name="tai_san_id" class="form-select {% if fe.tai_san_id %}is-invalid{% endif %}" required>
           <option value="">-- Chọn tài sản --</option>
@@ -64,35 +191,20 @@
         </select>
         {% if fe.tai_san_id %}<div class="invalid-feedback">{{ fe.tai_san_id }}</div>{% endif %}
       </div>
-    </div>
-  </div>
-
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-body">
+      <div class="col-md-4">
         <label class="form-label required">Ngày lập hồ sơ</label>
         <input type="date" name="ngay_lap_ho_so" class="form-control {% if fe.ngay_lap_ho_so %}is-invalid{% endif %}"
                value="{{ f.get('ngay_lap_ho_so','') if f else (obj.ngay_lap_ho_so.isoformat() if obj else '') }}" required>
         {% if fe.ngay_lap_ho_so %}<div class="invalid-feedback">{{ fe.ngay_lap_ho_so }}</div>{% endif %}
       </div>
-    </div>
-  </div>
-
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-body">
+      <div class="col-md-4">
         <label class="form-label required">Loại văn bản</label>
         <select name="loai_van_ban" class="form-select">
           <option value="khai_nhan" {{ 'selected' if (f.get('loai_van_ban') == 'khai_nhan') or (not f.get('loai_van_ban') and (not obj or obj.loai_van_ban == 'khai_nhan')) }}>Văn bản khai nhận di sản</option>
-          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thoả thuận phân chia</option>
+          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thỏa thuận phân chia</option>
         </select>
       </div>
-    </div>
-  </div>
-
-  <div class="col-md-4">
-    <div class="card">
-      <div class="card-body">
+      <div class="col-md-4">
         <label class="form-label">Ghi chú</label>
         <input type="text" name="ghi_chu" class="form-control"
                value="{{ f.get('ghi_chu','') if f else (obj.ghi_chu if obj else '') }}" placeholder="Ghi chú tuỳ chọn...">
@@ -101,18 +213,160 @@
   </div>
 </div>
 
-<div class="alert alert-info mt-3" style="font-size:13px">
-  <i class="bi bi-info-circle me-2"></i>
-  Sau khi tạo hồ sơ, bạn sẽ được chuyển sang trang chi tiết để <strong>thêm người tham gia</strong> và thiết lập tỷ lệ phân chia.
-</div>
-
 <div class="d-flex gap-2 justify-content-end mt-3">
   <a href="/cases" class="btn btn-outline-secondary">Huỷ</a>
-  <button type="submit" class="btn btn-gold px-4">
+  <button type="submit" class="btn btn-gold px-4" id="btn-submit-case">
     <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Tạo hồ sơ' }}
   </button>
 </div>
 </form>
+{% endblock %}
 
-{% endif %}
+{% block extra_js %}
+<script>
+  const pool = document.getElementById('people-pool');
+  const zones = document.querySelectorAll('.dropzone');
+  let dragged = null;
+
+  function makeDraggable(el) {
+    el.addEventListener('dragstart', (e) => {
+      dragged = el;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      dragged = null;
+    });
+  }
+
+  document.querySelectorAll('.person-row, .person-block').forEach(makeDraggable);
+
+  zones.forEach(z => {
+    z.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      z.classList.add('dragover');
+    });
+    z.addEventListener('dragleave', () => z.classList.remove('dragover'));
+    z.addEventListener('drop', (e) => {
+      e.preventDefault();
+      z.classList.remove('dragover');
+      if (!dragged) return;
+      const id = dragged.dataset.id;
+      const name = dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || '';
+      const doc = dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '';
+
+      const block = document.createElement('div');
+      block.className = 'person-block';
+      block.setAttribute('draggable', 'true');
+      block.dataset.id = id;
+      block.dataset.name = name;
+      block.innerHTML = `
+        <div class="fw-600" style="color:var(--navy)">${name}</div>
+        <div class="hint">${doc}</div>
+        <div class="row mt-2">
+          <div class="col-6">
+            <input type="number" class="form-control form-control-sm share-input" value="0" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
+          </div>
+          <div class="col-6 form-check">
+            <input class="form-check-input receive-input" type="checkbox" checked>
+            <label class="form-check-label">Nhận</label>
+          </div>
+        </div>
+      `;
+      makeDraggable(block);
+      z.appendChild(block);
+      dragged.remove();
+    });
+  });
+
+  document.getElementById('btn-add-person')?.addEventListener('click', async () => {
+    const err = document.getElementById('inline-person-error');
+    err.classList.add('d-none'); err.textContent = '';
+    const payload = new URLSearchParams({
+      ho_ten: document.getElementById('p-ho-ten').value,
+      gioi_tinh: document.getElementById('p-gioi-tinh').value,
+      ngay_sinh: document.getElementById('p-ngay-sinh').value,
+      ngay_chet: document.getElementById('p-ngay-chet').value,
+      so_giay_to: document.getElementById('p-so-giay-to').value,
+      ngay_cap: document.getElementById('p-ngay-cap').value,
+      dia_chi: document.getElementById('p-dia-chi').value
+    });
+    const res = await fetch('/customers/inline-create', { method: 'POST', body: payload });
+    const data = await res.json();
+    if (!data.ok) {
+      err.textContent = 'Thiếu/không hợp lệ: ' + Object.keys(data.errors).join(', ');
+      err.classList.remove('d-none');
+      return;
+    }
+    const c = data.customer;
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    row.setAttribute('draggable', 'true');
+    row.dataset.id = c.id;
+    row.dataset.name = c.ho_ten;
+    row.dataset.doc = c.so_giay_to;
+    row.innerHTML = `
+      <div>#</div>
+      <div class="fw-600" style="color:var(--navy)">${c.ho_ten}</div>
+      <div>${c.gioi_tinh}</div>
+      <div>${c.ngay_sinh || ''}</div>
+      <div class="text-danger">${c.so_giay_to}</div>
+      <div>${c.ngay_chet ? '<span class="badge rounded-pill badge-dead">Đã mất</span>' : '<span class="badge rounded-pill badge-alive">Còn sống</span>'}</div>
+      <div>${c.dia_chi || ''}</div>
+      <div><span class="hint">Kéo sang khu vực</span></div>
+    `;
+    makeDraggable(row);
+    pool.prepend(row);
+    if (c.ngay_chet) {
+      const sel = document.querySelector('select[name="nguoi_chet_id"]');
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = `${c.ho_ten} (Mất: ${c.ngay_chet})`;
+      sel.appendChild(opt);
+    }
+  });
+
+  document.getElementById('btn-add-prop')?.addEventListener('click', async () => {
+    const err = document.getElementById('inline-prop-error');
+    err.classList.add('d-none'); err.textContent = '';
+    const payload = new URLSearchParams({
+      so_serial: document.getElementById('pr-so-serial').value,
+      so_thua_dat: document.getElementById('pr-so-thua').value,
+      dia_chi: document.getElementById('pr-dia-chi').value
+    });
+    const res = await fetch('/properties/inline-create', { method: 'POST', body: payload });
+    const data = await res.json();
+    if (!data.ok) {
+      err.textContent = 'Thiếu/không hợp lệ: ' + Object.keys(data.errors).join(', ');
+      err.classList.remove('d-none');
+      return;
+    }
+    const p = data.property;
+    const sel = document.querySelector('select[name="tai_san_id"]');
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = `${p.so_serial} — Thửa ${p.so_thua_dat || '?'} (${(p.dia_chi || '').slice(0,40)}...)`;
+    sel.appendChild(opt);
+  });
+
+  document.getElementById('btn-submit-case')?.addEventListener('click', () => {
+    const holder = document.getElementById('participants-hidden');
+    holder.innerHTML = '';
+    zones.forEach(z => {
+      const role = z.dataset.role || 'Khac';
+      z.querySelectorAll('.person-block').forEach(block => {
+        const id = block.dataset.id;
+        const share = block.querySelector('.share-input')?.value || '0';
+        const receive = block.querySelector('.receive-input')?.checked ? '1' : '0';
+        holder.insertAdjacentHTML('beforeend', `
+          <input type="hidden" name="participant_id" value="${id}">
+          <input type="hidden" name="participant_role" value="${role}">
+          <input type="hidden" name="participant_share" value="${share}">
+          <input type="hidden" name="participant_receive" value="${receive}">
+        `);
+      });
+    });
+  });
+</script>
 {% endblock %}

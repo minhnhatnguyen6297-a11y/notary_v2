@@ -5,7 +5,7 @@ Bao gồm: CRUD, upload hàng loạt từ Excel, tải file mẫu.
 
 import io
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, UploadFile, File
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -242,6 +242,71 @@ def create_form(request: Request):
     }
     return templates.TemplateResponse("customers/form.html", {
         "request": request, "obj": None, "errors": [], "field_errors": {}, "form": form
+    })
+
+
+@router.post("/inline-create")
+def inline_create(
+    ho_ten: Optional[str] = Form(None), gioi_tinh: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None), ngay_chet: Optional[str] = Form(None),
+    so_giay_to: Optional[str] = Form(None), ngay_cap: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    form = {
+        "ho_ten": (ho_ten or "").strip(),
+        "gioi_tinh": (gioi_tinh or "").strip(),
+        "ngay_sinh": (ngay_sinh or "").strip(),
+        "ngay_chet": (ngay_chet or "").strip(),
+        "so_giay_to": (so_giay_to or "").strip(),
+        "ngay_cap": (ngay_cap or "").strip(),
+        "dia_chi": (dia_chi or "").strip(),
+    }
+    errors = {}
+    if not form["ho_ten"]:
+        errors["ho_ten"] = "Bat buoc"
+    if form["gioi_tinh"] not in ("Nam", "Nữ"):
+        errors["gioi_tinh"] = "Chon gioi tinh"
+    if not form["ngay_sinh"]:
+        errors["ngay_sinh"] = "Bat buoc"
+    if not form["so_giay_to"]:
+        errors["so_giay_to"] = "Bat buoc"
+    if not form["ngay_cap"]:
+        errors["ngay_cap"] = "Bat buoc"
+    if not form["dia_chi"]:
+        errors["dia_chi"] = "Bat buoc"
+
+    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
+        errors["ngay_sinh"] = "Ngay khong hop le"
+    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
+        errors["ngay_cap"] = "Ngay khong hop le"
+    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
+        errors["ngay_chet"] = "Ngay khong hop le"
+
+    if form["so_giay_to"] and db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"]).first():
+        errors["so_giay_to"] = "So giay to da ton tai"
+
+    if errors:
+        return JSONResponse({"ok": False, "errors": errors}, status_code=400)
+
+    c = Customer(
+        ho_ten=form["ho_ten"], gioi_tinh=form["gioi_tinh"],
+        ngay_sinh=parse_date(form["ngay_sinh"]), ngay_chet=parse_date(form["ngay_chet"]),
+        so_giay_to=form["so_giay_to"], ngay_cap=parse_date(form["ngay_cap"]),
+        dia_chi=form["dia_chi"]
+    )
+    db.add(c); db.commit(); db.refresh(c)
+    return JSONResponse({
+        "ok": True,
+        "customer": {
+            "id": c.id,
+            "ho_ten": c.ho_ten,
+            "gioi_tinh": c.gioi_tinh,
+            "ngay_sinh": c.ngay_sinh.isoformat() if c.ngay_sinh else "",
+            "ngay_chet": c.ngay_chet.isoformat() if c.ngay_chet else "",
+            "so_giay_to": c.so_giay_to,
+            "dia_chi": c.dia_chi,
+        }
     })
 
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Form, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -43,6 +43,67 @@ def create_form(request: Request):
     }
     return templates.TemplateResponse("properties/form.html", {
         "request": request, "obj": None, "errors": [], "field_errors": {}, "form": form
+    })
+
+
+@router.post("/inline-create")
+def inline_create(
+    so_serial: Optional[str] = Form(None),
+    so_vao_so: Optional[str] = Form(None),
+    so_thua_dat: Optional[str] = Form(None),
+    so_to_ban_do: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None),
+    loai_dat: Optional[str] = Form(None),
+    hinh_thuc_su_dung: Optional[str] = Form(None),
+    thoi_han: Optional[str] = Form(None),
+    nguon_goc: Optional[str] = Form(None),
+    ngay_cap: Optional[str] = Form(None),
+    co_quan_cap: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    form = {
+        "so_serial": (so_serial or "").strip(),
+        "so_vao_so": (so_vao_so or "").strip(),
+        "so_thua_dat": (so_thua_dat or "").strip(),
+        "so_to_ban_do": (so_to_ban_do or "").strip(),
+        "dia_chi": (dia_chi or "").strip(),
+        "loai_dat": (loai_dat or "").strip(),
+        "hinh_thuc_su_dung": (hinh_thuc_su_dung or "").strip(),
+        "thoi_han": (thoi_han or "").strip(),
+        "nguon_goc": (nguon_goc or "").strip(),
+        "ngay_cap": (ngay_cap or "").strip(),
+        "co_quan_cap": (co_quan_cap or "").strip(),
+    }
+    errors = {}
+    if not form["so_serial"]:
+        errors["so_serial"] = "Bat buoc"
+    if not form["dia_chi"]:
+        errors["dia_chi"] = "Bat buoc"
+    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
+        errors["ngay_cap"] = "Ngay khong hop le"
+    if form["so_serial"] and db.query(Property).filter(Property.so_serial == form["so_serial"]).first():
+        errors["so_serial"] = "So serial da ton tai"
+
+    if errors:
+        return JSONResponse({"ok": False, "errors": errors}, status_code=400)
+
+    p = Property(
+        so_serial=form["so_serial"], so_vao_so=form["so_vao_so"] or None,
+        so_thua_dat=form["so_thua_dat"] or None, so_to_ban_do=form["so_to_ban_do"] or None,
+        dia_chi=form["dia_chi"], loai_dat=form["loai_dat"] or None,
+        hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None, thoi_han=form["thoi_han"] or None,
+        nguon_goc=form["nguon_goc"] or None, ngay_cap=parse_date(form["ngay_cap"]),
+        co_quan_cap=form["co_quan_cap"] or None
+    )
+    db.add(p); db.commit(); db.refresh(p)
+    return JSONResponse({
+        "ok": True,
+        "property": {
+            "id": p.id,
+            "so_serial": p.so_serial,
+            "so_thua_dat": p.so_thua_dat or "",
+            "dia_chi": p.dia_chi or "",
+        }
     })
 
 
