@@ -78,22 +78,20 @@ def create(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Bat buoc"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Bat buoc"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Bat buoc"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "Ngay khong hop le"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
-    participant_ids = {p.customer_id for p in case.participants}
-    participants = case.participants
 
     if field_errors:
         return templates.TemplateResponse("cases/form.html", {
@@ -103,38 +101,48 @@ def create(
             "all_customers": all_customers, "participants": [], "participant_ids": set()
         })
 
-    c = InheritanceCase(
-        nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
-        ngay_lap_ho_so=datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date(),
-        loai_van_ban=form["loai_van_ban"], ghi_chu=form["ghi_chu"] or None
-    )
-    db.add(c); db.commit(); db.refresh(c)
-    pid_list = _to_list(participant_id)
-    role_list = _to_list(participant_role)
-    share_list = _to_list(participant_share)
-    recv_list = _to_list(participant_receive)
-    if pid_list and role_list:
-        for idx, cid in enumerate(pid_list):
-            if not cid:
-                continue
-            if str(cid) == str(c.nguoi_chet_id):
-                continue
-            role = role_list[idx] if idx < len(role_list) else ""
-            share_raw = share_list[idx] if idx < len(share_list) else "0"
-            receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
-            try:
-                share_val = float(share_raw)
-            except Exception:
-                share_val = 0.0
-            co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
-            p = InheritanceParticipant(
-                case_id=c.id, customer_id=int(cid),
-                vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                ty_le=share_val, co_nhan_tai_san=co_nhan
-            )
-            db.add(p)
-        db.commit()
-    return RedirectResponse(f"/cases/{c.id}", status_code=302)
+    try:
+        c = InheritanceCase(
+            nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
+            ngay_lap_ho_so=datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date(),
+            loai_van_ban=form["loai_van_ban"], ghi_chu=form["ghi_chu"] or None
+        )
+        db.add(c); db.commit(); db.refresh(c)
+        pid_list = _to_list(participant_id)
+        role_list = _to_list(participant_role)
+        share_list = _to_list(participant_share)
+        recv_list = _to_list(participant_receive)
+        if pid_list and role_list:
+            for idx, cid in enumerate(pid_list):
+                if not cid:
+                    continue
+                if str(cid) == str(c.nguoi_chet_id):
+                    continue
+                role = role_list[idx] if idx < len(role_list) else ""
+                share_raw = share_list[idx] if idx < len(share_list) else "0"
+                receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
+                try:
+                    share_val = float(share_raw)
+                except Exception:
+                    share_val = 0.0
+                co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+                p = InheritanceParticipant(
+                    case_id=c.id, customer_id=int(cid),
+                    vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
+                    ty_le=share_val, co_nhan_tai_san=co_nhan
+                )
+                db.add(p)
+            db.commit()
+        return RedirectResponse(f"/cases/{c.id}", status_code=302)
+    except Exception as e:
+        db.rollback()
+        errors.append(f"Lỗi tạo hồ sơ: {e}")
+        return templates.TemplateResponse("cases/form.html", {
+            "request": request, "obj": None,
+            "deceased": deceased, "properties": properties,
+            "errors": errors, "field_errors": field_errors, "form": form,
+            "all_customers": all_customers, "participants": [], "participant_ids": set()
+        })
 
 
 @router.get("/{cid}")
@@ -159,6 +167,8 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    participants = case.participants
+    participant_ids = {p.customer_id for p in participants}
     form = {
         "nguoi_chet_id": str(case.nguoi_chet_id) if case.nguoi_chet_id else "",
         "tai_san_id": str(case.tai_san_id) if case.tai_san_id else "",
@@ -204,16 +214,16 @@ def edit(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Bat buoc"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Bat buoc"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Bat buoc"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "Ngay khong hop le"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -228,38 +238,50 @@ def edit(
             "participant_ids": {p.customer_id for p in case.participants}
         })
 
-    case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
-    case.ngay_lap_ho_so = datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
-    case.loai_van_ban = form["loai_van_ban"]; case.ghi_chu = form["ghi_chu"] or None
-    db.commit()
-    db.query(InheritanceParticipant).filter(InheritanceParticipant.case_id == case.id).delete()
-    db.commit()
-    pid_list = _to_list(participant_id)
-    role_list = _to_list(participant_role)
-    share_list = _to_list(participant_share)
-    recv_list = _to_list(participant_receive)
-    if pid_list and role_list:
-        for idx, cid in enumerate(pid_list):
-            if not cid:
-                continue
-            if str(cid) == str(case.nguoi_chet_id):
-                continue
-            role = role_list[idx] if idx < len(role_list) else ""
-            share_raw = share_list[idx] if idx < len(share_list) else "0"
-            receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
-            try:
-                share_val = float(share_raw)
-            except Exception:
-                share_val = 0.0
-            co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
-            p = InheritanceParticipant(
-                case_id=case.id, customer_id=int(cid),
-                vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                ty_le=share_val, co_nhan_tai_san=co_nhan
-            )
-            db.add(p)
+    try:
+        case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
+        case.ngay_lap_ho_so = datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
+        case.loai_van_ban = form["loai_van_ban"]; case.ghi_chu = form["ghi_chu"] or None
         db.commit()
-    return RedirectResponse(f"/cases/{cid}", status_code=302)
+        db.query(InheritanceParticipant).filter(InheritanceParticipant.case_id == case.id).delete()
+        db.commit()
+        pid_list = _to_list(participant_id)
+        role_list = _to_list(participant_role)
+        share_list = _to_list(participant_share)
+        recv_list = _to_list(participant_receive)
+        if pid_list and role_list:
+            for idx, cid in enumerate(pid_list):
+                if not cid:
+                    continue
+                if str(cid) == str(case.nguoi_chet_id):
+                    continue
+                role = role_list[idx] if idx < len(role_list) else ""
+                share_raw = share_list[idx] if idx < len(share_list) else "0"
+                receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
+                try:
+                    share_val = float(share_raw)
+                except Exception:
+                    share_val = 0.0
+                co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+                p = InheritanceParticipant(
+                    case_id=case.id, customer_id=int(cid),
+                    vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
+                    ty_le=share_val, co_nhan_tai_san=co_nhan
+                )
+                db.add(p)
+            db.commit()
+        return RedirectResponse(f"/cases/{cid}", status_code=302)
+    except Exception as e:
+        db.rollback()
+        errors.append(f"Lỗi cập nhật hồ sơ: {e}")
+        return templates.TemplateResponse("cases/form.html", {
+            "request": request, "obj": case,
+            "deceased": deceased, "properties": properties,
+            "errors": errors, "field_errors": field_errors, "form": form,
+            "all_customers": all_customers,
+            "participants": case.participants,
+            "participant_ids": {p.customer_id for p in case.participants}
+        })
 
 
 @router.post("/{cid}/lock")
