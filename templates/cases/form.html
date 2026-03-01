@@ -26,10 +26,27 @@
   .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; }
   .person-row.dragging { opacity: .5; }
   .person-row .badge { font-size: 11px; }
-  .dropzone { border: 2px dashed #e5e7eb; border-radius: 12px; padding: 12px; min-height: 120px; background: #fafafa; }
-  .dropzone.dragover { border-color: var(--gold); background: #fff7df; }
-  .person-block { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fff; margin-bottom: 8px; }
-  .person-block .row { row-gap: 6px; }
+
+  .tree-wrap { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 16px; }
+  .tree-row { display: flex; align-items: flex-start; justify-content: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tree-group { display: flex; gap: 12px; align-items: flex-start; }
+  .tree-group .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+
+  .slot { min-width: 150px; min-height: 70px; border: 2px dashed #e5e7eb; border-radius: 10px; padding: 8px; background: #fafafa; display: flex; align-items: center; justify-content: center; text-align: center; }
+  .slot.dragover { border-color: var(--gold); background: #fff7df; }
+  .slot .placeholder { font-size: 12px; color: var(--muted); }
+
+  .person-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 8px; background: #fff; min-width: 140px; }
+  .person-card.dragging { opacity: .5; }
+  .person-card .name { font-weight: 600; color: var(--navy); }
+  .person-card .meta { font-size: 11px; color: var(--muted); }
+
+  .child-list { display: flex; flex-wrap: wrap; gap: 10px; }
+  .child-card { position: relative; }
+  .child-card .spouse-slot { position: absolute; right: -6px; top: -6px; background: #fff; border: 1px dashed #e5e7eb; border-radius: 8px; padding: 4px 6px; font-size: 11px; }
+  .grand-zone { margin-top: 8px; border: 1px dashed #e5e7eb; border-radius: 8px; padding: 6px; min-height: 40px; display: none; }
+  .grand-zone.show { display: block; }
+
   .inline-form .form-control, .inline-form .form-select { font-size: 13px; }
   .hint { font-size: 12px; color: var(--muted); }
 </style>
@@ -107,7 +124,7 @@
     <div id="people-pool">
       {% for c in all_customers %}
       {% if c.id not in participant_ids %}
-      <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}">
+      <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-death="{{ c.ngay_chet.isoformat() if c.ngay_chet else '' }}">
         <div>{{ loop.index }}</div>
         <div class="fw-600" style="color:var(--navy)">{{ c.ho_ten }}</div>
         <div>{{ c.gioi_tinh }}</div>
@@ -121,7 +138,7 @@
           {% endif %}
         </div>
         <div>{{ c.dia_chi }}</div>
-        <div><span class="hint">Kéo sang khu vực</span></div>
+        <div><span class="hint">Kéo sang cây</span></div>
       </div>
       {% endif %}
       {% endfor %}
@@ -130,35 +147,53 @@
 </div>
 
 <div class="card mt-3">
-  <div class="card-header"><i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>Phân bổ vai trò (kéo thả)</div>
+  <div class="card-header"><i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>Phân bổ vai trò (tree)</div>
   <div class="card-body">
-    <div class="row g-3">
-      {% set roles = ["Vợ/Chồng", "Con", "Cha/Mẹ", "Anh/Chị/Em", "Khác"] %}
-      {% for r in roles %}
-      <div class="col-md-4">
-        <div class="mb-2 fw-600">{{ r }}</div>
-        <div class="dropzone" data-role="{{ r }}">
-          {% for p in participants %}
-          {% if p.vai_tro == r %}
-          <div class="person-block" draggable="true" data-id="{{ p.customer_id }}" data-name="{{ p.customer.ho_ten }}">
-            <div class="fw-600" style="color:var(--navy)">{{ p.customer.ho_ten }}</div>
-            <div class="hint">{{ p.customer.so_giay_to }}</div>
-            <div class="row mt-2">
-              <div class="col-6">
-                <input type="number" class="form-control form-control-sm share-input" value="{{ p.ty_le }}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
-              </div>
-              <div class="col-6 form-check">
-                <input class="form-check-input receive-input" type="checkbox" {{ 'checked' if p.co_nhan_tai_san }}>
-                <label class="form-check-label">Nhận</label>
-              </div>
+    <div class="tree-wrap">
+      <div class="tree-row">
+        <div class="tree-group">
+          <div>
+            <div class="label">Cha mẹ chủ đất</div>
+            <div class="d-flex gap-2">
+              <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
+              <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
             </div>
           </div>
-          {% endif %}
-          {% endfor %}
+        </div>
+        <div class="tree-group">
+          <div>
+            <div class="label">Cha mẹ vợ/chồng</div>
+            <div class="d-flex gap-2">
+              <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
+              <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
+            </div>
+          </div>
         </div>
       </div>
-      {% endfor %}
+
+      <div class="tree-row">
+        <div class="tree-group">
+          <div>
+            <div class="label">Chủ đất</div>
+            <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
+          </div>
+        </div>
+        <div class="tree-group">
+          <div>
+            <div class="label">Vợ/Chồng</div>
+            <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tree-row" style="justify-content:flex-start">
+        <div style="width:100%">
+          <div class="label">Con đẻ (kéo rời từng người) — thả đè lên con để thêm vợ/chồng con</div>
+          <div class="child-list" id="children-zone"></div>
+        </div>
+      </div>
     </div>
+
     <div id="participants-hidden"></div>
   </div>
 </div>
@@ -224,9 +259,35 @@
 
 {% block extra_js %}
 <script>
+  const existingParticipants = [
+    {% for p in participants %}
+    {
+      id: "{{ p.customer_id }}",
+      name: "{{ p.customer.ho_ten|e }}",
+      doc: "{{ p.customer.so_giay_to|e }}",
+      death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
+      role: "{{ p.vai_tro|e }}",
+      share: "{{ p.ty_le }}",
+      receive: "{{ '1' if p.co_nhan_tai_san else '0' }}"
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
   const pool = document.getElementById('people-pool');
-  const zones = document.querySelectorAll('.dropzone');
+  const slots = document.querySelectorAll('.slot');
+  const childrenZone = document.getElementById('children-zone');
   let dragged = null;
+
+  function parseDate(s) {
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function isEligible(deathDate, ownerDeath) {
+    if (!ownerDeath) return true;
+    if (!deathDate) return true;
+    return deathDate >= ownerDeath;
+  }
 
   function makeDraggable(el) {
     el.addEventListener('dragstart', (e) => {
@@ -240,46 +301,218 @@
     });
   }
 
-  document.querySelectorAll('.person-row, .person-block').forEach(makeDraggable);
+  document.querySelectorAll('.person-row, .person-card').forEach(makeDraggable);
 
-  zones.forEach(z => {
-    z.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      z.classList.add('dragover');
+  function removeExisting(id) {
+    document.querySelectorAll(`[data-id="${id}"]`).forEach(n => {
+      if (n.classList.contains('person-row') || n.classList.contains('person-card')) {
+        n.remove();
+      }
     });
-    z.addEventListener('dragleave', () => z.classList.remove('dragover'));
-    z.addEventListener('drop', (e) => {
+  }
+
+  function buildPersonCard(data, role, withShare=true, shareVal='0', receiveVal='1') {
+    const card = document.createElement('div');
+    card.className = 'person-card';
+    card.setAttribute('draggable', 'true');
+    card.dataset.id = data.id;
+    card.dataset.name = data.name;
+    card.dataset.doc = data.doc;
+    card.dataset.death = data.death || '';
+    card.dataset.role = role || '';
+    card.innerHTML = `
+      <div class="name">${data.name}</div>
+      <div class="meta">${data.doc || ''}${data.death ? ' • mất ' + data.death : ''}</div>
+      ${withShare ? `
+      <div class="mt-1">
+        <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
+        <div class="form-check mt-1">
+          <input class="form-check-input receive-input" type="checkbox" ${receiveVal === '1' ? 'checked' : ''}>
+          <label class="form-check-label">Nhận</label>
+        </div>
+      </div>` : ''}
+    `;
+    makeDraggable(card);
+    return card;
+  }
+
+  function createChildCard(data, shareVal='0', receiveVal='1') {
+    const card = buildPersonCard(data, 'Con', true, shareVal, receiveVal);
+    card.classList.add('child-card');
+
+    const spouseSlot = document.createElement('div');
+    spouseSlot.className = 'spouse-slot';
+    spouseSlot.textContent = 'Kéo vợ/chồng con';
+    spouseSlot.addEventListener('dragover', (ev) => { ev.preventDefault(); spouseSlot.classList.add('dragover'); });
+    spouseSlot.addEventListener('dragleave', () => spouseSlot.classList.remove('dragover'));
+    spouseSlot.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      spouseSlot.classList.remove('dragover');
+      if (!dragged) return;
+      const sid = dragged.dataset.id;
+      const sdata = {
+        id: sid,
+        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
+        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
+        death: dragged.dataset.death || ''
+      };
+      removeExisting(sid);
+      spouseSlot.innerHTML = '';
+      const sp = buildPersonCard(sdata, 'Con_dau_re', false);
+      sp.classList.add('spouse-card');
+      spouseSlot.appendChild(sp);
+    });
+
+    const grandZone = document.createElement('div');
+    grandZone.className = 'grand-zone';
+    grandZone.textContent = 'Kéo cháu (thế vị) vào đây';
+    grandZone.addEventListener('dragover', (ev) => { ev.preventDefault(); grandZone.classList.add('dragover'); });
+    grandZone.addEventListener('dragleave', () => grandZone.classList.remove('dragover'));
+    grandZone.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      grandZone.classList.remove('dragover');
+      if (!dragged) return;
+      const gid = dragged.dataset.id;
+      const gdata = {
+        id: gid,
+        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
+        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
+        death: dragged.dataset.death || ''
+      };
+      removeExisting(gid);
+      const gcard = buildPersonCard(gdata, 'Cháu', true);
+      grandZone.appendChild(gcard);
+    });
+
+    card.appendChild(spouseSlot);
+    card.appendChild(grandZone);
+    return card;
+  }
+
+  slots.forEach(s => {
+    s.addEventListener('dragover', (e) => {
       e.preventDefault();
-      z.classList.remove('dragover');
+      s.classList.add('dragover');
+    });
+    s.addEventListener('dragleave', () => s.classList.remove('dragover'));
+    s.addEventListener('drop', (e) => {
+      e.preventDefault();
+      s.classList.remove('dragover');
       if (!dragged) return;
       const id = dragged.dataset.id;
-      const name = dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || '';
-      const doc = dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '';
+      const data = {
+        id,
+        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
+        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
+        death: dragged.dataset.death || ''
+      };
+      removeExisting(id);
+      s.innerHTML = '';
+      s.appendChild(buildPersonCard(data, s.dataset.role, s.dataset.role !== 'Cha_vc' && s.dataset.role !== 'Me_vc'));
 
-      const block = document.createElement('div');
-      block.className = 'person-block';
-      block.setAttribute('draggable', 'true');
-      block.dataset.id = id;
-      block.dataset.name = name;
-      block.innerHTML = `
-        <div class="fw-600" style="color:var(--navy)">${name}</div>
-        <div class="hint">${doc}</div>
-        <div class="row mt-2">
-          <div class="col-6">
-            <input type="number" class="form-control form-control-sm share-input" value="0" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
-          </div>
-          <div class="col-6 form-check">
-            <input class="form-check-input receive-input" type="checkbox" checked>
-            <label class="form-check-label">Nhận</label>
-          </div>
-        </div>
-      `;
-      makeDraggable(block);
-      z.appendChild(block);
-      dragged.remove();
+      if (s.dataset.slot === 'owner') {
+        const sel = document.querySelector('select[name="nguoi_chet_id"]');
+        if (sel) sel.value = id;
+      }
     });
   });
 
+  // children drop zone
+  childrenZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  });
+  childrenZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!dragged) return;
+    const id = dragged.dataset.id;
+    const data = {
+      id,
+      name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
+      doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
+      death: dragged.dataset.death || ''
+    };
+    removeExisting(id);
+    const card = createChildCard(data);
+    childrenZone.appendChild(card);
+    updateGrandZones();
+  });
+
+  function updateGrandZones() {
+    const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
+    const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
+    document.querySelectorAll('.child-card').forEach(child => {
+      const death = parseDate(child.dataset.death);
+      const zone = child.querySelector('.grand-zone');
+      if (!zone) return;
+      if (ownerDeath && death && death < ownerDeath) {
+        zone.classList.add('show');
+      } else {
+        zone.classList.remove('show');
+      }
+    });
+  }
+
+  document.addEventListener('drop', updateGrandZones);
+
+  function setOwnerFromSelect() {
+    const sel = document.querySelector('select[name="nguoi_chet_id"]');
+    if (!sel || !sel.value) return;
+    const row = document.querySelector(`.person-row[data-id="${sel.value}"]`);
+    if (!row) return;
+    const data = {
+      id: row.dataset.id,
+      name: row.dataset.name,
+      doc: row.dataset.doc,
+      death: row.dataset.death || ''
+    };
+    const ownerSlot = document.querySelector('.slot[data-slot="owner"]');
+    if (ownerSlot) {
+      removeExisting(data.id);
+      ownerSlot.innerHTML = '';
+      ownerSlot.appendChild(buildPersonCard(data, 'Owner', false));
+    }
+  }
+
+  function placeExistingParticipants() {
+    existingParticipants.forEach(p => {
+      const data = { id: p.id, name: p.name, doc: p.doc, death: p.death };
+      if (p.role === 'Cha' || p.role === 'Cha/Mẹ') {
+        const slot = document.querySelector('.slot[data-slot="owner_father"]');
+        if (slot && !slot.querySelector('.person-card')) {
+          slot.innerHTML = '';
+          slot.appendChild(buildPersonCard(data, 'Cha', true, p.share, p.receive));
+          return;
+        }
+      }
+      if (p.role === 'Mẹ' || p.role === 'Cha/Mẹ') {
+        const slot = document.querySelector('.slot[data-slot="owner_mother"]');
+        if (slot && !slot.querySelector('.person-card')) {
+          slot.innerHTML = '';
+          slot.appendChild(buildPersonCard(data, 'Mẹ', true, p.share, p.receive));
+          return;
+        }
+      }
+      if (p.role === 'Vợ/Chồng') {
+        const slot = document.querySelector('.slot[data-slot="spouse"]');
+        if (slot) {
+          slot.innerHTML = '';
+          slot.appendChild(buildPersonCard(data, 'Vợ/Chồng', true, p.share, p.receive));
+          return;
+        }
+      }
+      if (p.role === 'Con') {
+        const card = createChildCard(data, p.share, p.receive);
+        childrenZone.appendChild(card);
+        return;
+      }
+    });
+  }
+
+  setOwnerFromSelect();
+  placeExistingParticipants();
+  updateGrandZones();
+
+  // Inline add person
   document.getElementById('btn-add-person')?.addEventListener('click', async () => {
     const err = document.getElementById('inline-person-error');
     err.classList.add('d-none'); err.textContent = '';
@@ -306,6 +539,7 @@
     row.dataset.id = c.id;
     row.dataset.name = c.ho_ten;
     row.dataset.doc = c.so_giay_to;
+    row.dataset.death = c.ngay_chet || '';
     row.innerHTML = `
       <div>#</div>
       <div class="fw-600" style="color:var(--navy)">${c.ho_ten}</div>
@@ -314,7 +548,7 @@
       <div class="text-danger">${c.so_giay_to}</div>
       <div>${c.ngay_chet ? '<span class="badge rounded-pill badge-dead">Đã mất</span>' : '<span class="badge rounded-pill badge-alive">Còn sống</span>'}</div>
       <div>${c.dia_chi || ''}</div>
-      <div><span class="hint">Kéo sang khu vực</span></div>
+      <div><span class="hint">Kéo sang cây</span></div>
     `;
     makeDraggable(row);
     pool.prepend(row);
@@ -327,6 +561,7 @@
     }
   });
 
+  // Inline add property
   document.getElementById('btn-add-prop')?.addEventListener('click', async () => {
     const err = document.getElementById('inline-prop-error');
     err.classList.add('d-none'); err.textContent = '';
@@ -350,22 +585,47 @@
     sel.appendChild(opt);
   });
 
+  // Build hidden participant inputs on submit
   document.getElementById('btn-submit-case')?.addEventListener('click', () => {
     const holder = document.getElementById('participants-hidden');
     holder.innerHTML = '';
-    zones.forEach(z => {
-      const role = z.dataset.role || 'Khac';
-      z.querySelectorAll('.person-block').forEach(block => {
-        const id = block.dataset.id;
-        const share = block.querySelector('.share-input')?.value || '0';
-        const receive = block.querySelector('.receive-input')?.checked ? '1' : '0';
-        holder.insertAdjacentHTML('beforeend', `
-          <input type="hidden" name="participant_id" value="${id}">
-          <input type="hidden" name="participant_role" value="${role}">
-          <input type="hidden" name="participant_share" value="${share}">
-          <input type="hidden" name="participant_receive" value="${receive}">
-        `);
-      });
+
+    const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
+    const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
+
+    function addParticipant(card, role) {
+      if (!card) return;
+      const id = card.dataset.id;
+      const share = card.querySelector('.share-input')?.value || '0';
+      const receive = card.querySelector('.receive-input')?.checked ? '1' : '0';
+      holder.insertAdjacentHTML('beforeend', `
+        <input type="hidden" name="participant_id" value="${id}">
+        <input type="hidden" name="participant_role" value="${role}">
+        <input type="hidden" name="participant_share" value="${share}">
+        <input type="hidden" name="participant_receive" value="${receive}">
+      `);
+    }
+
+    // Cha/mẹ chủ đất
+    const of = document.querySelector('.slot[data-slot="owner_father"] .person-card');
+    const om = document.querySelector('.slot[data-slot="owner_mother"] .person-card');
+    if (of && isEligible(parseDate(of.dataset.death), ownerDeath)) addParticipant(of, 'Cha');
+    if (om && isEligible(parseDate(om.dataset.death), ownerDeath)) addParticipant(om, 'Mẹ');
+
+    // Vợ/Chồng
+    const sp = document.querySelector('.slot[data-slot="spouse"] .person-card');
+    if (sp && isEligible(parseDate(sp.dataset.death), ownerDeath)) addParticipant(sp, 'Vợ/Chồng');
+
+    // Con và cháu thế vị
+    document.querySelectorAll('.child-card').forEach(child => {
+      const death = parseDate(child.dataset.death);
+      if (isEligible(death, ownerDeath)) {
+        addParticipant(child, 'Con');
+      } else {
+        child.querySelectorAll('.grand-zone .person-card').forEach(gc => {
+          addParticipant(gc, 'Cháu');
+        });
+      }
     });
   });
 </script>

@@ -13,6 +13,14 @@ router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
 
+def _hang_for_role(role: str) -> int:
+    if role in ("Cha", "Mẹ", "Vợ/Chồng", "Con", "Cháu"):
+        return 1
+    if role in ("Ông/Bà", "Anh/Chị/Em"):
+        return 2
+    return 1
+
+
 @router.get("/")
 def list_cases(request: Request, db: Session = Depends(get_db), q: str = ""):
     cases = db.query(InheritanceCase).order_by(InheritanceCase.id.desc()).all()
@@ -112,7 +120,7 @@ def create(
             co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
             p = InheritanceParticipant(
                 case_id=c.id, customer_id=int(cid),
-                vai_tro=role or "Khac", hang_thua_ke=None,
+                vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
                 ty_le=share_val, co_nhan_tai_san=co_nhan
             )
             db.add(p)
@@ -229,7 +237,7 @@ def edit(
             co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
             p = InheritanceParticipant(
                 case_id=case.id, customer_id=int(cid),
-                vai_tro=role or "Khac", hang_thua_ke=None,
+                vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
                 ty_le=share_val, co_nhan_tai_san=co_nhan
             )
             db.add(p)
