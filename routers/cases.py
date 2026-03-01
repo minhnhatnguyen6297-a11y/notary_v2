@@ -56,10 +56,10 @@ def create(
     ngay_lap_ho_so: Optional[str] = Form(None),
     loai_van_ban: Optional[str] = Form("khai_nhan"),
     ghi_chu: Optional[str] = Form(None),
-    participant_id: Optional[List[str]] = Form(None),
-    participant_role: Optional[List[str]] = Form(None),
-    participant_share: Optional[List[str]] = Form(None),
-    participant_receive: Optional[List[str]] = Form(None),
+    participant_id: Optional[str] = Form(None),
+    participant_role: Optional[str] = Form(None),
+    participant_share: Optional[str] = Form(None),
+    participant_receive: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     def _to_list(v):
@@ -180,10 +180,10 @@ def edit(
     nguoi_chet_id: Optional[str] = Form(None), tai_san_id: Optional[str] = Form(None),
     ngay_lap_ho_so: Optional[str] = Form(None), loai_van_ban: Optional[str] = Form("khai_nhan"),
     ghi_chu: Optional[str] = Form(None),
-    participant_id: Optional[List[str]] = Form(None),
-    participant_role: Optional[List[str]] = Form(None),
-    participant_share: Optional[List[str]] = Form(None),
-    participant_receive: Optional[List[str]] = Form(None),
+    participant_id: Optional[str] = Form(None),
+    participant_role: Optional[str] = Form(None),
+    participant_share: Optional[str] = Form(None),
+    participant_receive: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     def _to_list(v):
