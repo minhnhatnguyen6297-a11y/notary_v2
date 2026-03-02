@@ -14,7 +14,8 @@ templates = Jinja2Templates(directory="templates")
 
 
 def _hang_for_role(role: str) -> int:
-    if role in ("Cha", "Mẹ", "Vợ/Chồng", "Con", "Cháu"):
+    role = (role or "").strip()
+    if role in ("Cha", "Mẹ", "Vợ/Chồng", "Con", "Cháu", "Con_dau_re"):
         return 1
     if role in ("Ông/Bà", "Anh/Chị/Em"):
         return 2
@@ -250,10 +251,10 @@ def edit(
         share_list = _to_list(participant_share)
         recv_list = _to_list(participant_receive)
         if pid_list and role_list:
-            for idx, cid in enumerate(pid_list):
-                if not cid:
+            for idx, participant_customer_id in enumerate(pid_list):
+                if not participant_customer_id:
                     continue
-                if str(cid) == str(case.nguoi_chet_id):
+                if str(participant_customer_id) == str(case.nguoi_chet_id):
                     continue
                 role = role_list[idx] if idx < len(role_list) else ""
                 share_raw = share_list[idx] if idx < len(share_list) else "0"
@@ -264,7 +265,7 @@ def edit(
                     share_val = 0.0
                 co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
                 p = InheritanceParticipant(
-                    ho_so_id=case.id, customer_id=int(cid),
+                    ho_so_id=case.id, customer_id=int(participant_customer_id),
                     vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
                     ty_le=share_val, co_nhan_tai_san=co_nhan
                 )
@@ -308,10 +309,12 @@ def delete(cid: int, db: Session = Depends(get_db)):
 
 @router.get("/{cid}/export-word")
 def export_word(cid: int, db: Session = Depends(get_db)):
-    """Xuất hồ sơ thừa kế ra file Word."""
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    """Xuat ho so thua ke ra file Word."""
+    try:
+        from docx import Document
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except Exception:
+        raise HTTPException(status_code=500, detail="Thieu thu vien python-docx. Vui long cai requirements.")
 
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if not case: raise HTTPException(404)
@@ -365,7 +368,8 @@ def export_word(cid: int, db: Session = Depends(get_db)):
         doc.add_paragraph("Những người nhận thừa kế:")
         for i, p in enumerate(nhan, 1):
             c = p.customer
-            line = f"{i}. {c.ho_ten} - {p.vai_tro} - Tỷ lệ: {p.ty_le:.1f}%"
+            ty_le = float(p.ty_le or 0)
+            line = f"{i}. {c.ho_ten} - {p.vai_tro} - Ty le: {ty_le:.1f}%"
             doc.add_paragraph(line, style="List Number")
 
     if tuchoi:
@@ -394,3 +398,5 @@ def export_word(cid: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+

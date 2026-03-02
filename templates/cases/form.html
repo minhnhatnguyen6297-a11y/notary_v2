@@ -23,33 +23,71 @@
 <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
 <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
 <style>
-  .people-head, .person-row { display: grid; grid-template-columns: 50px 1.6fr .7fr .9fr 1fr 1fr 1.2fr 120px; gap: 10px; align-items: center; }
-  .people-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; }
-  .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; }
+  .workbench { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
+  .pool-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
+  .pool-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; background: #fafafa; }
+  .pool-body { max-height: 720px; overflow: auto; }
+  .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; border-left: 3px solid transparent; }
   .person-row.dragging { opacity: .5; }
-  .person-row .badge { font-size: 11px; }
+  .person-row:hover { background: #f8fbff; border-left-color: #93c5fd; }
+  .person-row .name { font-weight: 700; color: var(--navy); line-height: 1.25; }
+  .person-row .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-  .tree-wrap { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.04); }
-  .tree-row { display: flex; align-items: flex-start; justify-content: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tree-wrap {
+    background-color: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.04);
+    background-image:
+      linear-gradient(to right, rgba(148,163,184,.16) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148,163,184,.16) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+  .tree-tier { border: 1px dashed #dbe3f3; border-radius: 12px; padding: 12px; margin-bottom: 12px; background: #fbfdff; }
+  .tree-tier:last-child { margin-bottom: 0; }
+  .tier-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 10px; font-weight: 700; }
+  .tier-content { display: flex; align-items: flex-start; justify-content: center; gap: 16px; flex-wrap: wrap; }
   .tree-group { display: flex; gap: 12px; align-items: flex-start; }
   .tree-group .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
 
-  .slot { min-width: 150px; min-height: 80px; border: 2px solid #cbd5f5; border-radius: 12px; padding: 8px; background: #f8fafc; display: flex; align-items: center; justify-content: center; text-align: center; position: relative; }
+  .slot { width: 150px; min-height: 110px; border: 2px solid #cbd5f5; border-radius: 12px; padding: 8px; background: #f8fafc; display: flex; align-items: center; justify-content: center; text-align: center; position: relative; }
   .slot.dragover { border-color: #2563eb; background: #eff6ff; }
   .slot .placeholder { font-size: 12px; color: var(--muted); }
 
-  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; min-width: 140px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 140px; min-height: 110px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
   .person-card.dragging { opacity: .5; }
+  body.is-dragging .slot .person-card,
+  body.is-dragging .grand-spouse-slot .person-card { pointer-events: none; }
   .person-card .name { font-weight: 600; color: var(--navy); }
   .person-card .meta { font-size: 11px; color: var(--muted); }
+  .card-role { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #1d4ed8; letter-spacing: .4px; margin-bottom: 2px; }
 
-  .child-list { display: flex; flex-wrap: wrap; gap: 10px; min-height: 80px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 10px; background: #f8fafc; }
+  .child-list { display: flex; flex-wrap: wrap; gap: 10px; min-height: 80px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 10px; background: #f8fafc; width: 100%; }
   .child-list.dragover { border-color: #2563eb; background: #eff6ff; }
   .child-placeholder { font-size: 12px; color: var(--muted); }
-  .child-card { position: relative; }
-  .child-card .spouse-slot { position: absolute; right: -6px; top: -6px; background: #fff; border: 1px dashed #e5e7eb; border-radius: 8px; padding: 4px 6px; font-size: 11px; }
-  .grand-zone { margin-top: 8px; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 40px; display: none; background: #f8fafc; }
-  .grand-zone.show { display: block; }
+  .family-unit { border: 1px solid #bfdbfe; border-radius: 12px; padding: 8px; background: #eff6ff; width: 340px; }
+  .family-pair { display: flex; align-items: stretch; gap: 8px; }
+  .family-link { display: flex; align-items: center; justify-content: center; min-width: 26px; color: #2563eb; font-weight: 700; font-size: 16px; }
+  .child-card { display: block; min-width: 140px; flex: 1; }
+  .family-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .family-meta .arrow-down { margin: 0; }
+  .flow-note { font-size: 11px; font-weight: 600; color: #334155; }
+  .grand-list { display: flex; flex-wrap: wrap; gap: 10px; min-height: 70px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 10px; background: #f8fafc; width: 100%; }
+  .grand-list.dragover { border-color: #2563eb; background: #eff6ff; }
+  .grand-group { border: 1px solid #bfdbfe; border-radius: 12px; padding: 8px; background: #eff6ff; min-width: 420px; }
+  .grand-group .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .grand-head { display: flex; align-items: flex-start; gap: 8px; }
+  .grand-spouse-wrap { width: 150px; }
+  .grand-spouse-wrap .slabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+  .grand-spouse-slot { border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 108px; background: #fff; display: flex; align-items: center; justify-content: center; text-align: center; }
+  .grand-spouse-slot .placeholder { font-size: 11px; color: var(--muted); }
+  .grand-spouse-slot.dragover { border-color: #2563eb; background: #eff6ff; }
+  .grand-heirs-wrap { flex: 1; min-width: 220px; }
+  .grand-heirs-wrap .hlabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+  .grand-zone { margin-top: 0; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 108px; background: #f8fafc; display: flex; flex-wrap: wrap; gap: 8px; }
+  .grand-zone .placeholder { font-size: 11px; color: var(--muted); }
+  .grand-zone.dragover { border-color: #2563eb; background: #eff6ff; }
 
   .spouse-connector { width: 40px; height: 2px; background: #64748b; margin-top: 36px; }
   .arrow-down { width: 2px; height: 18px; background: #64748b; margin: 0 auto; position: relative; }
@@ -59,6 +97,11 @@
 
   .inline-form .form-control, .inline-form .form-select { font-size: 13px; }
   .hint { font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 1200px) {
+    .workbench { grid-template-columns: 1fr; }
+    .pool-body { max-height: 260px; }
+  }
 </style>
 
 <div class="card mb-3">
@@ -202,86 +245,85 @@
 </div>
 
 <div class="card mt-3">
-  <div class="card-header"><i class="bi bi-people me-2" style="color:var(--gold)"></i>Danh sách người</div>
-  <div class="card-body p-0">
-    <div class="people-head">
-      <div>#</div><div>Họ và tên</div><div>Giới tính</div><div>Ngày sinh</div><div>Số giấy tờ</div><div>Trạng thái</div><div>Địa chỉ</div><div>Thao tác</div>
-    </div>
-    <div id="people-pool">
-      {% for c in all_customers %}
-      {% if c.id not in participant_ids %}
-      <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-death="{{ c.ngay_chet.isoformat() if c.ngay_chet else '' }}">
-        <div>{{ loop.index }}</div>
-        <div class="fw-600" style="color:var(--navy)">{{ c.ho_ten }}</div>
-        <div>{{ c.gioi_tinh }}</div>
-        <div>{{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '' }}</div>
-        <div class="text-danger">{{ c.so_giay_to }}</div>
-        <div>
-          {% if c.ngay_chet %}
-            <span class="badge rounded-pill badge-dead">Đã mất ({{ c.ngay_chet.strftime('%d/%m/%Y') }})</span>
-          {% else %}
-            <span class="badge rounded-pill badge-alive">Còn sống</span>
-          {% endif %}
-        </div>
-        <div>{{ c.dia_chi }}</div>
-        <div><span class="hint">Kéo sang cây</span></div>
-      </div>
-      {% endif %}
-      {% endfor %}
-    </div>
-  </div>
-</div>
-
-<div class="card mt-3">
   <div class="card-header"><i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>Phân bổ vai trò (tree)</div>
   <div class="card-body">
-    <div class="tree-wrap">
-      <div class="tree-row">
-        <div class="tree-group">
-          <div>
-            <div class="label">Cha mẹ chủ đất</div>
-            <div class="d-flex gap-2">
-              <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
-              <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
+    <div class="workbench">
+      <div class="pool-panel">
+        <div class="pool-head">Danh sách người kéo-thả</div>
+        <div class="pool-body" id="people-pool">
+          {% for c in all_customers %}
+          {% if c.id not in participant_ids %}
+          <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-birth="{{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '' }}" data-death="{{ c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '' }}" data-gender="{{ c.gioi_tinh or '' }}">
+            <div class="name">{{ c.ho_ten }}</div>
+            <div class="meta">Sinh: {{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '—' }}</div>
+            <div class="meta">Mất: {{ c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '—' }}</div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="tree-wrap">
+      <div class="tree-tier">
+        <div class="tier-title">Tầng 1 - Cha mẹ</div>
+        <div class="tier-content">
+          <div class="tree-group">
+            <div>
+              <div class="label">Cha mẹ chủ đất</div>
+              <div class="d-flex gap-2">
+                <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
+                <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="tree-group">
-          <div>
-            <div class="label">Cha mẹ vợ/chồng</div>
-            <div class="d-flex gap-2">
-              <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
-              <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
+          <div class="tree-group">
+            <div>
+              <div class="label">Cha mẹ vợ/chồng</div>
+              <div class="d-flex gap-2">
+                <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
+                <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="tree-row">
-        <div class="tree-group">
-          <div>
-            <div class="label">Chủ đất</div>
-            <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
-            <div class="arrow-up"></div>
-            <div class="arrow-down"></div>
+      <div class="tree-tier">
+        <div class="tier-title">Tầng 2 - Chủ đất và vợ/chồng</div>
+        <div class="tier-content">
+          <div class="tree-group">
+            <div>
+              <div class="label">Chủ đất</div>
+              <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
+            </div>
           </div>
-        </div>
-        <div class="spouse-connector"></div>
-        <div class="tree-group">
-          <div>
-            <div class="label">Vợ/Chồng</div>
-            <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
+          <div class="family-link">↔</div>
+          <div class="tree-group">
+            <div>
+              <div class="label">Vợ/Chồng</div>
+              <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="tree-row" style="justify-content:flex-start">
-        <div style="width:100%">
-          <div class="label">Con đẻ (kéo rời từng người) — thả đè lên con để thêm vợ/chồng con</div>
+      <div class="tree-tier">
+        <div class="tier-title">Tầng 3 - Con đẻ</div>
+        <div class="tier-content">
           <div class="child-list" id="children-zone">
             <div class="child-placeholder">Thả con đẻ vào đây</div>
           </div>
         </div>
+      </div>
+
+      <div class="tree-tier">
+        <div class="tier-title">Tầng 4 - Nhánh tiếp theo (vợ/chồng của con đã mất + cháu/đời tiếp)</div>
+        <div class="tier-content">
+          <div class="grand-list" id="grandchildren-zone">
+            <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã mất</div>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -306,7 +348,9 @@
       id: "{{ p.customer_id }}",
       name: "{{ p.customer.ho_ten|e }}",
       doc: "{{ p.customer.so_giay_to|e }}",
+      gender: "{{ p.customer.gioi_tinh|default('', true)|e }}",
       death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
+      birth: "{{ p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '' }}",
       role: "{{ p.vai_tro|e }}",
       share: "{{ p.ty_le }}",
       receive: "{{ '1' if p.co_nhan_tai_san else '0' }}"
@@ -316,33 +360,65 @@
   const pool = document.getElementById('people-pool');
   const slots = document.querySelectorAll('.slot');
   const childrenZone = document.getElementById('children-zone');
+  const grandchildrenZone = document.getElementById('grandchildren-zone');
   let dragged = null;
 
   function parseDate(s) {
     if (!s) return null;
-    const d = new Date(s);
+    const raw = String(s).trim();
+    const ddmmyyyy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (ddmmyyyy) {
+      const d = new Date(Number(ddmmyyyy[3]), Number(ddmmyyyy[2]) - 1, Number(ddmmyyyy[1]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+    const d = new Date(raw);
     return isNaN(d.getTime()) ? null : d;
   }
 
-  function isEligible(deathDate, ownerDeath) {
-    if (!ownerDeath) return true;
-    if (!deathDate) return true;
-    return deathDate >= ownerDeath;
+  function survivesAt(personDeath, eventDeath) {
+    if (!eventDeath) return true;
+    if (!personDeath) return true;
+    return personDeath.getTime() > eventDeath.getTime();
+  }
+
+  function deathFlowStatus(personDeath, parentDeath) {
+    if (!personDeath) return 'alive';
+    // If parent death is unknown but this person is dead, allow downstream branch editing.
+    if (!parentDeath) return 'after';
+    const a = personDeath.getTime();
+    const b = parentDeath.getTime();
+    if (a < b) return 'before';
+    if (a === b) return 'same';
+    return 'after';
   }
 
   function makeDraggable(el) {
     el.addEventListener('dragstart', (e) => {
       dragged = el;
       el.classList.add('dragging');
+      document.body.classList.add('is-dragging');
+      e.dataTransfer.setData('text/plain', el.dataset.id || '');
       e.dataTransfer.effectAllowed = 'move';
     });
     el.addEventListener('dragend', () => {
       el.classList.remove('dragging');
+      document.body.classList.remove('is-dragging');
       dragged = null;
     });
   }
 
   document.querySelectorAll('.person-row, .person-card').forEach(makeDraggable);
+
+  function extractDataFromElement(el) {
+    return {
+      id: el.dataset.id,
+      name: el.dataset.name || el.querySelector('.fw-600')?.textContent || el.querySelector('.name')?.textContent || '',
+      doc: el.dataset.doc || el.querySelector('.text-danger')?.textContent || '',
+      gender: el.dataset.gender || '',
+      birth: el.dataset.birth || '',
+      death: el.dataset.death || ''
+    };
+  }
 
   function removeExisting(id) {
     document.querySelectorAll(`[data-id="${id}"]`).forEach(n => {
@@ -350,20 +426,70 @@
         n.remove();
       }
     });
+    document.querySelectorAll('.family-unit').forEach(f => {
+      if (!f.querySelector('.child-card')) f.remove();
+    });
+    grandchildrenZone.querySelectorAll('.grand-group').forEach(g => {
+      const parentId = g.dataset.parentId;
+      if (!document.querySelector(`.child-card[data-id="${parentId}"]`)) g.remove();
+    });
+    if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
+      grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã mất</div>';
+    }
+  }
+
+  function putBackToPool(cardEl) {
+    if (!cardEl || !pool) return;
+    const data = extractDataFromElement(cardEl);
+    if (!data.id) return;
+    if (document.querySelector(`.person-row[data-id="${data.id}"]`)) return;
+    if (document.querySelector(`.person-card[data-id="${data.id}"]`)) return;
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    row.setAttribute('draggable', 'true');
+    row.dataset.id = data.id;
+    row.dataset.name = data.name || '';
+    row.dataset.doc = data.doc || '';
+    row.dataset.gender = data.gender || '';
+    row.dataset.birth = data.birth || '';
+    row.dataset.death = data.death || '';
+    row.innerHTML = `
+      <div class="name">${data.name || ''}</div>
+      <div class="meta">Sinh: ${data.birth || '—'}</div>
+      <div class="meta">Mất: ${data.death || '—'}</div>
+    `;
+    makeDraggable(row);
+    pool.prepend(row);
   }
 
   function buildPersonCard(data, role, withShare=true, shareVal='0', receiveVal='1') {
+    const roleMap = {
+      'Owner': 'Chủ đất',
+      'Cha': 'Cha',
+      'Mẹ': 'Mẹ',
+      'Cha_vc': 'Cha vợ/chồng',
+      'Me_vc': 'Mẹ vợ/chồng',
+      'Vợ/Chồng': 'Vợ/Chồng',
+      'Con': 'Con đẻ',
+      'Con_dau_re': 'Con dâu/rể',
+      'Vo_chong_con': 'Vợ/Chồng của con',
+      'Cháu': 'Cháu'
+    };
     const card = document.createElement('div');
     card.className = 'person-card';
     card.setAttribute('draggable', 'true');
     card.dataset.id = data.id;
     card.dataset.name = data.name;
     card.dataset.doc = data.doc;
+    card.dataset.gender = data.gender || '';
+    card.dataset.birth = data.birth || '';
     card.dataset.death = data.death || '';
     card.dataset.role = role || '';
     card.innerHTML = `
+      <div class="card-role">${roleMap[role] || role || ''}</div>
       <div class="name">${data.name}</div>
-      <div class="meta">${data.doc || ''}${data.death ? ' • mất ' + data.death : ''}</div>
+      <div class="meta">${data.doc || ''}</div>
+      <div class="meta">${data.birth ? 'Sinh: ' + data.birth : ''}${data.death ? (data.birth ? ' • ' : '') + 'Mất: ' + data.death : ''}</div>
       ${withShare ? `
       <div class="mt-1">
         <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
@@ -377,57 +503,95 @@
     return card;
   }
 
+  function getGrandGroup(childCard, createIfMissing=true) {
+    if (!childCard) return null;
+    const childId = childCard.dataset.id;
+    let group = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${childId}"]`);
+    if (!group && createIfMissing) {
+      const ph = grandchildrenZone.querySelector('.child-placeholder');
+      if (ph) ph.remove();
+      group = document.createElement('div');
+      group.className = 'grand-group';
+      group.dataset.parentId = childId;
+      group.innerHTML = `
+        <div class="label">Nhánh tiếp theo của ${childCard.dataset.name}</div>
+        <div class="grand-head">
+          <div class="grand-spouse-wrap">
+            <div class="slabel">Vợ/Chồng của con</div>
+            <div class="grand-spouse-slot"><span class="placeholder">Kéo vợ/chồng vào đây</span></div>
+          </div>
+          <div class="family-link">↔</div>
+          <div class="grand-heirs-wrap">
+            <div class="hlabel">Người hưởng tiếp (cháu hoặc đời sau)</div>
+            <div class="grand-zone"><span class="placeholder">Kéo người hưởng vào đây</span></div>
+          </div>
+        </div>
+      `;
+      const spouseSlot = group.querySelector('.grand-spouse-slot');
+      const zone = group.querySelector('.grand-zone');
+
+      spouseSlot.addEventListener('dragover', (ev) => { ev.preventDefault(); spouseSlot.classList.add('dragover'); });
+      spouseSlot.addEventListener('dragleave', () => spouseSlot.classList.remove('dragover'));
+      spouseSlot.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        spouseSlot.classList.remove('dragover');
+        if (!dragged) return;
+        const childDeath = parseDate(childCard.dataset.death);
+        const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
+        const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
+        const status = deathFlowStatus(childDeath, ownerDeath);
+        if (status !== 'after') return;
+
+        const sdata = extractDataFromElement(dragged);
+        removeExisting(sdata.id);
+        const prev = spouseSlot.querySelector('.person-card');
+        if (prev) putBackToPool(prev);
+        spouseSlot.innerHTML = '';
+        const spouseRole = sdata.gender === 'Nam' ? 'Chồng' : (sdata.gender === 'Nữ' ? 'Vợ' : 'Vợ/Chồng');
+        const sp = buildPersonCard(sdata, 'Vo_chong_con', true);
+        sp.querySelector('.card-role').textContent = `${spouseRole} của con`;
+        spouseSlot.appendChild(sp);
+        recalcShares();
+      });
+
+      zone.addEventListener('dragover', (ev) => { ev.preventDefault(); zone.classList.add('dragover'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+      zone.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        zone.classList.remove('dragover');
+        if (!dragged) return;
+        const gdata = extractDataFromElement(dragged);
+        removeExisting(gdata.id);
+        if (zone.querySelector('.placeholder')) zone.innerHTML = '';
+        const gcard = buildPersonCard(gdata, 'Cháu', true);
+        zone.appendChild(gcard);
+        recalcShares();
+      });
+      grandchildrenZone.appendChild(group);
+    }
+    return group;
+  }
+
   function createChildCard(data, shareVal='0', receiveVal='1') {
+    const family = document.createElement('div');
+    family.className = 'family-unit';
+    family.dataset.childId = data.id;
+
+    const pair = document.createElement('div');
+    pair.className = 'family-pair';
+
     const card = buildPersonCard(data, 'Con', true, shareVal, receiveVal);
     card.classList.add('child-card');
 
-    const spouseSlot = document.createElement('div');
-    spouseSlot.className = 'spouse-slot';
-    spouseSlot.textContent = 'Kéo vợ/chồng con';
-    spouseSlot.addEventListener('dragover', (ev) => { ev.preventDefault(); spouseSlot.classList.add('dragover'); });
-    spouseSlot.addEventListener('dragleave', () => spouseSlot.classList.remove('dragover'));
-    spouseSlot.addEventListener('drop', (ev) => {
-      ev.preventDefault();
-      spouseSlot.classList.remove('dragover');
-      if (!dragged) return;
-      const sid = dragged.dataset.id;
-      const sdata = {
-        id: sid,
-        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
-        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
-        death: dragged.dataset.death || ''
-      };
-      removeExisting(sid);
-      spouseSlot.innerHTML = '';
-      const sp = buildPersonCard(sdata, 'Con_dau_re', false);
-      sp.classList.add('spouse-card');
-      spouseSlot.appendChild(sp);
-    });
+    pair.appendChild(card);
+    family.appendChild(pair);
 
-    const grandZone = document.createElement('div');
-    grandZone.className = 'grand-zone';
-    grandZone.textContent = 'Kéo cháu (thế vị) vào đây';
-    grandZone.addEventListener('dragover', (ev) => { ev.preventDefault(); grandZone.classList.add('dragover'); });
-    grandZone.addEventListener('dragleave', () => grandZone.classList.remove('dragover'));
-    grandZone.addEventListener('drop', (ev) => {
-      ev.preventDefault();
-      grandZone.classList.remove('dragover');
-      if (!dragged) return;
-      const gid = dragged.dataset.id;
-      const gdata = {
-        id: gid,
-        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
-        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
-        death: dragged.dataset.death || ''
-      };
-      removeExisting(gid);
-      const gcard = buildPersonCard(gdata, 'Cháu', true);
-      grandZone.appendChild(gcard);
-    });
+    const meta = document.createElement('div');
+    meta.className = 'family-meta';
+    meta.innerHTML = '<span class="hint">Con đẻ</span><div class="arrow-down"></div><span class="hint">Nhánh tầng 4</span><span class="flow-note"></span>';
+    family.appendChild(meta);
 
-    card.appendChild(spouseSlot);
-    card.appendChild(grandZone);
-    return card;
+    return family;
   }
 
   slots.forEach(s => {
@@ -440,19 +604,15 @@
       e.preventDefault();
       s.classList.remove('dragover');
       if (!dragged) return;
-      const id = dragged.dataset.id;
-      const data = {
-        id,
-        name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
-        doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
-        death: dragged.dataset.death || ''
-      };
-      removeExisting(id);
+      const data = extractDataFromElement(dragged);
+      removeExisting(data.id);
+      const prev = s.querySelector('.person-card');
+      if (prev) putBackToPool(prev);
       s.innerHTML = '';
       s.appendChild(buildPersonCard(data, s.dataset.role, s.dataset.role !== 'Cha_vc' && s.dataset.role !== 'Me_vc'));
 
       if (s.dataset.slot === 'owner') {
-        if (ownerInput) ownerInput.value = id;
+        if (ownerInput) ownerInput.value = data.id;
       }
       updateGrandZones();
       recalcShares();
@@ -471,14 +631,8 @@
     e.preventDefault();
     childrenZone.classList.remove('dragover');
     if (!dragged) return;
-    const id = dragged.dataset.id;
-    const data = {
-      id,
-      name: dragged.dataset.name || dragged.querySelector('.fw-600')?.textContent || dragged.querySelector('.name')?.textContent || '',
-      doc: dragged.dataset.doc || dragged.querySelector('.text-danger')?.textContent || '',
-      death: dragged.dataset.death || ''
-    };
-    removeExisting(id);
+    const data = extractDataFromElement(dragged);
+    removeExisting(data.id);
     const ph = childrenZone.querySelector('.child-placeholder');
     if (ph) ph.remove();
     const card = createChildCard(data);
@@ -491,13 +645,39 @@
     const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
     const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
     document.querySelectorAll('.child-card').forEach(child => {
-      const death = parseDate(child.dataset.death);
-      const zone = child.querySelector('.grand-zone');
-      if (!zone) return;
-      if (ownerDeath && death && death < ownerDeath) {
-        zone.classList.add('show');
+      const childDeath = parseDate(child.dataset.death);
+      const status = deathFlowStatus(childDeath, ownerDeath);
+      child.dataset.flowStatus = status;
+
+      const family = child.closest('.family-unit');
+      const flowNote = family ? family.querySelector('.flow-note') : null;
+
+      if (flowNote) {
+        if (status === 'before') flowNote.textContent = 'Trạng thái: chết trước chủ đất';
+        else if (status === 'same') flowNote.textContent = 'Trạng thái: chết cùng ngày chủ đất';
+        else if (status === 'after') flowNote.textContent = 'Trạng thái: chết sau chủ đất';
+        else flowNote.textContent = '';
+      }
+
+      const needGrandBranch = status === 'before' || status === 'same' || status === 'after';
+      const group = getGrandGroup(child, needGrandBranch);
+      if (!group) return;
+      if (needGrandBranch) {
+        group.style.display = '';
+        const spouseSlot = group.querySelector('.grand-spouse-slot');
+        if (spouseSlot) {
+          if (status === 'after') {
+            if (!spouseSlot.querySelector('.person-card')) {
+              spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+            }
+          } else {
+            const prev = spouseSlot.querySelector('.person-card');
+            if (prev) putBackToPool(prev);
+            spouseSlot.innerHTML = '<span class="placeholder">Không áp dụng (chết trước/cùng ngày chủ đất)</span>';
+          }
+        }
       } else {
-        zone.classList.remove('show');
+        group.style.display = 'none';
       }
     });
   }
@@ -514,6 +694,8 @@
       id: row.dataset.id,
       name: row.dataset.name,
       doc: row.dataset.doc,
+      gender: row.dataset.gender || '',
+      birth: row.dataset.birth || '',
       death: row.dataset.death || ''
     };
     const ownerSlot = document.querySelector('.slot[data-slot="owner"]');
@@ -525,8 +707,11 @@
   }
 
   function placeExistingParticipants() {
+    const delayedSpouses = [];
+    const delayedGrand = [];
+
     existingParticipants.forEach(p => {
-      const data = { id: p.id, name: p.name, doc: p.doc, death: p.death };
+      const data = { id: p.id, name: p.name, doc: p.doc, gender: p.gender || '', birth: p.birth || '', death: p.death };
       if (p.role === 'Cha' || p.role === 'Cha/Mẹ') {
         const slot = document.querySelector('.slot[data-slot="owner_father"]');
         if (slot && !slot.querySelector('.person-card')) {
@@ -552,16 +737,48 @@
         }
       }
       if (p.role === 'Con') {
-    const ph = childrenZone.querySelector('.child-placeholder');
-    if (ph) ph.remove();
-    const card = createChildCard(data, p.share, p.receive);
-    childrenZone.appendChild(card);
+        const ph = childrenZone.querySelector('.child-placeholder');
+        if (ph) ph.remove();
+        const card = createChildCard(data, p.share, p.receive);
+        childrenZone.appendChild(card);
         return;
       }
+      if (p.role === 'Con_dau_re') {
+        delayedSpouses.push({ data });
+        return;
+      }
+      if (p.role === 'Cháu') {
+        delayedGrand.push({ data, share: p.share, receive: p.receive });
+        return;
+      }
+    });
+
+    delayedSpouses.forEach(({ data }) => {
+      const targetSlot = Array.from(document.querySelectorAll('.grand-group .grand-spouse-slot'))
+        .find(s => s && !s.querySelector('.person-card') && !String(s.textContent || '').includes('Không áp dụng'));
+      if (!targetSlot) return;
+      const prev = targetSlot.querySelector('.person-card');
+      if (prev) putBackToPool(prev);
+      targetSlot.innerHTML = '';
+      const spouseRole = data.gender === 'Nam' ? 'Chồng' : (data.gender === 'Nữ' ? 'Vợ' : 'Vợ/Chồng');
+      const sp = buildPersonCard(data, 'Vo_chong_con', true);
+      sp.querySelector('.card-role').textContent = `${spouseRole} của con`;
+      targetSlot.appendChild(sp);
+    });
+
+    delayedGrand.forEach(({ data, share, receive }) => {
+      const deadChild = Array.from(document.querySelectorAll('.child-card'))
+        .find(ch => !!parseDate(ch.dataset.death));
+      if (!deadChild) return;
+      const group = getGrandGroup(deadChild, true);
+      const zone = group.querySelector('.grand-zone');
+      if (zone.querySelector('.placeholder')) zone.innerHTML = '';
+      zone.appendChild(buildPersonCard(data, 'Cháu', true, share, receive));
     });
   }
 
   setOwnerFromSelect();
+  updateGrandZones();
   placeExistingParticipants();
   updateGrandZones();
   recalcShares();
@@ -593,16 +810,13 @@
     row.dataset.id = c.id;
     row.dataset.name = c.ho_ten;
     row.dataset.doc = c.so_giay_to;
+    row.dataset.gender = c.gioi_tinh || '';
+    row.dataset.birth = c.ngay_sinh || '';
     row.dataset.death = c.ngay_chet || '';
     row.innerHTML = `
-      <div>#</div>
-      <div class="fw-600" style="color:var(--navy)">${c.ho_ten}</div>
-      <div>${c.gioi_tinh}</div>
-      <div>${c.ngay_sinh || ''}</div>
-      <div class="text-danger">${c.so_giay_to}</div>
-      <div>${c.ngay_chet ? '<span class="badge rounded-pill badge-dead">Đã mất</span>' : '<span class="badge rounded-pill badge-alive">Còn sống</span>'}</div>
-      <div>${c.dia_chi || ''}</div>
-      <div><span class="hint">Kéo sang cây</span></div>
+      <div class="name">${c.ho_ten}</div>
+      <div class="meta">Sinh: ${c.ngay_sinh || '—'}</div>
+      <div class="meta">Mất: ${c.ngay_chet || '—'}</div>
     `;
     makeDraggable(row);
     pool.prepend(row);
@@ -692,48 +906,105 @@
       }
     }
 
+    const allShareCards = Array.from(document.querySelectorAll('.person-card')).filter(c => c.querySelector('.share-input'));
+    allShareCards.forEach(c => setCardShare(c, '0', false));
+
     const father = document.querySelector('.slot[data-slot="owner_father"] .person-card');
     const mother = document.querySelector('.slot[data-slot="owner_mother"] .person-card');
     const spouse = document.querySelector('.slot[data-slot="spouse"] .person-card');
-
-    const eligibleParents = [father, mother].filter(c => c && isEligible(parseDate(c.dataset.death), ownerDeath));
-    const eligibleSpouse = spouse && isEligible(parseDate(spouse.dataset.death), ownerDeath) ? [spouse] : [];
-
+    const owner = document.querySelector('.slot[data-slot="owner"] .person-card');
     const childCards = Array.from(document.querySelectorAll('.child-card'));
-    const childUnits = [];
+
+    const eligibleParents = [father, mother].filter(c => c && survivesAt(parseDate(c.dataset.death), ownerDeath));
+    const eligibleSpouse = spouse && survivesAt(parseDate(spouse.dataset.death), ownerDeath) ? [spouse] : [];
+
+    function uniqCards(cards) {
+      const seen = new Set();
+      return cards.filter(c => {
+        if (!c || !c.dataset.id || seen.has(c.dataset.id)) return false;
+        seen.add(c.dataset.id);
+        return true;
+      });
+    }
+
+    function collectFallbackRecipients(child, childDeath) {
+      const fallback = [];
+      if (owner && owner.dataset.id !== child.dataset.id && survivesAt(parseDate(owner.dataset.death), childDeath)) {
+        fallback.push(owner);
+      }
+      if (spouse && spouse.dataset.id !== child.dataset.id && survivesAt(parseDate(spouse.dataset.death), childDeath)) {
+        fallback.push(spouse);
+      }
+      if (fallback.length > 0) return uniqCards(fallback);
+
+      const siblingsAlive = childCards.filter(s => s.dataset.id !== child.dataset.id && survivesAt(parseDate(s.dataset.death), childDeath));
+      if (siblingsAlive.length > 0) return uniqCards(siblingsAlive);
+
+      const niecesNephews = [];
+      childCards.filter(s => s.dataset.id !== child.dataset.id && !!parseDate(s.dataset.death)).forEach(sib => {
+        const sibDeath = parseDate(sib.dataset.death);
+        const sgroup = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${sib.dataset.id}"]`);
+        if (!sgroup) return;
+        const heirs = Array.from(sgroup.querySelectorAll('.grand-zone .person-card'));
+        heirs.forEach(h => {
+          if (survivesAt(parseDate(h.dataset.death), sibDeath)) niecesNephews.push(h);
+        });
+      });
+      return uniqCards(niecesNephews);
+    }
+
+    const branchUnits = [];
     childCards.forEach(child => {
-      const d = parseDate(child.dataset.death);
-      if (isEligible(d, ownerDeath)) {
-        childUnits.push({ type: 'child', card: child });
+      const childDeath = parseDate(child.dataset.death);
+      const status = child.dataset.flowStatus || deathFlowStatus(childDeath, ownerDeath);
+      const group = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${child.dataset.id}"]`);
+      const branchSpouse = group ? group.querySelector('.grand-spouse-slot .person-card') : null;
+      const branchHeirs = group ? Array.from(group.querySelectorAll('.grand-zone .person-card')) : [];
+      const eligibleHeirs = branchHeirs.filter(g => survivesAt(parseDate(g.dataset.death), childDeath));
+      const recipients = [];
+
+      if (status === 'alive') {
+        branchUnits.push([child]);
+        return;
+      }
+
+      if (status === 'after') {
+        if (branchSpouse && survivesAt(parseDate(branchSpouse.dataset.death), childDeath)) recipients.push(branchSpouse);
+        recipients.push(...eligibleHeirs);
       } else {
-        const grands = Array.from(child.querySelectorAll('.grand-zone .person-card'));
-        if (grands.length > 0) {
-          childUnits.push({ type: 'grand', grands });
-        } else {
-          setCardShare(child, '0', false);
-        }
+        recipients.push(...eligibleHeirs);
+      }
+
+      const branchRecipients = uniqCards(recipients);
+      if (branchRecipients.length > 0) {
+        branchUnits.push(branchRecipients);
+      } else {
+        const fb = collectFallbackRecipients(child, childDeath);
+        if (fb.length > 0) branchUnits.push(fb);
       }
     });
 
-    const totalUnits = eligibleParents.length + eligibleSpouse.length + childUnits.length;
-    if (!totalUnits || totalUnits <= 0) {
-      eligibleParents.forEach(c => setCardShare(c, '0', false));
-      if (spouse) setCardShare(spouse, '0', false);
-      childCards.forEach(c => setCardShare(c, '0', false));
-      return;
+    const totalUnits = eligibleParents.length + eligibleSpouse.length + branchUnits.length;
+    if (!totalUnits || totalUnits <= 0) return;
+
+    const unit = 100 / totalUnits;
+    const alloc = new Map();
+    function addAlloc(card, amount) {
+      if (!card || !card.dataset.id || amount <= 0) return;
+      const prev = alloc.get(card.dataset.id) || { card, amount: 0 };
+      prev.amount += amount;
+      alloc.set(card.dataset.id, prev);
     }
 
-    const unit = (100 / totalUnits);
-    eligibleParents.forEach(c => setCardShare(c, unit.toFixed(2), true));
-    if (spouse) setCardShare(spouse, eligibleSpouse.length ? unit.toFixed(2) : '0', !!eligibleSpouse.length);
+    eligibleParents.forEach(c => addAlloc(c, unit));
+    eligibleSpouse.forEach(c => addAlloc(c, unit));
+    branchUnits.forEach(unitRecipients => {
+      const each = unit / unitRecipients.length;
+      unitRecipients.forEach(c => addAlloc(c, each));
+    });
 
-    childUnits.forEach(u => {
-      if (u.type === 'child') {
-        setCardShare(u.card, unit.toFixed(2), true);
-      } else if (u.type === 'grand') {
-        const each = (unit / u.grands.length).toFixed(2);
-        u.grands.forEach(g => setCardShare(g, each, true));
-      }
+    alloc.forEach(({ card, amount }) => {
+      setCardShare(card, amount.toFixed(2), true);
     });
   }
 
@@ -744,14 +1015,11 @@
     const holder = document.getElementById('participants-hidden');
     holder.innerHTML = '';
 
-    const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
-    const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
-
     function addParticipant(card, role) {
       if (!card) return;
       const id = card.dataset.id;
       const share = card.querySelector('.share-input')?.value || '0';
-      const receive = card.querySelector('.receive-input')?.checked ? '1' : '0';
+      const receive = Number(share) > 0 ? '1' : (card.querySelector('.receive-input')?.checked ? '1' : '0');
       holder.insertAdjacentHTML('beforeend', `
         <input type="hidden" name="participant_id" value="${id}">
         <input type="hidden" name="participant_role" value="${role}">
@@ -760,26 +1028,26 @@
       `);
     }
 
-    // Cha/mẹ chủ đất
-    const of = document.querySelector('.slot[data-slot="owner_father"] .person-card');
-    const om = document.querySelector('.slot[data-slot="owner_mother"] .person-card');
-    if (of && isEligible(parseDate(of.dataset.death), ownerDeath)) addParticipant(of, 'Cha');
-    if (om && isEligible(parseDate(om.dataset.death), ownerDeath)) addParticipant(om, 'Mẹ');
+    const roleMap = {
+      'Cha': 'Cha',
+      'Mẹ': 'Mẹ',
+      'Vợ/Chồng': 'Vợ/Chồng',
+      'Con': 'Con',
+      'Vo_chong_con': 'Con_dau_re',
+      'Con_dau_re': 'Con_dau_re',
+      'Cháu': 'Cháu'
+    };
 
-    // Vợ/Chồng
-    const sp = document.querySelector('.slot[data-slot="spouse"] .person-card');
-    if (sp && isEligible(parseDate(sp.dataset.death), ownerDeath)) addParticipant(sp, 'Vợ/Chồng');
-
-    // Con và cháu thế vị
-    document.querySelectorAll('.child-card').forEach(child => {
-      const death = parseDate(child.dataset.death);
-      if (isEligible(death, ownerDeath)) {
-        addParticipant(child, 'Con');
-      } else {
-        child.querySelectorAll('.grand-zone .person-card').forEach(gc => {
-          addParticipant(gc, 'Cháu');
-        });
-      }
+    const sent = new Set();
+    Array.from(document.querySelectorAll('.person-card')).forEach(card => {
+      const role = roleMap[card.dataset.role || ''];
+      if (!role) return;
+      const share = Number(card.querySelector('.share-input')?.value || '0');
+      if (share <= 0) return;
+      const key = `${card.dataset.id}:${role}`;
+      if (sent.has(key)) return;
+      sent.add(key);
+      addParticipant(card, role);
     });
   });
 </script>
