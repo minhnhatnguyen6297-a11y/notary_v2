@@ -55,13 +55,15 @@
   .slot.dragover { border-color: #2563eb; background: #eff6ff; }
   .slot .placeholder { font-size: 12px; color: var(--muted); }
 
-  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 140px; min-height: 110px; box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 140px; min-height: 110px; box-shadow: 0 1px 6px rgba(0,0,0,.06); position: relative; }
   .person-card.dragging { opacity: .5; }
   body.is-dragging .slot .person-card,
   body.is-dragging .grand-spouse-slot .person-card { pointer-events: none; }
   .person-card .name { font-weight: 600; color: var(--navy); }
   .person-card .meta { font-size: 11px; color: var(--muted); }
   .card-role { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #1d4ed8; letter-spacing: .4px; margin-bottom: 2px; }
+  .card-remove-btn { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 999px; border: 1px solid #ef4444; background: #fff; color: #ef4444; font-size: 12px; font-weight: 700; line-height: 16px; cursor: pointer; padding: 0; }
+  .card-remove-btn:hover { background: #ef4444; color: #fff; }
 
   .child-list { display: flex; flex-wrap: wrap; gap: 10px; min-height: 80px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 10px; background: #f8fafc; width: 100%; }
   .child-list.dragover { border-color: #2563eb; background: #eff6ff; }
@@ -148,16 +150,16 @@
             </select>
           </div>
           <div class="col-4">
-            <input type="date" class="form-control" id="p-ngay-sinh" placeholder="Ngày sinh *">
+            <input type="text" class="form-control" id="p-ngay-sinh" placeholder="Ngay sinh * (yyyy hoac dd/mm/yyyy)">
           </div>
           <div class="col-4">
-            <input type="date" class="form-control" id="p-ngay-chet" placeholder="Ngày mất">
+            <input type="text" class="form-control" id="p-ngay-chet" placeholder="Ngay mat (yyyy hoac dd/mm/yyyy)">
           </div>
           <div class="col-4">
             <input type="text" class="form-control" id="p-so-giay-to" placeholder="Số giấy tờ *">
           </div>
           <div class="col-4">
-            <input type="date" class="form-control" id="p-ngay-cap" placeholder="Ngày cấp *">
+            <input type="text" class="form-control" id="p-ngay-cap" placeholder="Ngay cap * (yyyy hoac dd/mm/yyyy)">
           </div>
           <div class="col-8">
             <input type="text" class="form-control" id="p-dia-chi" placeholder="Địa chỉ *">
@@ -253,10 +255,10 @@
         <div class="pool-body" id="people-pool">
           {% for c in all_customers %}
           {% if c.id not in participant_ids %}
-          <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-birth="{{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '' }}" data-death="{{ c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '' }}" data-gender="{{ c.gioi_tinh or '' }}">
+          <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-birth="{{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '') }}" data-death="{{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '') }}" data-gender="{{ c.gioi_tinh or '' }}">
             <div class="name">{{ c.ho_ten }}</div>
-            <div class="meta">Sinh: {{ c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '—' }}</div>
-            <div class="meta">Mất: {{ c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '—' }}</div>
+            <div class="meta">Sinh: {{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '—') }}</div>
+            <div class="meta">Mất: {{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '—') }}</div>
           </div>
           {% endif %}
           {% endfor %}
@@ -350,7 +352,7 @@
       doc: "{{ p.customer.so_giay_to|e }}",
       gender: "{{ p.customer.gioi_tinh|default('', true)|e }}",
       death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
-      birth: "{{ p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '' }}",
+      birth: "{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}",
       role: "{{ p.vai_tro|e }}",
       share: "{{ p.ty_le }}",
       receive: "{{ '1' if p.co_nhan_tai_san else '0' }}"
@@ -486,6 +488,7 @@
     card.dataset.death = data.death || '';
     card.dataset.role = role || '';
     card.innerHTML = `
+      <button type="button" class="card-remove-btn" title="Bỏ chọn">×</button>
       <div class="card-role">${roleMap[role] || role || ''}</div>
       <div class="name">${data.name}</div>
       <div class="meta">${data.doc || ''}</div>
@@ -499,8 +502,69 @@
         </div>
       </div>` : ''}
     `;
+    const removeBtn = card.querySelector('.card-remove-btn');
+    if (removeBtn) {
+      removeBtn.addEventListener('mousedown', (ev) => ev.stopPropagation());
+      removeBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        removeCardFromTree(card);
+      });
+    }
     makeDraggable(card);
     return card;
+  }
+
+  function restoreSlotPlaceholder(slotEl) {
+    if (!slotEl || !slotEl.classList.contains('slot')) return;
+    const labelMap = {
+      owner_father: 'Bố chủ đất',
+      owner_mother: 'Mẹ chủ đất',
+      spouse_father: 'Bố vợ/chồng',
+      spouse_mother: 'Mẹ vợ/chồng',
+      owner: 'Kéo chủ đất',
+      spouse: 'Kéo vợ/chồng'
+    };
+    const txt = labelMap[slotEl.dataset.slot] || 'Kéo vào đây';
+    slotEl.innerHTML = `<span class="placeholder">${txt}</span>`;
+  }
+
+  function removeCardFromTree(card) {
+    if (!card) return;
+    const data = extractDataFromElement(card);
+    const parent = card.parentElement;
+    const family = card.closest('.family-unit');
+    const wasChild = card.classList.contains('child-card');
+
+    putBackToPool(card);
+    card.remove();
+
+    if (parent && parent.classList.contains('slot') && !parent.querySelector('.person-card')) {
+      restoreSlotPlaceholder(parent);
+    }
+    if (parent && parent.classList.contains('grand-spouse-slot') && !parent.querySelector('.person-card')) {
+      parent.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+    }
+    if (parent && parent.classList.contains('grand-zone') && !parent.querySelector('.person-card')) {
+      parent.innerHTML = '<span class="placeholder">Kéo người hưởng vào đây</span>';
+    }
+
+    if (wasChild && data.id) {
+      const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${data.id}"]`);
+      if (g) g.remove();
+    }
+    if (family && !family.querySelector('.person-card')) {
+      family.remove();
+    }
+    if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
+      childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
+    }
+    if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
+      grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã mất</div>';
+    }
+
+    updateGrandZones();
+    recalcShares();
   }
 
   function getGrandGroup(childCard, createIfMissing=true) {
@@ -659,25 +723,13 @@
         else flowNote.textContent = '';
       }
 
-      const needGrandBranch = status === 'before' || status === 'same' || status === 'after';
+      const needGrandBranch = true;
       const group = getGrandGroup(child, needGrandBranch);
       if (!group) return;
-      if (needGrandBranch) {
-        group.style.display = '';
-        const spouseSlot = group.querySelector('.grand-spouse-slot');
-        if (spouseSlot) {
-          if (status === 'after') {
-            if (!spouseSlot.querySelector('.person-card')) {
-              spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
-            }
-          } else {
-            const prev = spouseSlot.querySelector('.person-card');
-            if (prev) putBackToPool(prev);
-            spouseSlot.innerHTML = '<span class="placeholder">Không áp dụng (chết trước/cùng ngày chủ đất)</span>';
-          }
-        }
-      } else {
-        group.style.display = 'none';
+      group.style.display = '';
+      const spouseSlot = group.querySelector('.grand-spouse-slot');
+      if (spouseSlot && !spouseSlot.querySelector('.person-card')) {
+        spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
       }
     });
   }

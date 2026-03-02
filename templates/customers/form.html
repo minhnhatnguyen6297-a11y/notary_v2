@@ -53,15 +53,17 @@
 
         <div class="col-md-4">
           <label class="form-label required">Ngày sinh</label>
-          <input type="date" name="ngay_sinh" class="form-control {% if fe.ngay_sinh %}is-invalid{% endif %}"
-                 value="{{ f.get('ngay_sinh','') if f else (obj.ngay_sinh.isoformat() if obj and obj.ngay_sinh else '') }}" required>
+          <input type="text" name="ngay_sinh" class="form-control {% if fe.ngay_sinh %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_sinh','') if f else (obj.ngay_sinh.isoformat() if obj and obj.ngay_sinh else '') }}"
+                 placeholder="yyyy hoac dd/mm/yyyy" required>
           {% if fe.ngay_sinh %}<div class="invalid-feedback">{{ fe.ngay_sinh }}</div>{% endif %}
         </div>
 
         <div class="col-md-4">
           <label class="form-label">Ngày mất <small class="text-muted">(bỏ trống nếu còn sống)</small></label>
-          <input type="date" name="ngay_chet" class="form-control {% if fe.ngay_chet %}is-invalid{% endif %}"
-                 value="{{ f.get('ngay_chet','') if f else (obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '') }}">
+          <input type="text" name="ngay_chet" class="form-control {% if fe.ngay_chet %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_chet','') if f else (obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '') }}"
+                 placeholder="yyyy hoac dd/mm/yyyy">
           {% if fe.ngay_chet %}<div class="invalid-feedback">{{ fe.ngay_chet }}</div>{% endif %}
           <small class="text-muted">Điền vào nếu người này đã qua đời</small>
         </div>
@@ -76,8 +78,9 @@
 
         <div class="col-md-4">
           <label class="form-label required">Ngày cấp giấy tờ</label>
-          <input type="date" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}"
-                 value="{{ f.get('ngay_cap','') if f else (obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '') }}" required>
+          <input type="text" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}"
+                 value="{{ f.get('ngay_cap','') if f else (obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '') }}"
+                 placeholder="yyyy hoac dd/mm/yyyy" required>
           {% if fe.ngay_cap %}<div class="invalid-feedback">{{ fe.ngay_cap }}</div>{% endif %}
         </div>
 

@@ -36,11 +36,11 @@
           </div>
           <div class="info-item">
             <label>Ngày sinh</label>
-            <span>{{ obj.ngay_sinh.strftime('%d/%m/%Y') if obj.ngay_sinh }}</span>
+            <span>{{ obj.ngay_sinh.year if obj.ngay_sinh and obj.ngay_sinh.day == 1 and obj.ngay_sinh.month == 1 else (obj.ngay_sinh.strftime('%d/%m/%Y') if obj.ngay_sinh else '') }}</span>
           </div>
           <div class="info-item">
             <label>Ngày mất</label>
-            <span>{{ obj.ngay_chet.strftime('%d/%m/%Y') if obj.ngay_chet else '—' }}</span>
+            <span>{{ obj.ngay_chet.year if obj.ngay_chet and obj.ngay_chet.day == 1 and obj.ngay_chet.month == 1 else (obj.ngay_chet.strftime('%d/%m/%Y') if obj.ngay_chet else '—') }}</span>
           </div>
           <div class="info-item">
             <label>Số giấy tờ (CCCD / Khai tử)</label>
@@ -48,7 +48,7 @@
           </div>
           <div class="info-item">
             <label>Ngày cấp</label>
-            <span>{{ obj.ngay_cap.strftime('%d/%m/%Y') if obj.ngay_cap }}</span>
+            <span>{{ obj.ngay_cap.year if obj.ngay_cap and obj.ngay_cap.day == 1 and obj.ngay_cap.month == 1 else (obj.ngay_cap.strftime('%d/%m/%Y') if obj.ngay_cap else '') }}</span>
           </div>
           <div class="info-item" style="grid-column: 1 / -1">
             <label>Địa chỉ thường trú</label>

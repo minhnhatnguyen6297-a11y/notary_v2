@@ -1,16 +1,14 @@
-"""
-Module quản lý Người (Customer).
-Bao gồm: CRUD, upload hàng loạt từ Excel, tải file mẫu.
-"""
+"""Customer router: CRUD + Excel import."""
 
 import io
-from fastapi import APIRouter, Depends, Request, Form, HTTPException, UploadFile, File
-from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from typing import Optional
 from datetime import date, datetime
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Customer
@@ -18,25 +16,145 @@ from models import Customer
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-EXCEL_COLUMNS = ["ho_ten","gioi_tinh","ngay_sinh","ngay_chet","so_giay_to","ngay_cap","dia_chi"]
+EXCEL_COLUMNS = ["ho_ten", "gioi_tinh", "ngay_sinh", "ngay_chet", "so_giay_to", "ngay_cap", "dia_chi"]
+DATE_FIELDS = {"ngay_sinh", "ngay_chet", "ngay_cap"}
 
 
-def parse_date(s) -> Optional[date]:
-    if s is None:
+def parse_date(value: Any, allow_year_only: bool = True) -> Optional[date]:
+    if value is None:
         return None
-    if isinstance(s, date):
-        return s
-    if isinstance(s, datetime):
-        return s.date()
-    s = str(s).strip()
-    if not s or s.lower() in ("nan", "none", ""):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            dt = from_excel(value)
+            if isinstance(dt, datetime):
+                return dt.date()
+            if isinstance(dt, date):
+                return dt
+        except Exception:
+            pass
+
+    s = str(value).strip()
+    if not s or s.lower() in ("nan", "none"):
         return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+
+    if allow_year_only and len(s) == 4 and s.isdigit():
+        y = int(s)
+        if 1 <= y <= 9999:
+            return date(y, 1, 1)
+
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
         try:
             return datetime.strptime(s, fmt).date()
         except ValueError:
             pass
     return None
+
+
+def format_date_display(d: Optional[date]) -> str:
+    if not d:
+        return ""
+    if d.day == 1 and d.month == 1:
+        return f"{d.year:04d}"
+    return d.strftime("%d/%m/%Y")
+
+
+def normalize_gender(value: str) -> str:
+    s = (value or "").strip().lower()
+    if not s:
+        return ""
+    if s in ("nam", "male", "m"):
+        return "Nam"
+    if s in ("nu", "n?", "female", "f"):
+        return "N?"
+    return ""
+
+
+def as_input_value(value: Any, is_date: bool = False) -> str:
+    if value is None:
+        return ""
+    if is_date:
+        d = parse_date(value, allow_year_only=True)
+        if d:
+            return format_date_display(d)
+    return str(value).strip()
+
+
+def to_customer_json(c: Customer) -> Dict[str, Any]:
+    return {
+        "id": c.id,
+        "ho_ten": c.ho_ten,
+        "gioi_tinh": c.gioi_tinh,
+        "ngay_sinh": format_date_display(c.ngay_sinh),
+        "ngay_chet": format_date_display(c.ngay_chet),
+        "so_giay_to": c.so_giay_to,
+        "ngay_cap": format_date_display(c.ngay_cap),
+        "dia_chi": c.dia_chi,
+    }
+
+
+def validate_customer_form(form: Dict[str, str], db: Session, current_id: Optional[int] = None, duplicate_as_error: bool = True):
+    field_errors: Dict[str, str] = {}
+
+    required = ["ho_ten", "gioi_tinh", "ngay_sinh", "so_giay_to", "ngay_cap", "dia_chi"]
+    for key in required:
+        if not (form.get(key) or "").strip():
+            field_errors[key] = "Bat buoc"
+
+    gioi_tinh = normalize_gender(form.get("gioi_tinh", ""))
+    if form.get("gioi_tinh") and not gioi_tinh:
+        field_errors["gioi_tinh"] = "Chon Nam hoac Nu"
+
+    ngay_sinh = parse_date(form.get("ngay_sinh"), allow_year_only=True)
+    ngay_chet = parse_date(form.get("ngay_chet"), allow_year_only=True)
+    ngay_cap = parse_date(form.get("ngay_cap"), allow_year_only=True)
+
+    if form.get("ngay_sinh") and ngay_sinh is None:
+        field_errors["ngay_sinh"] = "Ngay khong hop le (yyyy hoac dd/mm/yyyy)"
+    if form.get("ngay_chet") and ngay_chet is None:
+        field_errors["ngay_chet"] = "Ngay khong hop le (yyyy hoac dd/mm/yyyy)"
+    if form.get("ngay_cap") and ngay_cap is None:
+        field_errors["ngay_cap"] = "Ngay khong hop le (yyyy hoac dd/mm/yyyy)"
+
+    so_gt = (form.get("so_giay_to") or "").strip()
+    if so_gt and duplicate_as_error:
+        q = db.query(Customer).filter(Customer.so_giay_to == so_gt)
+        if current_id is not None:
+            q = q.filter(Customer.id != current_id)
+        if q.first():
+            field_errors["so_giay_to"] = "So giay to da ton tai"
+
+    cleaned = {
+        "ho_ten": (form.get("ho_ten") or "").strip(),
+        "gioi_tinh": gioi_tinh,
+        "ngay_sinh": ngay_sinh,
+        "ngay_chet": ngay_chet,
+        "so_giay_to": so_gt,
+        "ngay_cap": ngay_cap,
+        "dia_chi": (form.get("dia_chi") or "").strip(),
+    }
+    return cleaned, field_errors
+
+
+def result_message(field_errors: Dict[str, str]) -> str:
+    order = ["ho_ten", "gioi_tinh", "ngay_sinh", "ngay_chet", "so_giay_to", "ngay_cap", "dia_chi"]
+    labels = {
+        "ho_ten": "Thieu ho ten",
+        "gioi_tinh": "Gioi tinh khong hop le",
+        "ngay_sinh": "Ngay sinh khong hop le",
+        "ngay_chet": "Ngay mat khong hop le",
+        "so_giay_to": "So giay to khong hop le",
+        "ngay_cap": "Ngay cap khong hop le",
+        "dia_chi": "Thieu dia chi",
+    }
+    msg = [labels[k] for k in order if k in field_errors]
+    return " | ".join(msg) if msg else "Du lieu khong hop le"
 
 
 @router.get("/")
@@ -51,67 +169,26 @@ def list_customers(request: Request, db: Session = Depends(get_db), q: str = "")
 @router.get("/download-template")
 def download_template():
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Danh sách người"
+    ws.title = "Danh sach nguoi"
 
-    header_fill = PatternFill("solid", fgColor="0F2443")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    thin = Side(style="thin", color="CCCCCC")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    headers = [
-        ("ho_ten",     "ho_ten\n(Họ và tên - BẮT BUỘC)",                  32),
-        ("gioi_tinh",  "gioi_tinh\n(Nam/Nữ - BẮT BUỘC)",                  18),
-        ("ngay_sinh",  "ngay_sinh\n(Ngày sinh - BẮT BUỘC)\nVD: 01/01/1970", 24),
-        ("ngay_chet",  "ngay_chet\n(Ngày mất)\nĐể trống nếu còn sống",    24),
-        ("so_giay_to", "so_giay_to\n(Số CCCD/Khai tử - BẮT BUỘC)",        26),
-        ("ngay_cap",   "ngay_cap\n(Ngày cấp - BẮT BUỘC)\nVD: 15/03/2021", 24),
-        ("dia_chi",    "dia_chi\n(Địa chỉ thường trú - BẮT BUỘC)",         44),
-    ]
-
-    for col_idx, (field, label, width) in enumerate(headers, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=label)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = border
-        from openpyxl.utils import get_column_letter
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-    ws.row_dimensions[1].height = 52
-
-    ex1 = ["NGUYỄN VĂN A","Nam","01/01/1970","","034056789012","15/03/2021","Xóm 5, Yên Đồng, Ý Yên, Nam Định"]
-    ex2 = ["TRẦN THỊ B","Nữ","20/05/1945","10/01/2023","Giấy khai tử số 001/2023","10/01/2023","Xóm 8, Yên Đồng, Ý Yên, Nam Định"]
-
-    ex_fill = PatternFill("solid", fgColor="EEF3FF")
-    for col_idx, val in enumerate(ex1, start=1):
-        cell = ws.cell(row=2, column=col_idx, value=val)
-        cell.fill = ex_fill
-        cell.border = border
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-    for col_idx, val in enumerate(ex2, start=1):
-        cell = ws.cell(row=3, column=col_idx, value=val)
-        cell.border = border
-        cell.alignment = Alignment(horizontal="left", vertical="center")
-
-    ws.cell(row=5, column=1, value="Lưu ý quan trọng:").font = Font(bold=True, color="CC0000")
-    ws.cell(row=6, column=1, value="1. Các cột BẮT BUỘC không được để trống").font = Font(italic=True, color="666666")
-    ws.cell(row=7, column=1, value="2. Ngày nhập theo định dạng DD/MM/YYYY hoặc YYYY-MM-DD").font = Font(italic=True, color="666666")
-    ws.cell(row=8, column=1, value="3. Số giấy tờ phải duy nhất — nếu trùng hệ thống sẽ bỏ qua dòng đó").font = Font(italic=True, color="666666")
-    ws.cell(row=9, column=1, value="4. Xóa 2 dòng ví dụ (dòng 2, 3) trước khi nhập dữ liệu thật").font = Font(italic=True, color="FF6600")
+    widths = [24, 14, 16, 16, 22, 16, 40]
+    for idx, field in enumerate(EXCEL_COLUMNS, start=1):
+        cell = ws.cell(row=1, column=idx, value=field)
+        cell.font = Font(bold=True)
+        ws.column_dimensions[get_column_letter(idx)].width = widths[idx - 1]
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=mau_nhap_nguoi.xlsx"}
+        headers={"Content-Disposition": "attachment; filename=mau_nhap_nguoi.xlsx"},
     )
 
 
@@ -121,7 +198,7 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
 
     if not file.filename.endswith((".xlsx", ".xls")):
         return templates.TemplateResponse("customers/upload_result.html", {
-            "request": request, "error_global": "Chỉ chấp nhận file .xlsx",
+            "request": request, "error_global": "Chi chap nhan file .xlsx",
             "results": [], "added": 0, "skipped": 0, "errors": 0, "total": 0
         })
 
@@ -130,20 +207,18 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     except Exception as e:
         return templates.TemplateResponse("customers/upload_result.html", {
-            "request": request, "error_global": f"Không thể mở file: {e}",
+            "request": request, "error_global": f"Khong the mo file: {e}",
             "results": [], "added": 0, "skipped": 0, "errors": 0, "total": 0
         })
 
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
-
     if len(rows) < 2:
         return templates.TemplateResponse("customers/upload_result.html", {
-            "request": request, "error_global": "File không có dữ liệu.",
+            "request": request, "error_global": "File khong co du lieu.",
             "results": [], "added": 0, "skipped": 0, "errors": 0, "total": 0
         })
 
-    # Nhận diện cột theo dòng đầu — chấp nhận cả tên cột tiếng Việt lẫn tên field
     raw_headers = [str(h).strip() if h else "" for h in rows[0]]
 
     def find_col(keywords):
@@ -154,92 +229,127 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         return None
 
     col = {
-        "ho_ten":     find_col(["ho_ten", "họ", "tên", "full_name"]),
-        "gioi_tinh":  find_col(["gioi_tinh", "giới", "gender"]),
-        "ngay_sinh":  find_col(["ngay_sinh", "ngày sinh", "sinh", "birth"]),
-        "ngay_chet":  find_col(["ngay_chet", "ngày mất", "mất", "death", "chết"]),
-        "so_giay_to": find_col(["so_giay_to", "cccd", "giấy tờ", "id_number", "khai tử", "so_cccd"]),
-        "ngay_cap":   find_col(["ngay_cap", "ngày cấp", "cấp", "issue"]),
-        "dia_chi":    find_col(["dia_chi", "địa chỉ", "address"]),
+        "ho_ten": find_col(["ho_ten", "h?", "ten", "full_name"]),
+        "gioi_tinh": find_col(["gioi_tinh", "gioi", "gender"]),
+        "ngay_sinh": find_col(["ngay_sinh", "ngay sinh", "birth"]),
+        "ngay_chet": find_col(["ngay_chet", "ngay mat", "death", "chet"]),
+        "so_giay_to": find_col(["so_giay_to", "cccd", "giay to", "id_number", "khai tu"]),
+        "ngay_cap": find_col(["ngay_cap", "ngay cap", "issue"]),
+        "dia_chi": find_col(["dia_chi", "dia chi", "address"]),
     }
 
-    missing = [f for f in ["ho_ten","gioi_tinh","ngay_sinh","so_giay_to","ngay_cap","dia_chi"] if col[f] is None]
+    missing = [f for f in ["ho_ten", "gioi_tinh", "ngay_sinh", "so_giay_to", "ngay_cap", "dia_chi"] if col[f] is None]
     if missing:
         return templates.TemplateResponse("customers/upload_result.html", {
             "request": request,
-            "error_global": f"Không nhận diện được cột: {', '.join(missing)}. Hãy dùng file mẫu.",
+            "error_global": f"Khong nhan dien duoc cot: {', '.join(missing)}",
             "results": [], "added": 0, "skipped": 0, "errors": 0, "total": 0
         })
+
+    def get_raw(row_vals, field):
+        idx = col.get(field)
+        if idx is None or idx >= len(row_vals):
+            return None
+        return row_vals[idx]
 
     results = []
     added = skipped = errors = 0
 
     for row_num, row in enumerate(rows[1:], start=2):
-        def get(field):
-            idx = col.get(field)
-            if idx is None or idx >= len(row):
-                return None
-            v = row[idx]
-            return str(v).strip() if v is not None else None
+        raw_form = {
+            "ho_ten": as_input_value(get_raw(row, "ho_ten")),
+            "gioi_tinh": as_input_value(get_raw(row, "gioi_tinh")),
+            "ngay_sinh": as_input_value(get_raw(row, "ngay_sinh"), is_date=True),
+            "ngay_chet": as_input_value(get_raw(row, "ngay_chet"), is_date=True),
+            "so_giay_to": as_input_value(get_raw(row, "so_giay_to")),
+            "ngay_cap": as_input_value(get_raw(row, "ngay_cap"), is_date=True),
+            "dia_chi": as_input_value(get_raw(row, "dia_chi")),
+        }
 
-        ho_ten = get("ho_ten")
-        so_gt  = get("so_giay_to")
-
-        if not ho_ten and not so_gt:
-            continue  # Dòng trống
-
-        row_errors = []
-        if not ho_ten:       row_errors.append("Thiếu họ tên")
-        if not so_gt:        row_errors.append("Thiếu số giấy tờ")
-        if not get("dia_chi"): row_errors.append("Thiếu địa chỉ")
-
-        ngay_sinh = parse_date(get("ngay_sinh"))
-        ngay_cap  = parse_date(get("ngay_cap"))
-        ngay_chet = parse_date(get("ngay_chet"))
-
-        if not ngay_sinh: row_errors.append("Ngày sinh không hợp lệ")
-        if not ngay_cap:  row_errors.append("Ngày cấp không hợp lệ")
-
-        if row_errors:
-            results.append({"row": row_num, "name": ho_ten or "?", "status": "error", "message": " | ".join(row_errors)})
-            errors += 1
+        if not raw_form["ho_ten"] and not raw_form["so_giay_to"]:
             continue
 
-        # Chuẩn hoá giới tính
-        gt_raw = get("gioi_tinh") or ""
-        gioi_tinh = "Nữ" if "n" in gt_raw.lower() and ("ữ" in gt_raw or "u" in gt_raw.lower()) else "Nam"
-
-        # Kiểm tra trùng
-        if db.query(Customer).filter(Customer.so_giay_to == so_gt).first():
-            results.append({"row": row_num, "name": ho_ten, "status": "skip", "message": f"Số '{so_gt}' đã tồn tại → bỏ qua"})
+        if raw_form["so_giay_to"] and db.query(Customer).filter(Customer.so_giay_to == raw_form["so_giay_to"]).first():
+            results.append({"row": row_num, "name": raw_form["ho_ten"] or "?", "status": "skip", "message": "Trung so giay to, bo qua"})
             skipped += 1
             continue
 
+        cleaned, field_errors = validate_customer_form(raw_form, db, duplicate_as_error=False)
+        if field_errors:
+            results.append({
+                "row": row_num,
+                "name": raw_form["ho_ten"] or "?",
+                "status": "error",
+                "message": result_message(field_errors),
+                "raw": raw_form,
+                "field_errors": field_errors,
+            })
+            errors += 1
+            continue
+
         try:
-            c = Customer(ho_ten=ho_ten.upper(), gioi_tinh=gioi_tinh,
-                         ngay_sinh=ngay_sinh, ngay_chet=ngay_chet,
-                         so_giay_to=so_gt, ngay_cap=ngay_cap, dia_chi=get("dia_chi"))
-            db.add(c); db.commit()
-            results.append({"row": row_num, "name": ho_ten, "status": "ok", "message": "Thêm thành công"})
+            c = Customer(**cleaned)
+            db.add(c)
+            db.commit()
+            results.append({"row": row_num, "name": cleaned["ho_ten"], "status": "ok", "message": "Them thanh cong"})
             added += 1
         except Exception as e:
             db.rollback()
-            results.append({"row": row_num, "name": ho_ten, "status": "error", "message": f"Lỗi: {e}"})
+            results.append({
+                "row": row_num,
+                "name": raw_form["ho_ten"] or "?",
+                "status": "error",
+                "message": f"Loi: {e}",
+                "raw": raw_form,
+                "field_errors": {},
+            })
             errors += 1
 
     return templates.TemplateResponse("customers/upload_result.html", {
-        "request": request, "error_global": None,
-        "results": results, "added": added, "skipped": skipped, "errors": errors,
-        "total": added + skipped + errors
+        "request": request,
+        "error_global": None,
+        "results": results,
+        "added": added,
+        "skipped": skipped,
+        "errors": errors,
+        "total": added + skipped + errors,
     })
+
+
+@router.post("/upload-excel/save-row")
+def upload_excel_save_row(
+    ho_ten: Optional[str] = Form(None),
+    gioi_tinh: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None),
+    ngay_chet: Optional[str] = Form(None),
+    so_giay_to: Optional[str] = Form(None),
+    ngay_cap: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    form = {
+        "ho_ten": (ho_ten or "").strip(),
+        "gioi_tinh": (gioi_tinh or "").strip(),
+        "ngay_sinh": (ngay_sinh or "").strip(),
+        "ngay_chet": (ngay_chet or "").strip(),
+        "so_giay_to": (so_giay_to or "").strip(),
+        "ngay_cap": (ngay_cap or "").strip(),
+        "dia_chi": (dia_chi or "").strip(),
+    }
+    cleaned, field_errors = validate_customer_form(form, db, duplicate_as_error=True)
+    if field_errors:
+        return JSONResponse({"ok": False, "errors": field_errors, "message": result_message(field_errors)}, status_code=400)
+
+    c = Customer(**cleaned)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return JSONResponse({"ok": True, "message": "Da luu thanh cong", "customer": to_customer_json(c)})
 
 
 @router.get("/create")
 def create_form(request: Request):
-    form = {
-        "ho_ten": "", "gioi_tinh": "", "ngay_sinh": "", "ngay_chet": "",
-        "so_giay_to": "", "ngay_cap": "", "dia_chi": ""
-    }
+    form = {k: "" for k in EXCEL_COLUMNS}
     return templates.TemplateResponse("customers/form.html", {
         "request": request, "obj": None, "errors": [], "field_errors": {}, "form": form
     })
@@ -262,52 +372,15 @@ def inline_create(
         "ngay_cap": (ngay_cap or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
     }
-    errors = {}
-    if not form["ho_ten"]:
-        errors["ho_ten"] = "Bat buoc"
-    if form["gioi_tinh"] not in ("Nam", "Nữ"):
-        errors["gioi_tinh"] = "Chon gioi tinh"
-    if not form["ngay_sinh"]:
-        errors["ngay_sinh"] = "Bat buoc"
-    if not form["so_giay_to"]:
-        errors["so_giay_to"] = "Bat buoc"
-    if not form["ngay_cap"]:
-        errors["ngay_cap"] = "Bat buoc"
-    if not form["dia_chi"]:
-        errors["dia_chi"] = "Bat buoc"
-
-    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
-        errors["ngay_sinh"] = "Ngay khong hop le"
-    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
-        errors["ngay_cap"] = "Ngay khong hop le"
-    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
-        errors["ngay_chet"] = "Ngay khong hop le"
-
-    if form["so_giay_to"] and db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"]).first():
-        errors["so_giay_to"] = "So giay to da ton tai"
-
+    cleaned, errors = validate_customer_form(form, db)
     if errors:
         return JSONResponse({"ok": False, "errors": errors}, status_code=400)
 
-    c = Customer(
-        ho_ten=form["ho_ten"], gioi_tinh=form["gioi_tinh"],
-        ngay_sinh=parse_date(form["ngay_sinh"]), ngay_chet=parse_date(form["ngay_chet"]),
-        so_giay_to=form["so_giay_to"], ngay_cap=parse_date(form["ngay_cap"]),
-        dia_chi=form["dia_chi"]
-    )
-    db.add(c); db.commit(); db.refresh(c)
-    return JSONResponse({
-        "ok": True,
-        "customer": {
-            "id": c.id,
-            "ho_ten": c.ho_ten,
-            "gioi_tinh": c.gioi_tinh,
-            "ngay_sinh": c.ngay_sinh.isoformat() if c.ngay_sinh else "",
-            "ngay_chet": c.ngay_chet.isoformat() if c.ngay_chet else "",
-            "so_giay_to": c.so_giay_to,
-            "dia_chi": c.dia_chi,
-        }
-    })
+    c = Customer(**cleaned)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return JSONResponse({"ok": True, "customer": to_customer_json(c)})
 
 
 @router.post("/create")
@@ -328,32 +401,11 @@ def create(
         "ngay_cap": (ngay_cap or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
     }
+
+    cleaned, field_errors = validate_customer_form(form, db)
     errors = []
-    field_errors = {}
-
-    if not form["ho_ten"]:
-        field_errors["ho_ten"] = "Bat buoc"
-    if form["gioi_tinh"] not in ("Nam", "Nữ"):
-        field_errors["gioi_tinh"] = "Chon gioi tinh"
-    if not form["ngay_sinh"]:
-        field_errors["ngay_sinh"] = "Bat buoc"
-    if not form["so_giay_to"]:
-        field_errors["so_giay_to"] = "Bat buoc"
-    if not form["ngay_cap"]:
-        field_errors["ngay_cap"] = "Bat buoc"
-    if not form["dia_chi"]:
-        field_errors["dia_chi"] = "Bat buoc"
-
-    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
-        field_errors["ngay_sinh"] = "Ngay khong hop le"
-    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
-        field_errors["ngay_cap"] = "Ngay khong hop le"
-    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
-        field_errors["ngay_chet"] = "Ngay khong hop le"
-
-    if form["so_giay_to"] and db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"]).first():
-        field_errors["so_giay_to"] = "So giay to da ton tai"
-        errors.append(f"Số giấy tờ '{form['so_giay_to']}' đã tồn tại!")
+    if "so_giay_to" in field_errors:
+        errors.append(f"So giay to '{form['so_giay_to']}' da ton tai")
 
     if field_errors:
         return templates.TemplateResponse("customers/form.html", {
@@ -361,31 +413,32 @@ def create(
             "errors": errors, "field_errors": field_errors, "form": form
         })
 
-    c = Customer(ho_ten=ho_ten.strip(), gioi_tinh=gioi_tinh, ngay_sinh=parse_date(ngay_sinh),
-                 ngay_chet=parse_date(ngay_chet), so_giay_to=so_giay_to.strip(),
-                 ngay_cap=parse_date(ngay_cap), dia_chi=dia_chi.strip())
-    db.add(c); db.commit()
+    c = Customer(**cleaned)
+    db.add(c)
+    db.commit()
     return RedirectResponse("/customers", status_code=302)
 
 
 @router.get("/{cid}")
 def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     c = db.query(Customer).filter(Customer.id == cid).first()
-    if not c: raise HTTPException(404)
+    if not c:
+        raise HTTPException(404)
     return templates.TemplateResponse("customers/detail.html", {"request": request, "obj": c})
 
 
 @router.get("/{cid}/edit")
 def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     c = db.query(Customer).filter(Customer.id == cid).first()
-    if not c: raise HTTPException(404)
+    if not c:
+        raise HTTPException(404)
     form = {
         "ho_ten": c.ho_ten or "",
         "gioi_tinh": c.gioi_tinh or "",
-        "ngay_sinh": c.ngay_sinh.isoformat() if c.ngay_sinh else "",
-        "ngay_chet": c.ngay_chet.isoformat() if c.ngay_chet else "",
+        "ngay_sinh": format_date_display(c.ngay_sinh),
+        "ngay_chet": format_date_display(c.ngay_chet),
         "so_giay_to": c.so_giay_to or "",
-        "ngay_cap": c.ngay_cap.isoformat() if c.ngay_cap else "",
+        "ngay_cap": format_date_display(c.ngay_cap),
         "dia_chi": c.dia_chi or "",
     }
     return templates.TemplateResponse("customers/form.html", {
@@ -403,7 +456,9 @@ def edit(
     db: Session = Depends(get_db)
 ):
     c = db.query(Customer).filter(Customer.id == cid).first()
-    if not c: raise HTTPException(404)
+    if not c:
+        raise HTTPException(404)
+
     form = {
         "ho_ten": (ho_ten or "").strip(),
         "gioi_tinh": (gioi_tinh or "").strip(),
@@ -413,44 +468,24 @@ def edit(
         "ngay_cap": (ngay_cap or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
     }
+
+    cleaned, field_errors = validate_customer_form(form, db, current_id=cid)
     errors = []
-    field_errors = {}
-
-    if not form["ho_ten"]:
-        field_errors["ho_ten"] = "Bat buoc"
-    if form["gioi_tinh"] not in ("Nam", "Nữ"):
-        field_errors["gioi_tinh"] = "Chon gioi tinh"
-    if not form["ngay_sinh"]:
-        field_errors["ngay_sinh"] = "Bat buoc"
-    if not form["so_giay_to"]:
-        field_errors["so_giay_to"] = "Bat buoc"
-    if not form["ngay_cap"]:
-        field_errors["ngay_cap"] = "Bat buoc"
-    if not form["dia_chi"]:
-        field_errors["dia_chi"] = "Bat buoc"
-
-    if form["ngay_sinh"] and parse_date(form["ngay_sinh"]) is None:
-        field_errors["ngay_sinh"] = "Ngay khong hop le"
-    if form["ngay_cap"] and parse_date(form["ngay_cap"]) is None:
-        field_errors["ngay_cap"] = "Ngay khong hop le"
-    if form["ngay_chet"] and parse_date(form["ngay_chet"]) is None:
-        field_errors["ngay_chet"] = "Ngay khong hop le"
-
-    if form["so_giay_to"]:
-        dup = db.query(Customer).filter(Customer.so_giay_to == form["so_giay_to"], Customer.id != cid).first()
-        if dup:
-            field_errors["so_giay_to"] = "So giay to da ton tai"
-            errors.append(f"Số giấy tờ '{form['so_giay_to']}' đã tồn tại!")
+    if "so_giay_to" in field_errors:
+        errors.append(f"So giay to '{form['so_giay_to']}' da ton tai")
 
     if field_errors:
         return templates.TemplateResponse("customers/form.html", {
-            "request": request, "obj": c, "errors": errors,
-            "field_errors": field_errors, "form": form
+            "request": request, "obj": c, "errors": errors, "field_errors": field_errors, "form": form
         })
-    c.ho_ten = ho_ten.strip(); c.gioi_tinh = gioi_tinh
-    c.ngay_sinh = parse_date(ngay_sinh); c.ngay_chet = parse_date(ngay_chet)
-    c.so_giay_to = so_giay_to.strip(); c.ngay_cap = parse_date(ngay_cap)
-    c.dia_chi = dia_chi.strip()
+
+    c.ho_ten = cleaned["ho_ten"]
+    c.gioi_tinh = cleaned["gioi_tinh"]
+    c.ngay_sinh = cleaned["ngay_sinh"]
+    c.ngay_chet = cleaned["ngay_chet"]
+    c.so_giay_to = cleaned["so_giay_to"]
+    c.ngay_cap = cleaned["ngay_cap"]
+    c.dia_chi = cleaned["dia_chi"]
     db.commit()
     return RedirectResponse(f"/customers/{cid}", status_code=302)
 
@@ -458,5 +493,7 @@ def edit(
 @router.post("/{cid}/delete")
 def delete(cid: int, db: Session = Depends(get_db)):
     c = db.query(Customer).filter(Customer.id == cid).first()
-    if c: db.delete(c); db.commit()
+    if c:
+        db.delete(c)
+        db.commit()
     return RedirectResponse("/customers", status_code=302)
