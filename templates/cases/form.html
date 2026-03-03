@@ -55,13 +55,12 @@
   .slot.dragover { border-color: #2563eb; background: #eff6ff; }
   .slot .placeholder { font-size: 12px; color: var(--muted); }
 
-  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 140px; min-height: 110px; box-shadow: 0 1px 6px rgba(0,0,0,.06); position: relative; }
+  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 240px; height: 150px; box-shadow: 0 1px 6px rgba(0,0,0,.06); position: relative; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-start; }
   .person-card.dragging { opacity: .5; }
   body.is-dragging .slot .person-card,
   body.is-dragging .grand-spouse-slot .person-card { pointer-events: none; }
-  .person-card .name { font-weight: 600; color: var(--navy); }
-  .person-card .meta { font-size: 11px; color: var(--muted); }
-  .card-role { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #1d4ed8; letter-spacing: .4px; margin-bottom: 2px; }
+  .person-card .name { font-weight: 700; color: var(--navy); line-height: 1.2; min-height: 34px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .person-card .meta { font-size: 12px; color: var(--muted); }
   .card-remove-btn { position: absolute; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 999px; border: 1px solid #ef4444; background: #fff; color: #ef4444; font-size: 12px; font-weight: 700; line-height: 16px; cursor: pointer; padding: 0; }
   .card-remove-btn:hover { background: #ef4444; color: #fff; }
 
@@ -80,14 +79,14 @@
   .grand-group { border: 1px solid #bfdbfe; border-radius: 12px; padding: 8px; background: #eff6ff; min-width: 420px; }
   .grand-group .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
   .grand-head { display: flex; align-items: flex-start; gap: 8px; }
-  .grand-spouse-wrap { width: 150px; }
+  .grand-spouse-wrap { width: 240px; }
   .grand-spouse-wrap .slabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
   .grand-spouse-slot { border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 108px; background: #fff; display: flex; align-items: center; justify-content: center; text-align: center; }
   .grand-spouse-slot .placeholder { font-size: 11px; color: var(--muted); }
   .grand-spouse-slot.dragover { border-color: #2563eb; background: #eff6ff; }
   .grand-heirs-wrap { flex: 1; min-width: 220px; }
   .grand-heirs-wrap .hlabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
-  .grand-zone { margin-top: 0; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 108px; background: #f8fafc; display: flex; flex-wrap: wrap; gap: 8px; }
+  .grand-zone { margin-top: 0; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 152px; background: #f8fafc; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; }
   .grand-zone .placeholder { font-size: 11px; color: var(--muted); }
   .grand-zone.dragover { border-color: #2563eb; background: #eff6ff; }
 
@@ -433,7 +432,12 @@
     });
     grandchildrenZone.querySelectorAll('.grand-group').forEach(g => {
       const parentId = g.dataset.parentId;
-      if (!document.querySelector(`.child-card[data-id="${parentId}"]`)) g.remove();
+      if (!document.querySelector(`.child-card[data-id="${parentId}"]`)) {
+        g.querySelectorAll('.person-card').forEach(c => {
+          if (c.dataset.id !== id) putBackToPool(c);
+        });
+        g.remove();
+      }
     });
     if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
       grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã mất</div>';
@@ -445,7 +449,9 @@
     const data = extractDataFromElement(cardEl);
     if (!data.id) return;
     if (document.querySelector(`.person-row[data-id="${data.id}"]`)) return;
-    if (document.querySelector(`.person-card[data-id="${data.id}"]`)) return;
+    const stillUsedElsewhere = Array.from(document.querySelectorAll(`.person-card[data-id="${data.id}"]`))
+      .some(n => n !== cardEl);
+    if (stillUsedElsewhere) return;
     const row = document.createElement('div');
     row.className = 'person-row';
     row.setAttribute('draggable', 'true');
@@ -465,18 +471,6 @@
   }
 
   function buildPersonCard(data, role, withShare=true, shareVal='0', receiveVal='1') {
-    const roleMap = {
-      'Owner': 'Chủ đất',
-      'Cha': 'Cha',
-      'Mẹ': 'Mẹ',
-      'Cha_vc': 'Cha vợ/chồng',
-      'Me_vc': 'Mẹ vợ/chồng',
-      'Vợ/Chồng': 'Vợ/Chồng',
-      'Con': 'Con đẻ',
-      'Con_dau_re': 'Con dâu/rể',
-      'Vo_chong_con': 'Vợ/Chồng của con',
-      'Cháu': 'Cháu'
-    };
     const card = document.createElement('div');
     card.className = 'person-card';
     card.setAttribute('draggable', 'true');
@@ -489,13 +483,12 @@
     card.dataset.role = role || '';
     card.innerHTML = `
       <button type="button" class="card-remove-btn" title="Bỏ chọn">×</button>
-      <div class="card-role">${roleMap[role] || role || ''}</div>
       <div class="name">${data.name}</div>
-      <div class="meta">${data.doc || ''}</div>
-      <div class="meta">${data.birth ? 'Sinh: ' + data.birth : ''}${data.death ? (data.birth ? ' • ' : '') + 'Mất: ' + data.death : ''}</div>
+      <div class="meta">${data.birth ? 'Sinh: ' + data.birth : 'Sinh: —'}</div>
+      <div class="meta">${data.death ? 'Mất: ' + data.death : 'Mất: —'}</div>
       ${withShare ? `
       <div class="mt-1">
-        <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.01" placeholder="Tỷ lệ %">
+        <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.01" readonly disabled>
         <div class="form-check mt-1">
           <input class="form-check-input receive-input" type="checkbox" ${receiveVal === '1' ? 'checked' : ''} ${data.death ? 'disabled' : ''}>
           <label class="form-check-label">Nhận</label>
@@ -536,8 +529,8 @@
     const family = card.closest('.family-unit');
     const wasChild = card.classList.contains('child-card');
 
-    putBackToPool(card);
     card.remove();
+    putBackToPool(card);
 
     if (parent && parent.classList.contains('slot') && !parent.querySelector('.person-card')) {
       restoreSlotPlaceholder(parent);
@@ -551,7 +544,13 @@
 
     if (wasChild && data.id) {
       const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${data.id}"]`);
-      if (g) g.remove();
+      if (g) {
+        g.querySelectorAll('.person-card').forEach(c => {
+          c.remove();
+          putBackToPool(c);
+        });
+        g.remove();
+      }
     }
     if (family && !family.querySelector('.person-card')) {
       family.remove();
@@ -611,9 +610,7 @@
         const prev = spouseSlot.querySelector('.person-card');
         if (prev) putBackToPool(prev);
         spouseSlot.innerHTML = '';
-        const spouseRole = sdata.gender === 'Nam' ? 'Chồng' : (sdata.gender === 'Nữ' ? 'Vợ' : 'Vợ/Chồng');
         const sp = buildPersonCard(sdata, 'Vo_chong_con', true);
-        sp.querySelector('.card-role').textContent = `${spouseRole} của con`;
         spouseSlot.appendChild(sp);
         recalcShares();
       });
@@ -624,6 +621,7 @@
         ev.preventDefault();
         zone.classList.remove('dragover');
         if (!dragged) return;
+        if (dragged.classList.contains('child-card')) return;
         const gdata = extractDataFromElement(dragged);
         removeExisting(gdata.id);
         if (zone.querySelector('.placeholder')) zone.innerHTML = '';
@@ -737,6 +735,11 @@
   const ownerInput = document.getElementById('case-nguoi-chet');
 
   document.addEventListener('drop', () => { updateGrandZones(); recalcShares(); });
+  document.addEventListener('change', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('receive-input')) {
+      recalcShares();
+    }
+  });
 
   function setOwnerFromSelect() {
     if (!ownerInput || !ownerInput.value) return;
@@ -812,9 +815,7 @@
       const prev = targetSlot.querySelector('.person-card');
       if (prev) putBackToPool(prev);
       targetSlot.innerHTML = '';
-      const spouseRole = data.gender === 'Nam' ? 'Chồng' : (data.gender === 'Nữ' ? 'Vợ' : 'Vợ/Chồng');
       const sp = buildPersonCard(data, 'Vo_chong_con', true);
-      sp.querySelector('.card-role').textContent = `${spouseRole} của con`;
       targetSlot.appendChild(sp);
     });
 
@@ -946,20 +947,27 @@
     const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
     const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
 
-    function setCardShare(card, val, receive) {
+    function setCardShare(card, val) {
       if (!card) return;
       const share = card.querySelector('.share-input');
       const recv = card.querySelector('.receive-input');
       if (share) share.value = val;
       if (recv) {
         const isDead = !!card.dataset.death;
-        recv.checked = isDead ? false : receive;
+        if (isDead) recv.checked = false;
         if (isDead) recv.disabled = true;
       }
     }
 
+    function isOptedIn(card) {
+      if (!card) return false;
+      if (!!card.dataset.death) return false;
+      const recv = card.querySelector('.receive-input');
+      return !!recv && recv.checked;
+    }
+
     const allShareCards = Array.from(document.querySelectorAll('.person-card')).filter(c => c.querySelector('.share-input'));
-    allShareCards.forEach(c => setCardShare(c, '0', false));
+    allShareCards.forEach(c => setCardShare(c, '0'));
 
     const father = document.querySelector('.slot[data-slot="owner_father"] .person-card');
     const mother = document.querySelector('.slot[data-slot="owner_mother"] .person-card');
@@ -967,8 +975,8 @@
     const owner = document.querySelector('.slot[data-slot="owner"] .person-card');
     const childCards = Array.from(document.querySelectorAll('.child-card'));
 
-    const eligibleParents = [father, mother].filter(c => c && survivesAt(parseDate(c.dataset.death), ownerDeath));
-    const eligibleSpouse = spouse && survivesAt(parseDate(spouse.dataset.death), ownerDeath) ? [spouse] : [];
+    const eligibleParents = [father, mother].filter(c => c && survivesAt(parseDate(c.dataset.death), ownerDeath) && isOptedIn(c));
+    const eligibleSpouse = spouse && survivesAt(parseDate(spouse.dataset.death), ownerDeath) && isOptedIn(spouse) ? [spouse] : [];
 
     function uniqCards(cards) {
       const seen = new Set();
@@ -981,15 +989,15 @@
 
     function collectFallbackRecipients(child, childDeath) {
       const fallback = [];
-      if (owner && owner.dataset.id !== child.dataset.id && survivesAt(parseDate(owner.dataset.death), childDeath)) {
+      if (owner && owner.dataset.id !== child.dataset.id && survivesAt(parseDate(owner.dataset.death), childDeath) && isOptedIn(owner)) {
         fallback.push(owner);
       }
-      if (spouse && spouse.dataset.id !== child.dataset.id && survivesAt(parseDate(spouse.dataset.death), childDeath)) {
+      if (spouse && spouse.dataset.id !== child.dataset.id && survivesAt(parseDate(spouse.dataset.death), childDeath) && isOptedIn(spouse)) {
         fallback.push(spouse);
       }
       if (fallback.length > 0) return uniqCards(fallback);
 
-      const siblingsAlive = childCards.filter(s => s.dataset.id !== child.dataset.id && survivesAt(parseDate(s.dataset.death), childDeath));
+      const siblingsAlive = childCards.filter(s => s.dataset.id !== child.dataset.id && survivesAt(parseDate(s.dataset.death), childDeath) && isOptedIn(s));
       if (siblingsAlive.length > 0) return uniqCards(siblingsAlive);
 
       const niecesNephews = [];
@@ -999,7 +1007,7 @@
         if (!sgroup) return;
         const heirs = Array.from(sgroup.querySelectorAll('.grand-zone .person-card'));
         heirs.forEach(h => {
-          if (survivesAt(parseDate(h.dataset.death), sibDeath)) niecesNephews.push(h);
+          if (survivesAt(parseDate(h.dataset.death), sibDeath) && isOptedIn(h)) niecesNephews.push(h);
         });
       });
       return uniqCards(niecesNephews);
@@ -1012,16 +1020,16 @@
       const group = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${child.dataset.id}"]`);
       const branchSpouse = group ? group.querySelector('.grand-spouse-slot .person-card') : null;
       const branchHeirs = group ? Array.from(group.querySelectorAll('.grand-zone .person-card')) : [];
-      const eligibleHeirs = branchHeirs.filter(g => survivesAt(parseDate(g.dataset.death), childDeath));
+      const eligibleHeirs = branchHeirs.filter(g => survivesAt(parseDate(g.dataset.death), childDeath) && isOptedIn(g));
       const recipients = [];
 
       if (status === 'alive') {
-        branchUnits.push([child]);
+        if (isOptedIn(child)) branchUnits.push([child]);
         return;
       }
 
       if (status === 'after') {
-        if (branchSpouse && survivesAt(parseDate(branchSpouse.dataset.death), childDeath)) recipients.push(branchSpouse);
+        if (branchSpouse && survivesAt(parseDate(branchSpouse.dataset.death), childDeath) && isOptedIn(branchSpouse)) recipients.push(branchSpouse);
         recipients.push(...eligibleHeirs);
       } else {
         recipients.push(...eligibleHeirs);
@@ -1056,7 +1064,7 @@
     });
 
     alloc.forEach(({ card, amount }) => {
-      setCardShare(card, amount.toFixed(2), true);
+      setCardShare(card, amount.toFixed(2));
     });
   }
 
