@@ -8,6 +8,7 @@ import io
 from pathlib import Path
 import re
 import unicodedata
+from types import SimpleNamespace
 
 from database import get_db
 from models import InheritanceCase, Customer, Property, InheritanceParticipant
@@ -23,6 +24,54 @@ def _hang_for_role(role: str) -> int:
     if role in ("Ã”ng/BÃ ", "Anh/Chá»‹/Em"):
         return 2
     return 1
+
+
+def _to_list(v):
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return v
+    return [v]
+
+
+def _build_temp_participants(
+    all_customers: List[Customer],
+    participant_id: Optional[Union[List[str], str]],
+    participant_role: Optional[Union[List[str], str]],
+    participant_share: Optional[Union[List[str], str]],
+    participant_receive: Optional[Union[List[str], str]],
+):
+    id_list = _to_list(participant_id)
+    role_list = _to_list(participant_role)
+    share_list = _to_list(participant_share)
+    receive_list = _to_list(participant_receive)
+    customers_by_id = {str(c.id): c for c in all_customers}
+    participants = []
+
+    for idx, cid in enumerate(id_list):
+        cid_str = str(cid or "").strip()
+        if not cid_str:
+            continue
+        customer = customers_by_id.get(cid_str)
+        if not customer:
+            continue
+        role = (role_list[idx] if idx < len(role_list) else "") or "Khac"
+        share_raw = share_list[idx] if idx < len(share_list) else "0"
+        receive_raw = receive_list[idx] if idx < len(receive_list) else "1"
+        try:
+            share_val = float(share_raw)
+        except Exception:
+            share_val = 0.0
+        co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+        participants.append(SimpleNamespace(
+            customer_id=customer.id,
+            customer=customer,
+            vai_tro=role,
+            ty_le=share_val,
+            co_nhan_tai_san=co_nhan
+        ))
+    participant_ids = {p.customer_id for p in participants}
+    return participants, participant_ids
 
 
 @router.get("/")
@@ -66,12 +115,6 @@ def create(
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
-    def _to_list(v):
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        return [v]
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
@@ -96,13 +139,18 @@ def create(
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    posted_participants, posted_participant_ids = _build_temp_participants(
+        all_customers, participant_id, participant_role, participant_share, participant_receive
+    )
 
     if field_errors:
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": None,
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers, "participants": [], "participant_ids": set()
+            "all_customers": all_customers,
+            "participants": posted_participants,
+            "participant_ids": posted_participant_ids
         })
 
     try:
@@ -145,7 +193,9 @@ def create(
             "request": request, "obj": None,
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers, "participants": [], "participant_ids": set()
+            "all_customers": all_customers,
+            "participants": posted_participants,
+            "participant_ids": posted_participant_ids
         })
 
 
@@ -200,12 +250,6 @@ def edit(
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
-    def _to_list(v):
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        return [v]
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if not case or case.is_locked: raise HTTPException(400)
     form = {
@@ -232,14 +276,17 @@ def edit(
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
+    posted_participants, posted_participant_ids = _build_temp_participants(
+        all_customers, participant_id, participant_role, participant_share, participant_receive
+    )
     if field_errors:
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": case,
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
-            "participants": case.participants,
-            "participant_ids": {p.customer_id for p in case.participants}
+            "participants": posted_participants,
+            "participant_ids": posted_participant_ids
         })
 
     try:
@@ -283,8 +330,8 @@ def edit(
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
-            "participants": case.participants,
-            "participant_ids": {p.customer_id for p in case.participants}
+            "participants": posted_participants,
+            "participant_ids": posted_participant_ids
         })
 
 

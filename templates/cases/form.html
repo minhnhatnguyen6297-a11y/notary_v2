@@ -19,7 +19,7 @@
   Nhập người và tài sản ngay trên hồ sơ. Dữ liệu vẫn được lưu vào danh mục chung.
 </div>
 
-<form method="post" action="{{ action }}">
+<form method="post" action="{{ action }}" id="case-form">
 <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
 <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
 <style>
@@ -1321,7 +1321,8 @@
     validateTreeWarnings();
   }
 
-  document.getElementById('btn-submit-case')?.addEventListener('click', () => {
+  document.getElementById('case-form')?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
     const warns = validateTreeWarnings();
     if (warns.length > 0) {
       const ok = window.confirm(`Hồ sơ đang có ${warns.length} cảnh báo đỏ. Bạn vẫn muốn lưu?`);
@@ -1367,6 +1368,7 @@
       sent.add(key);
       addParticipant(card, role);
     });
+    ev.target.submit();
   });
 </script>
 {% endblock %}
