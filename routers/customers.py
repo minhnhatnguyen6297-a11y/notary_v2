@@ -148,7 +148,7 @@ def result_message(field_errors: Dict[str, str]) -> str:
         "ho_ten": "Thieu ho ten",
         "gioi_tinh": "Gioi tinh khong hop le",
         "ngay_sinh": "Ngay sinh khong hop le",
-        "ngay_chet": "Ngay mat khong hop le",
+        "ngay_chet": "Ngay chet khong hop le",
         "so_giay_to": "So giay to khong hop le",
         "ngay_cap": "Ngay cap khong hop le",
         "dia_chi": "Thieu dia chi",

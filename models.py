@@ -5,7 +5,7 @@ from database import Base
 
 
 class Customer(Base):
-    """Bảng lưu thông tin người (sống hoặc đã mất)."""
+    """Bảng lưu thông tin người (sống hoặc đã chết)."""
     __tablename__ = "customers"
 
     id           = Column(Integer, primary_key=True, index=True)
@@ -25,6 +25,27 @@ class Customer(Base):
     @property
     def con_song(self):
         return self.ngay_chet is None
+
+    @property
+    def _moc_cccd_moi(self):
+        """01/07/2024 — ngưỡng phân biệt CCCD cũ/mới."""
+        from datetime import date
+        return self.ngay_cap and self.ngay_cap >= date(2024, 7, 1)
+
+    @property
+    def loai_giay_to(self):
+        """Căn cước công dân (trước 01/07/2024) hoặc Căn cước (từ 01/07/2024)."""
+        return "Căn cước" if self._moc_cccd_moi else "Căn cước công dân"
+
+    @property
+    def noi_cap(self):
+        """Bộ Công an (từ 01/07/2024) hoặc Cục CSQLHC về TTXH (trước đó)."""
+        return "Bộ Công an" if self._moc_cccd_moi else "Cục cảnh sát quản lý hành chính về trật tự xã hội"
+
+    @property
+    def loai_dia_chi(self):
+        """'Cư trú tại' (từ 01/07/2024) hoặc 'Thường trú tại' (trước đó)."""
+        return "Cư trú tại" if self._moc_cccd_moi else "Thường trú tại"
 
 
 class Property(Base):

@@ -11,7 +11,7 @@
 <div class="card mb-3">
   <div class="card-body py-3">
     <form method="get" class="d-flex gap-2">
-      <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="🔍  Tìm theo tên người mất...">
+      <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="🔍  Tìm theo tên người chết...">
       <button class="btn btn-primary px-4">Tìm</button>
       {% if q %}<a href="/cases" class="btn btn-outline-secondary">Xoá bộ lọc</a>{% endif %}
     </form>
@@ -44,7 +44,7 @@
               <a href="/cases/{{ c.id }}" class="fw-bold text-decoration-none" style="color:var(--navy)">
                 {{ c.nguoi_chet.ho_ten }}
               </a>
-              <div style="font-size:11px; color:var(--muted)">Mất: {{ c.nguoi_chet.ngay_chet.year if c.nguoi_chet.ngay_chet and c.nguoi_chet.ngay_chet.day == 1 and c.nguoi_chet.ngay_chet.month == 1 else (c.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if c.nguoi_chet.ngay_chet else '') }}</div>
+              <div style="font-size:11px; color:var(--muted)">Chết: {{ c.nguoi_chet.ngay_chet.year if c.nguoi_chet.ngay_chet and c.nguoi_chet.ngay_chet.day == 1 and c.nguoi_chet.ngay_chet.month == 1 else (c.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if c.nguoi_chet.ngay_chet else '') }}</div>
             </td>
             <td><code style="font-size:12px">{{ c.tai_san.so_serial }}</code><div style="font-size:11px; color:var(--muted)">Thửa {{ c.tai_san.so_thua_dat }}</div></td>
             <td>

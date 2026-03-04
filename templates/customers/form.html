@@ -60,7 +60,7 @@
         </div>
 
         <div class="col-md-4">
-          <label class="form-label">Ngày mất <small class="text-muted">(bỏ trống nếu còn sống)</small></label>
+          <label class="form-label">Ngày chết <small class="text-muted">(bỏ trống nếu còn sống)</small></label>
           <input type="text" name="ngay_chet" class="form-control {% if fe.ngay_chet %}is-invalid{% endif %}"
                  value="{{ f.get('ngay_chet','') if f else (obj.ngay_chet.isoformat() if obj and obj.ngay_chet else '') }}"
                  placeholder="yyyy hoac dd/mm/yyyy">
@@ -107,7 +107,7 @@
 {% if not obj %}
 <div class="alert alert-info mt-3" style="font-size:13px">
   <i class="bi bi-lightbulb me-2"></i>
-  <strong>Lưu ý:</strong> Nhập <strong>từng người một</strong> — kể cả người đã mất.
+  <strong>Lưu ý:</strong> Nhập <strong>từng người một</strong> — kể cả người đã chết.
   Sau đó vào <strong>Hồ sơ thừa kế</strong> để ghép họ lại trong một hồ sơ.
 </div>
 {% endif %}

@@ -21,7 +21,7 @@
         {% if obj.con_song %}
           <span class="badge badge-alive ms-2 rounded-pill">Còn sống</span>
         {% else %}
-          <span class="badge badge-dead ms-2 rounded-pill">Đã mất</span>
+          <span class="badge badge-dead ms-2 rounded-pill">Đã chết</span>
         {% endif %}
       </div>
       <div class="card-body">
@@ -39,7 +39,7 @@
             <span>{{ obj.ngay_sinh.year if obj.ngay_sinh and obj.ngay_sinh.day == 1 and obj.ngay_sinh.month == 1 else (obj.ngay_sinh.strftime('%d/%m/%Y') if obj.ngay_sinh else '') }}</span>
           </div>
           <div class="info-item">
-            <label>Ngày mất</label>
+            <label>Ngày chết</label>
             <span>{{ obj.ngay_chet.year if obj.ngay_chet and obj.ngay_chet.day == 1 and obj.ngay_chet.month == 1 else (obj.ngay_chet.strftime('%d/%m/%Y') if obj.ngay_chet else '—') }}</span>
           </div>
           <div class="info-item">

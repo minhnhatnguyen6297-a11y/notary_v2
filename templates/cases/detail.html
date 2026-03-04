@@ -45,7 +45,7 @@
         <div class="fw-bold fs-6" style="color:var(--navy)">{{ case.nguoi_chet.ho_ten }}</div>
         <div class="text-muted mt-1" style="font-size:13px">
           <div><i class="bi bi-calendar3 me-1"></i>Sinh: {{ case.nguoi_chet.ngay_sinh.year if case.nguoi_chet.ngay_sinh and case.nguoi_chet.ngay_sinh.day == 1 and case.nguoi_chet.ngay_sinh.month == 1 else (case.nguoi_chet.ngay_sinh.strftime('%d/%m/%Y') if case.nguoi_chet.ngay_sinh else '') }}</div>
-          <div><i class="bi bi-calendar-x me-1"></i>Mất: {{ case.nguoi_chet.ngay_chet.year if case.nguoi_chet.ngay_chet and case.nguoi_chet.ngay_chet.day == 1 and case.nguoi_chet.ngay_chet.month == 1 else (case.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if case.nguoi_chet.ngay_chet else '') }}</div>
+          <div><i class="bi bi-calendar-x me-1"></i>Chết: {{ case.nguoi_chet.ngay_chet.year if case.nguoi_chet.ngay_chet and case.nguoi_chet.ngay_chet.day == 1 and case.nguoi_chet.ngay_chet.month == 1 else (case.nguoi_chet.ngay_chet.strftime('%d/%m/%Y') if case.nguoi_chet.ngay_chet else '') }}</div>
           <div><i class="bi bi-card-text me-1"></i>GT: {{ case.nguoi_chet.so_giay_to }}</div>
           <div><i class="bi bi-geo-alt me-1"></i>{{ case.nguoi_chet.dia_chi }}</div>
         </div>
@@ -151,7 +151,7 @@
               {% if p.customer.con_song %}
                 <span class="badge badge-alive rounded-pill">Còn sống</span>
               {% else %}
-                <span class="badge badge-dead rounded-pill">Đã mất</span>
+                <span class="badge badge-dead rounded-pill">Đã chết</span>
               {% endif %}
             </td>
             <td class="text-center">
@@ -212,7 +212,7 @@
             <option value="">-- Chọn người --</option>
             {% for c in available %}
             <option value="{{ c.id }}">
-              {{ c.ho_ten }} {% if not c.con_song %}(đã mất){% endif %}
+              {{ c.ho_ten }} {% if not c.con_song %}(đã chết){% endif %}
             </option>
             {% endfor %}
           </select>

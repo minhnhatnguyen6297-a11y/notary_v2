@@ -30,11 +30,11 @@ Quay lại cửa sổ CMD → nhấn Ctrl + C
 Quy trình làm hồ sơ thừa kế
 1. Nhập người (menu Danh sách người)
 → Thêm từng người từ CCCD hoặc giấy khai tử
-→ Người đã mất thì điền thêm Ngày mất
+→ Người đã chết thì điền thêm Ngày chết
 2. Nhập tài sản (menu Tài sản / Sổ đỏ)
 → Nhập thông tin từ sổ đỏ / GCN quyền sử dụng đất
 3. Tạo hồ sơ (menu Hồ sơ thừa kế)
-→ Chọn người mất + tài sản + loại văn bản
+→ Chọn người chết + tài sản + loại văn bản
 → Thêm người thừa kế, nhập tỷ lệ % từng người
 4. Xuất Word
 → Nhấn Khoá hồ sơ → nhấn Xuất Word → file .docx tải về máy

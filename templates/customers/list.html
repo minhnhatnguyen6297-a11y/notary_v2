@@ -49,7 +49,7 @@
               <div class="col-6"><code style="font-size:11px">ho_ten</code> — Họ và tên *</div>
               <div class="col-6"><code style="font-size:11px">gioi_tinh</code> — Nam/Nữ *</div>
               <div class="col-6"><code style="font-size:11px">ngay_sinh</code> — Ngày sinh *</div>
-              <div class="col-6"><code style="font-size:11px">ngay_chet</code> — Ngày mất (để trống nếu còn sống)</div>
+              <div class="col-6"><code style="font-size:11px">ngay_chet</code> — Ngày chết (để trống nếu còn sống)</div>
               <div class="col-6"><code style="font-size:11px">so_giay_to</code> — Số CCCD *</div>
               <div class="col-6"><code style="font-size:11px">ngay_cap</code> — Ngày cấp *</div>
               <div class="col-12"><code style="font-size:11px">dia_chi</code> — Địa chỉ thường trú *</div>
@@ -121,7 +121,7 @@
               {% if c.con_song %}
                 <span class="badge badge-alive rounded-pill px-2 py-1"><i class="bi bi-circle-fill me-1" style="font-size:8px"></i>Còn sống</span>
               {% else %}
-                <span class="badge badge-dead rounded-pill px-2 py-1"><i class="bi bi-x-circle-fill me-1" style="font-size:8px"></i>Đã mất ({{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else c.ngay_chet.strftime('%d/%m/%Y') }})</span>
+                <span class="badge badge-dead rounded-pill px-2 py-1"><i class="bi bi-x-circle-fill me-1" style="font-size:8px"></i>Đã chết ({{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else c.ngay_chet.strftime('%d/%m/%Y') }})</span>
               {% endif %}
             </td>
             <td style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ c.dia_chi }}">
