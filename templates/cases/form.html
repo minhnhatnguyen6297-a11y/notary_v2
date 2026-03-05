@@ -620,13 +620,14 @@
     }
   }
 
-  function putDataBackToPool(data, force=false) {
+  function putDataBackToPool(data, force=false, originalCard=null) {
     if (!data || !pool) return;
     if (!data.id) return;
     if (document.querySelector(`.person-row[data-id="${data.id}"]`)) return;
     if (!force) {
+      // Chỉ put back nếu không còn card nào khác dùng cùng id trong tree
       const stillUsedElsewhere = Array.from(document.querySelectorAll(`.person-card[data-id="${data.id}"]`))
-        .some(n => n !== cardEl);
+        .some(n => n !== originalCard);
       if (stillUsedElsewhere) return;
     }
     const row = document.createElement('div');
@@ -650,7 +651,7 @@
   function putBackToPool(cardEl, force=false) {
     if (!cardEl) return;
     const data = extractDataFromElement(cardEl);
-    putDataBackToPool(data, force);
+    putDataBackToPool(data, force, cardEl);
   }
 
   function buildPersonCard(data, role, withShare=true, shareVal='0', receiveVal='1') {
@@ -1014,19 +1015,38 @@
 
     existingParticipants.forEach(p => {
       const data = { id: p.id, name: p.name, doc: p.doc, gender: p.gender || '', birth: p.birth || '', death: p.death };
-      if (p.role === 'Cha' || p.role === 'Cha/Mẹ') {
+      // Người đã chết: mặc định checkbox=checked (họ nhận nếu còn sống khi owner mất)
+      const effectiveReceive = data.death ? '1' : p.receive;
+
+      if (p.role === 'Cha') {
         const slot = document.querySelector('.slot[data-slot="owner_father"]');
         if (slot && !slot.querySelector('.person-card')) {
           slot.innerHTML = '';
-          slot.appendChild(buildPersonCard(data, 'Cha', true, p.share, p.receive));
+          slot.appendChild(buildPersonCard(data, 'Cha', true, p.share, effectiveReceive));
           return;
         }
       }
-      if (p.role === 'Mẹ' || p.role === 'Cha/Mẹ') {
+      if (p.role === 'Mẹ') {
         const slot = document.querySelector('.slot[data-slot="owner_mother"]');
         if (slot && !slot.querySelector('.person-card')) {
           slot.innerHTML = '';
-          slot.appendChild(buildPersonCard(data, 'Mẹ', true, p.share, p.receive));
+          slot.appendChild(buildPersonCard(data, 'Mẹ', true, p.share, effectiveReceive));
+          return;
+        }
+      }
+      if (p.role === 'Cha_vc') {
+        const slot = document.querySelector('.slot[data-slot="spouse_father"]');
+        if (slot && !slot.querySelector('.person-card')) {
+          slot.innerHTML = '';
+          slot.appendChild(buildPersonCard(data, 'Cha_vc', false, p.share, effectiveReceive));
+          return;
+        }
+      }
+      if (p.role === 'Me_vc') {
+        const slot = document.querySelector('.slot[data-slot="spouse_mother"]');
+        if (slot && !slot.querySelector('.person-card')) {
+          slot.innerHTML = '';
+          slot.appendChild(buildPersonCard(data, 'Me_vc', false, p.share, effectiveReceive));
           return;
         }
       }
@@ -1034,14 +1054,14 @@
         const slot = document.querySelector('.slot[data-slot="spouse"]');
         if (slot) {
           slot.innerHTML = '';
-          slot.appendChild(buildPersonCard(data, 'Vợ/Chồng', true, p.share, p.receive));
+          slot.appendChild(buildPersonCard(data, 'Vợ/Chồng', true, p.share, effectiveReceive));
           return;
         }
       }
       if (p.role === 'Con') {
         const ph = childrenZone.querySelector('.child-placeholder');
         if (ph) ph.remove();
-        const card = createChildCard(data, p.share, p.receive);
+        const card = createChildCard(data, p.share, effectiveReceive);
         childrenZone.appendChild(card);
         return;
       }
@@ -1050,7 +1070,7 @@
         return;
       }
       if (p.role === 'Cháu') {
-        delayedGrand.push({ data, share: p.share, receive: p.receive });
+        delayedGrand.push({ data, share: p.share, receive: effectiveReceive });
         return;
       }
     });
@@ -1201,15 +1221,17 @@
       const recv = card.querySelector('.receive-input');
       if (share) share.value = val;
       if (recv) {
+        // Người đã chết: disable checkbox (không thể tự opt-out), nhưng KHÔNG force uncheck
+        // — việc họ có nhận hay không do survivesAt() + checkbox ban đầu quyết định
         const isDead = !!card.dataset.death;
-        if (isDead) recv.checked = false;
         if (isDead) recv.disabled = true;
       }
     }
 
     function isOptedIn(card) {
       if (!card) return false;
-      if (!!card.dataset.death) return false;
+      // Không dùng card.dataset.death để loại — người chết sau owner vẫn được nhận
+      // survivesAt() trong recalcShares() mới là nơi kiểm tra điều kiện sống sót
       const recv = card.querySelector('.receive-input');
       return !!recv && recv.checked;
     }
@@ -1350,6 +1372,8 @@
     const roleMap = {
       'Cha': 'Cha',
       'Mẹ': 'Mẹ',
+      'Cha_vc': 'Cha_vc',
+      'Me_vc': 'Me_vc',
       'Vợ/Chồng': 'Vợ/Chồng',
       'Con': 'Con',
       'Vo_chong_con': 'Con_dau_re',
@@ -1361,8 +1385,6 @@
     Array.from(document.querySelectorAll('.person-card')).forEach(card => {
       const role = roleMap[card.dataset.role || ''];
       if (!role) return;
-      const share = Number(card.querySelector('.share-input')?.value || '0');
-      if (share <= 0) return;
       const key = `${card.dataset.id}:${role}`;
       if (sent.has(key)) return;
       sent.add(key);

@@ -86,6 +86,7 @@ def inline_create(
         return JSONResponse({"ok": False, "errors": errors}, status_code=400)
 
     loai_dat_val = ""
+    thoi_han_val = ""
     if form["land_rows"]:
         try:
             import json
@@ -98,6 +99,9 @@ def inline_create(
                 if loai or dien or thoi:
                     parts.append(f"{loai} | {dien}m2 | {thoi}")
             loai_dat_val = "; ".join(parts)
+            # Lấy thoi_han từ dòng đầu tiên
+            if rows:
+                thoi_han_val = str(rows[0].get("thoi_han", "")).strip()
         except Exception:
             loai_dat_val = form["land_rows"]
 
@@ -105,7 +109,8 @@ def inline_create(
         so_serial=form["so_serial"], so_vao_so=form["so_vao_so"] or None,
         so_thua_dat=form["so_thua_dat"] or None, so_to_ban_do=form["so_to_ban_do"] or None,
         dia_chi=form["dia_chi"], loai_dat=loai_dat_val or None,
-        hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None, thoi_han=None,
+        hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None,
+        thoi_han=thoi_han_val or None,
         nguon_goc=form["nguon_goc"] or None, ngay_cap=parse_date(form["ngay_cap"]),
         co_quan_cap=form["co_quan_cap"] or None
     )
@@ -117,6 +122,7 @@ def inline_create(
             "so_serial": p.so_serial,
             "so_thua_dat": p.so_thua_dat or "",
             "dia_chi": p.dia_chi or "",
+            "ngay_cap": p.ngay_cap.isoformat() if p.ngay_cap else "",
         }
     })
 

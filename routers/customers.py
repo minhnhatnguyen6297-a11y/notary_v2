@@ -71,8 +71,8 @@ def normalize_gender(value: str) -> str:
         return ""
     if s in ("nam", "male", "m"):
         return "Nam"
-    if s in ("nu", "n?", "female", "f"):
-        return "N?"
+    if s in ("nữ", "nu", "female", "f"):
+        return "Nữ"
     return ""
 
 

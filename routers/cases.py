@@ -19,9 +19,9 @@ templates = Jinja2Templates(directory="templates")
 
 def _hang_for_role(role: str) -> int:
     role = (role or "").strip()
-    if role in ("Cha", "Máº¹", "Vá»£/Chá»“ng", "Con", "ChÃ¡u", "Con_dau_re"):
+    if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc", "Vợ/Chồng", "Con", "Cháu", "Con_dau_re"):
         return 1
-    if role in ("Ã”ng/BÃ ", "Anh/Chá»‹/Em"):
+    if role in ("Ông/Bà", "Anh/Chị/Em"):
         return 2
     return 1
 
@@ -125,16 +125,16 @@ def create(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Báº¯t buá»™c"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Báº¯t buá»™c"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Báº¯t buá»™c"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "NgÃ y khÃ´ng há»£p lá»‡"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -188,7 +188,7 @@ def create(
         return RedirectResponse(f"/cases/{c.id}", status_code=302)
     except Exception as e:
         db.rollback()
-        errors.append(f"Lá»—i táº¡o há»“ sÆ¡: {e}")
+        errors.append(f"Lỗi tạo hồ sơ: {e}")
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": None,
             "deceased": deceased, "properties": properties,
@@ -208,7 +208,7 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     available = [c for c in all_customers if c.id not in participant_ids and c.id != case.nguoi_chet_id]
     return templates.TemplateResponse("cases/detail.html", {
         "request": request, "case": case, "available": available,
-        "vai_tro_options": ["Vá»£/Chá»“ng", "Con", "Cha/Máº¹", "Anh/Chá»‹/Em"]
+        "vai_tro_options": ["Vợ/Chồng", "Con", "Cha/Mẹ", "Anh/Chị/Em"]
     })
 
 
@@ -262,16 +262,16 @@ def edit(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Báº¯t buá»™c"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Báº¯t buá»™c"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Báº¯t buá»™c"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "NgÃ y khÃ´ng há»£p lá»‡"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -324,7 +324,7 @@ def edit(
         return RedirectResponse(f"/cases/{cid}", status_code=302)
     except Exception as e:
         db.rollback()
-        errors.append(f"Lá»—i cáº­p nháº­t há»“ sÆ¡: {e}")
+        errors.append(f"Lỗi cập nhật hồ sơ: {e}")
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": case,
             "deceased": deceased, "properties": properties,
@@ -384,15 +384,20 @@ def _pick_core_people(case: InheritanceCase):
     owner = case.nguoi_chet
     spouse = None
     for p in case.participants:
-        if (p.vai_tro or "").strip() == "Vá»£/Chá»“ng":
+        if (p.vai_tro or "").strip() == "Vợ/Chồng":
             spouse = p.customer
             break
 
     pair = [c for c in [owner, spouse] if c is not None]
     male = next((c for c in pair if (c.gioi_tinh or "").strip().lower() == "nam"), None)
-    female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("ná»¯", "nu")), None)
+    female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("nữ", "nu")), None)
     person1 = male or owner or spouse
-    person2 = female or (spouse if spouse and spouse != person1 else owner)
+    if female:
+        person2 = female
+    elif spouse and spouse != person1:
+        person2 = spouse
+    else:
+        person2 = None  # không trùng person1
 
     excluded_ids = {c.id for c in [person1, person2] if c is not None}
     receivers = [p for p in case.participants if p.co_nhan_tai_san and p.customer_id not in excluded_ids]
@@ -462,7 +467,6 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
         m[f"[Năm chết {i}]"] = _safe_text(_fmt_date(c.ngay_chet) if c else "")
 
     m["[Năm chết]"] = m.get("[Năm chết 1]", "")
-    m["[Năm chết 2]"] = m.get("[Năm chết 2]", "")
     return m
 
 

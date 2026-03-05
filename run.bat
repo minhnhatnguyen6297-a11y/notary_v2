@@ -4,7 +4,7 @@ chcp 65001 >nul
 
 REM === CONFIG ===
 set "PROJECT_DIR=%~dp0"
-set "VENV_DIR=%PROJECT_DIR%venv"
+set "VENV_DIR=%PROJECT_DIR%.venv"
 set "HOST=127.0.0.1"
 set "PORT=8000"
 set "MODE=%~1"
