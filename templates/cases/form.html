@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế' }}{% endblock %}
 {% block topbar_title %}{{ 'Sửa hồ sơ' if obj else 'Tạo hồ sơ thừa kế mới' }}{% endblock %}
 
@@ -9,20 +9,59 @@
 
 <div class="page-header">
   <h2><i class="bi bi-folder-plus me-2" style="color:var(--gold)"></i>{{ 'Chỉnh sửa hồ sơ #' + obj.id|string if obj else 'Tạo hồ sơ thừa kế mới' }}</h2>
-  <a href="/cases" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+  <div class="d-flex gap-2">
+    <a href="/cases" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+  </div>
 </div>
 
-{% if errors %}<div class="alert alert-danger">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{% endif %}
-
-<div class="alert alert-info" style="font-size:13px">
-  <i class="bi bi-info-circle me-2"></i>
-  Nhập người và tài sản ngay trên hồ sơ. Dữ liệu vẫn được lưu vào danh mục chung.
-</div>
+{% if errors %}<div class="alert alert-danger py-2 mb-2">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{% endif %}
 
 <form method="post" action="{{ action }}" id="case-form">
 <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
 <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
 <style>
+  .page-header { margin-bottom: 10px; }
+  .card { margin-bottom: 10px !important; }
+  .card-header { padding: 10px 14px; }
+  .card-body { padding: 12px 14px; }
+  .row.g-3 { --bs-gutter-x: .65rem; --bs-gutter-y: .65rem; }
+  .row.g-2 { --bs-gutter-x: .45rem; --bs-gutter-y: .45rem; }
+  .form-label { margin-bottom: 4px; font-size: 12px; }
+  .form-control, .form-select { padding: .35rem .5rem; font-size: 13px; }
+
+  .compact-title { font-size: 14px; font-weight: 700; color: var(--navy); }
+  .compact-title .bi { color: var(--gold); }
+
+  .person-inline-grid {
+    display: grid;
+    grid-template-columns: 1.5fr .7fr .95fr .95fr 1fr .95fr 1.5fr auto;
+    gap: 6px;
+    align-items: center;
+  }
+  .person-inline-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .mini-btn { font-size: 12px; padding: 4px 8px; }
+  .inline-people-list { margin-top: 8px; border: 1px dashed #d1d5db; border-radius: 8px; padding: 6px; min-height: 38px; background: #fcfcfd; }
+  .inline-people-row {
+    display: grid;
+    grid-template-columns: 1.5fr .8fr .95fr .95fr 1fr .95fr 1.5fr;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .inline-people-row:last-child { margin-bottom: 0; }
+  .inline-cell {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #fff;
+    padding: 5px 7px;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  .inline-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
+
+  .property-compact .border.rounded { padding: 8px !important; }
+  .property-compact .table-sm th,
+  .property-compact .table-sm td { padding: 4px; font-size: 12px; }
+
   .workbench { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
   .pool-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
   .pool-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; background: #fafafa; }
@@ -58,9 +97,7 @@
   .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 200px; height: 150px; box-shadow: 0 1px 6px rgba(0,0,0,.06); position: relative; overflow: visible; display: flex; flex-direction: column; justify-content: flex-start; z-index: 2; cursor: grab; user-select: none; }
   .person-card:active { cursor: grabbing; }
   .person-card.dragging { opacity: .5; }
-  body.is-dragging .slot .person-card,
-  body.is-dragging .grand-spouse-slot .person-card,
-  body.is-dragging .grand-zone .person-card { pointer-events: none; }
+
   .person-card .name { font-weight: 700; color: var(--navy); line-height: 1.2; min-height: 34px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; }
   .person-card .meta { font-size: 11px; color: var(--muted); line-height: 1.15; pointer-events: none; }
   .drag-grip { width: 36px; height: 6px; border-radius: 999px; background: #93c5fd; margin: 0 auto 4px auto; cursor: grab; }
@@ -110,13 +147,41 @@
   .warning-box ul { margin: 0; padding-left: 18px; max-height: 120px; overflow: auto; }
 
   @media (max-width: 1200px) {
+    .person-inline-grid { grid-template-columns: 1fr 1fr; }
+    .inline-people-row { grid-template-columns: 1fr 1fr; }
     .workbench { grid-template-columns: 1fr; }
     .pool-body { max-height: 260px; }
   }
+
+  /* ── SORTABLE DRAG ── */
+  .drag-ghost { opacity: .35; background: #dbeafe !important; border: 2px dashed #2563eb !important; }
+  .drag-chosen { cursor: grabbing !important; box-shadow: 0 8px 24px rgba(0,0,0,.18) !important; }
+  .sortable-fallback { opacity: .8; }
+  .person-row.drag-ghost { background: #dbeafe !important; }
+
+  /* ── TIER 4 TRANSITION ── */
+  #tier4-section { transition: opacity .3s ease; }
+
+  /* ── TOAST ── */
+  .dnd-toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: #fff; border-radius: 10px;
+    padding: 11px 16px; font-size: 13px; line-height: 1.4;
+    box-shadow: 0 4px 24px rgba(0,0,0,.16);
+    z-index: 9999; display: flex; align-items: flex-start; gap: 9px;
+    max-width: 340px; pointer-events: none;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .22s ease, transform .22s ease;
+  }
+  .dnd-toast.show { opacity: 1; transform: translateY(0); }
+  .dnd-toast-warn { border-left: 4px solid #f59e0b; }
+  .dnd-toast-info { border-left: 4px solid #3b82f6; }
+  .dnd-toast-icon { flex-shrink: 0; }
 </style>
 
-<div class="card mb-3">
-  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thiết lập hồ sơ</div>
+<div>
+<div class="card mb-2">
+  <div class="card-header compact-title"><i class="bi bi-file-earmark-text me-1"></i>Thiết lập hồ sơ</div>
   <div class="card-body">
     <div class="row g-3">
       <div class="col-md-4">
@@ -141,49 +206,38 @@
   </div>
 </div>
 
-<div class="row g-3">
+<div class="row g-2">
   <div class="col-md-6">
     <div class="card">
-      <div class="card-header"><i class="bi bi-person-plus me-2" style="color:var(--gold)"></i>Nhập nhanh người</div>
+      <div class="card-header compact-title"><i class="bi bi-person-plus me-1"></i>Người tham gia hồ sơ thừa kế</div>
       <div class="card-body inline-form">
         <div id="inline-person-error" class="alert alert-danger d-none"></div>
-        <div class="row g-2">
-          <div class="col-8">
-            <input type="text" class="form-control" id="p-ho-ten" placeholder="Họ và tên *">
-          </div>
-          <div class="col-4">
-            <select class="form-select" id="p-gioi-tinh">
-              <option value="">Giới tính *</option>
-              <option value="Nam">Nam</option>
-              <option value="Nữ">Nữ</option>
-            </select>
-          </div>
-          <div class="col-4">
-            <input type="text" class="form-control" id="p-ngay-sinh" placeholder="Ngay sinh * (yyyy hoac dd/mm/yyyy)">
-          </div>
-          <div class="col-4">
-            <input type="text" class="form-control" id="p-ngay-chet" placeholder="Ngày chết (yyyy hoặc dd/mm/yyyy)">
-          </div>
-          <div class="col-4">
-            <input type="text" class="form-control" id="p-so-giay-to" placeholder="Số giấy tờ *">
-          </div>
-          <div class="col-4">
-            <input type="text" class="form-control" id="p-ngay-cap" placeholder="Ngay cap * (yyyy hoac dd/mm/yyyy)">
-          </div>
-          <div class="col-8">
-            <input type="text" class="form-control" id="p-dia-chi" placeholder="Địa chỉ *">
-          </div>
+        <div class="person-inline-grid">
+          <input type="text" class="form-control" id="p-ho-ten" placeholder="Họ và tên *">
+          <select class="form-select" id="p-gioi-tinh">
+            <option value="">Giới tính *</option>
+            <option value="Nam">Nam</option>
+            <option value="Nữ">Nữ</option>
+          </select>
+          <input type="text" class="form-control" id="p-ngay-sinh" placeholder="Ngày sinh *">
+          <input type="text" class="form-control" id="p-ngay-chet" placeholder="Ngày chết">
+          <input type="text" class="form-control" id="p-so-giay-to" placeholder="Số giấy tờ *">
+          <input type="text" class="form-control" id="p-ngay-cap" placeholder="Ngày cấp *">
+          <input type="text" class="form-control" id="p-dia-chi" placeholder="Địa chỉ *">
+          <button type="button" id="btn-add-person" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm</button>
         </div>
-        <div class="d-flex justify-content-end mt-2">
-          <button type="button" id="btn-add-person" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm người</button>
+        <div class="person-inline-actions">
+          <a href="/customers/download-template" class="btn btn-outline-secondary mini-btn">Tải mẫu Excel</a>
+          <a href="/customers" class="btn btn-outline-secondary mini-btn">Import Excel</a>
         </div>
+        <div id="inline-people-list" class="inline-people-list"><div class="inline-empty">Người thêm mới sẽ hiển thị tại đây.</div></div>
       </div>
     </div>
   </div>
 
   <div class="col-md-6">
-    <div class="card">
-      <div class="card-header"><i class="bi bi-house-add me-2" style="color:var(--gold)"></i>Nhập nhanh tài sản</div>
+    <div class="card property-compact">
+      <div class="card-header compact-title"><i class="bi bi-house-add me-1"></i>Tài sản</div>
       <div class="card-body inline-form">
         <div id="inline-prop-error" class="alert alert-danger d-none"></div>
         <div class="row g-2">
@@ -255,7 +309,7 @@
   </div>
 </div>
 
-<div class="card mt-3">
+<div class="card mt-2">
   <div class="card-header"><i class="bi bi-diagram-3 me-2" style="color:var(--gold)"></i>Phân bổ vai trò (tree)</div>
   <div class="card-body">
     <div id="tree-warnings" class="warning-box d-none">
@@ -335,8 +389,8 @@
         </div>
       </div>
 
-      <div class="tree-tier">
-        <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo</div>
+      <div class="tree-tier" id="tier4-section" style="display:none">
+        <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo <small style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(hiển thị khi có con đã mất)</small></div>
         <div class="tier-content">
           <div class="grand-list" id="grandchildren-zone">
             <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>
@@ -355,6 +409,7 @@
   <button type="submit" class="btn btn-gold px-4" id="btn-submit-case">
     <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Tạo hồ sơ' }}
   </button>
+</div>
 </div>
 </form>
 {% endblock %}
@@ -383,7 +438,54 @@
   const marriageInput = document.getElementById('marriage-date');
   const warningBox = document.getElementById('tree-warnings');
   const warningList = document.getElementById('tree-warnings-list');
-  let dragged = null;
+  const ownerInput = document.getElementById('case-nguoi-chet');
+
+  // ─── DRAG STATE ──────────────────────────────────────────────────────────────
+  let dragState = null;
+  function onDragStart(evt) {
+    dragState = { el: evt.item, data: extractDataFromElement(evt.item), from: evt.from };
+  }
+  function onDragEnd() { dragState = null; }
+
+  // ─── TOAST ───────────────────────────────────────────────────────────────────
+  let _toastTimer = null;
+  function showToast(msg, type = 'warn') {
+    let t = document.getElementById('dnd-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'dnd-toast'; document.body.appendChild(t); }
+    t.className = `dnd-toast dnd-toast-${type} show`;
+    t.innerHTML = `<span class="dnd-toast-icon">${type === 'warn' ? '⚠️' : 'ℹ️'}</span><span>${msg}</span>`;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+
+  // ─── MOVE VALIDATION ─────────────────────────────────────────────────────────
+  let _lastMoveMsg = '';
+  function validateMove(draggedEl, destContainer) {
+    if (draggedEl.classList.contains('child-card') && destContainer.classList.contains('grand-zone')) {
+      return { allowed: false, reason: `${draggedEl.dataset.name || 'Người này'} đang là Con trực tiếp — không thể thêm làm Cháu` };
+    }
+    if (destContainer.classList.contains('grand-spouse-slot')) {
+      const group = destContainer.closest('.grand-group');
+      if (group) {
+        const childCard = document.querySelector(`.child-card[data-id="${group.dataset.parentId}"]`);
+        if (childCard) {
+          const childDeath = parseDate(childCard.dataset.death);
+          const ownerCard = document.querySelector('.slot[data-slot="owner"] .person-card');
+          const ownerDeath = ownerCard ? parseDate(ownerCard.dataset.death) : null;
+          if (deathFlowStatus(childDeath, ownerDeath) !== 'after') {
+            return { allowed: false, reason: `${childCard.dataset.name} chết trước hoặc cùng ngày chủ đất — nhánh này không có thừa kế thế vị` };
+          }
+        }
+      }
+    }
+    return { allowed: true };
+  }
+  function onMoveValidate(evt) {
+    const v = validateMove(evt.dragged, evt.to);
+    if (!v.allowed && v.reason !== _lastMoveMsg) { _lastMoveMsg = v.reason; showToast(v.reason); }
+    if (v.allowed) _lastMoveMsg = '';
+    return v.allowed;
+  }
 
   function parseDate(s) {
     if (!s) return null;
@@ -562,30 +664,6 @@
     return 'after';
   }
 
-  function makeDraggable(el) {
-    el.addEventListener('dragstart', (e) => {
-      dragged = el;
-      el.classList.add('dragging');
-      document.body.classList.add('is-dragging');
-      e.dataTransfer.setData('text/plain', el.dataset.id || '');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    el.addEventListener('dragend', () => {
-      el.classList.remove('dragging');
-      document.body.classList.remove('is-dragging');
-      dragged = null;
-    });
-  }
-
-  document.querySelectorAll('.person-row, .person-card').forEach(makeDraggable);
-
-  function resolveDragged(ev) {
-    if (dragged) return dragged;
-    const id = ev?.dataTransfer?.getData('text/plain');
-    if (!id) return null;
-    return document.querySelector(`.person-card[data-id="${id}"], .person-row[data-id="${id}"]`);
-  }
-
   function extractDataFromElement(el) {
     return {
       id: el.dataset.id,
@@ -624,14 +702,9 @@
     if (!data || !pool) return;
     if (!data.id) return;
     if (document.querySelector(`.person-row[data-id="${data.id}"]`)) return;
-    if (!force) {
-      const stillUsedElsewhere = Array.from(document.querySelectorAll(`.person-card[data-id="${data.id}"]`))
-        .some(n => n !== cardEl);
-      if (stillUsedElsewhere) return;
-    }
+    if (!force) return;
     const row = document.createElement('div');
     row.className = 'person-row';
-    row.setAttribute('draggable', 'true');
     row.dataset.id = data.id;
     row.dataset.name = data.name || '';
     row.dataset.doc = data.doc || '';
@@ -643,7 +716,6 @@
       <div class="meta">Sinh: ${data.birth || '—'}</div>
       <div class="meta">Chết: ${data.death || '—'}</div>
     `;
-    makeDraggable(row);
     pool.prepend(row);
   }
 
@@ -656,7 +728,6 @@
   function buildPersonCard(data, role, withShare=true, shareVal='0', receiveVal='1') {
     const card = document.createElement('div');
     card.className = 'person-card';
-    card.setAttribute('draggable', 'true');
     card.dataset.id = data.id;
     card.dataset.name = data.name;
     card.dataset.doc = data.doc;
@@ -682,22 +753,6 @@
       </div>` : ''}
       <div class="card-warning"></div>
     `;
-    const grip = card.querySelector('.drag-grip');
-    if (grip) {
-      grip.setAttribute('draggable', 'true');
-      grip.addEventListener('dragstart', (e) => {
-        dragged = card;
-        card.classList.add('dragging');
-        document.body.classList.add('is-dragging');
-        e.dataTransfer.setData('text/plain', card.dataset.id || '');
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      grip.addEventListener('dragend', () => {
-        card.classList.remove('dragging');
-        document.body.classList.remove('is-dragging');
-        dragged = null;
-      });
-    }
     const removeBtn = card.querySelector('.card-remove-btn');
     if (removeBtn) {
       removeBtn.addEventListener('mousedown', (ev) => ev.stopPropagation());
@@ -707,7 +762,6 @@
         removeCardFromTree(card);
       });
     }
-    makeDraggable(card);
     return card;
   }
 
@@ -769,6 +823,78 @@
     recalcShares();
   }
 
+  // ─── TIER 4 VISIBILITY ───────────────────────────────────────────────────────
+  function updateTier4Visibility() {
+    const tier4 = document.getElementById('tier4-section');
+    if (!tier4) return;
+    const hasDeadChildren = Array.from(document.querySelectorAll('.child-card')).some(c => !!parseDate(c.dataset.death));
+    tier4.style.display = hasDeadChildren ? '' : 'none';
+  }
+
+  // ─── GRAND SLOT & ZONE SORTABLES ─────────────────────────────────────────────
+  function initGrandSpouseSlot(spouseSlot, childCard) {
+    Sortable.create(spouseSlot, {
+      group: 'tree', sort: false, animation: 150,
+      handle: '.drag-grip', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
+      onStart: onDragStart, onEnd: onDragEnd,
+      onMove: onMoveValidate,
+      onRemove: () => {
+        if (!spouseSlot.querySelector('.person-card')) {
+          spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+        }
+        recalcShares();
+      },
+      onAdd: (evt) => {
+        const data = dragState ? dragState.data : extractDataFromElement(evt.item);
+        evt.item.remove();
+        const childDeath = parseDate(childCard.dataset.death);
+        const ownerCard = document.querySelector('.slot[data-slot="owner"] .person-card');
+        const ownerDeath = ownerCard ? parseDate(ownerCard.dataset.death) : null;
+        if (deathFlowStatus(childDeath, ownerDeath) !== 'after') {
+          showToast(`${childCard.dataset.name} chết trước chủ đất — nhánh này không có thừa kế thế vị`, 'warn');
+          putDataBackToPool(data, true);
+          dragState = null;
+          return;
+        }
+        const prev = spouseSlot.querySelector('.person-card');
+        if (prev) putBackToPool(prev, true);
+        removeExisting(data.id);
+        spouseSlot.innerHTML = '';
+        spouseSlot.appendChild(buildPersonCard(data, 'Vo_chong_con', true));
+        dragState = null;
+        recalcShares();
+      }
+    });
+  }
+
+  function initGrandZone(zone, childCard) {
+    Sortable.create(zone, {
+      group: 'tree', sort: true, animation: 150,
+      handle: '.drag-grip', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
+      onStart: onDragStart, onEnd: onDragEnd,
+      onMove: onMoveValidate,
+      onRemove: () => {
+        if (!zone.querySelector('.person-card')) zone.innerHTML = '<span class="placeholder">Kéo con vào đây</span>';
+        recalcShares();
+      },
+      onAdd: (evt) => {
+        const data = dragState ? dragState.data : extractDataFromElement(evt.item);
+        if (dragState && dragState.el.classList.contains('child-card')) {
+          evt.item.remove();
+          showToast(`${data.name} đang là Con trực tiếp — không thể thêm làm Cháu`, 'warn');
+          dragState = null;
+          return;
+        }
+        evt.item.remove();
+        if (zone.querySelector('.placeholder')) zone.innerHTML = '';
+        removeExisting(data.id);
+        zone.appendChild(buildPersonCard(data, 'Cháu', true));
+        dragState = null;
+        recalcShares();
+      }
+    });
+  }
+
   function getGrandGroup(childCard, createIfMissing=true) {
     if (!childCard) return null;
     const childId = childCard.dataset.id;
@@ -796,54 +922,8 @@
       const spouseSlot = group.querySelector('.grand-spouse-slot');
       const zone = group.querySelector('.grand-zone');
 
-      spouseSlot.addEventListener('dragover', (ev) => { ev.preventDefault(); spouseSlot.classList.add('dragover'); });
-      spouseSlot.addEventListener('dragleave', () => spouseSlot.classList.remove('dragover'));
-      spouseSlot.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        spouseSlot.classList.remove('dragover');
-        const source = resolveDragged(ev);
-        if (!source) return;
-        const sdata = extractDataFromElement(source);
-        try {
-          const childDeath = parseDate(childCard.dataset.death);
-          const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
-          const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
-          const status = deathFlowStatus(childDeath, ownerDeath);
-          if (status !== 'after') return;
-
-          removeExisting(sdata.id);
-          const prev = spouseSlot.querySelector('.person-card');
-          if (prev) putBackToPool(prev, true);
-          spouseSlot.innerHTML = '';
-          const sp = buildPersonCard(sdata, 'Vo_chong_con', true);
-          spouseSlot.appendChild(sp);
-          recalcShares();
-        } catch (e) {
-          putDataBackToPool(sdata, true);
-          console.error(e);
-        }
-      });
-
-      zone.addEventListener('dragover', (ev) => { ev.preventDefault(); zone.classList.add('dragover'); });
-      zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
-      zone.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        zone.classList.remove('dragover');
-        const source = resolveDragged(ev);
-        if (!source) return;
-        if (source.classList.contains('child-card')) return;
-        const gdata = extractDataFromElement(source);
-        try {
-          removeExisting(gdata.id);
-          if (zone.querySelector('.placeholder')) zone.innerHTML = '';
-          const gcard = buildPersonCard(gdata, 'Cháu', true);
-          zone.appendChild(gcard);
-          recalcShares();
-        } catch (e) {
-          putDataBackToPool(gdata, true);
-          console.error(e);
-        }
-      });
+      initGrandSpouseSlot(spouseSlot, childCard);
+      initGrandZone(zone, childCard);
       grandchildrenZone.appendChild(group);
     }
     return group;
@@ -868,66 +948,109 @@
     meta.innerHTML = '<span class="flow-note"></span>';
     family.appendChild(meta);
 
-    return family;
-  }
-
-  slots.forEach(s => {
-    s.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      s.classList.add('dragover');
-    });
-    s.addEventListener('dragleave', () => s.classList.remove('dragover'));
-    s.addEventListener('drop', (e) => {
-      e.preventDefault();
-      s.classList.remove('dragover');
-      const source = resolveDragged(e);
-      if (!source) return;
-      const data = extractDataFromElement(source);
-      try {
-        removeExisting(data.id);
-        const prev = s.querySelector('.person-card');
-        if (prev) putBackToPool(prev, true);
-        s.innerHTML = '';
-        s.appendChild(buildPersonCard(data, s.dataset.role, s.dataset.role !== 'Cha_vc' && s.dataset.role !== 'Me_vc'));
-
-        if (s.dataset.slot === 'owner') {
-          if (ownerInput) ownerInput.value = data.id;
+    // Allow child-card to be dragged OUT to other tiers
+    Sortable.create(pair, {
+      group: { name: 'tree', pull: true, put: false },
+      sort: false,
+      handle: '.drag-grip',
+      ghostClass: 'drag-ghost',
+      chosenClass: 'drag-chosen',
+      onStart: onDragStart,
+      onEnd: onDragEnd,
+      onRemove: (evt) => {
+        const childId = evt.item.dataset.id;
+        family.remove();
+        if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
+          childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
+        }
+        const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${childId}"]`);
+        if (g) {
+          g.querySelectorAll('.person-card').forEach(c => putBackToPool(c, true));
+          g.remove();
+        }
+        if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
+          grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
         }
         updateGrandZones();
         recalcShares();
-      } catch (e) {
-        putDataBackToPool(data, true);
-        console.error(e);
       }
     });
-  });
+    return family;
+  }
 
-  // children drop zone
-  childrenZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    childrenZone.classList.add('dragover');
-  });
-  childrenZone.addEventListener('dragleave', () => {
-    childrenZone.classList.remove('dragover');
-  });
-  childrenZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    childrenZone.classList.remove('dragover');
-    const source = resolveDragged(e);
-    if (!source) return;
-    const data = extractDataFromElement(source);
-    try {
-      removeExisting(data.id);
+  // ─── INIT SLOT SORTABLES ─────────────────────────────────────────────────────
+  function initSlotSortable(slotEl) {
+    Sortable.create(slotEl, {
+      group: 'tree',
+      sort: false,
+      animation: 150,
+      handle: '.drag-grip',
+      ghostClass: 'drag-ghost',
+      chosenClass: 'drag-chosen',
+      onStart: onDragStart,
+      onEnd: onDragEnd,
+      onRemove: () => {
+        restoreSlotPlaceholder(slotEl);
+        if (slotEl.dataset.slot === 'owner') ownerInput.value = '';
+        updateGrandZones();
+        recalcShares();
+      },
+      onAdd: (evt) => {
+        const data = dragState ? dragState.data : extractDataFromElement(evt.item);
+        evt.item.remove();
+        const prev = slotEl.querySelector('.person-card');
+        if (prev) putBackToPool(prev, true);
+        removeExisting(data.id);
+        slotEl.innerHTML = '';
+        const withShare = slotEl.dataset.role !== 'Cha_vc' && slotEl.dataset.role !== 'Me_vc';
+        slotEl.appendChild(buildPersonCard(data, slotEl.dataset.role, withShare));
+        if (slotEl.dataset.slot === 'owner') ownerInput.value = data.id;
+        dragState = null;
+        updateGrandZones();
+        recalcShares();
+      }
+    });
+  }
+  slots.forEach(s => initSlotSortable(s));
+
+  // ─── INIT CHILDREN ZONE ──────────────────────────────────────────────────────
+  Sortable.create(childrenZone, {
+    group: { name: 'tree', pull: false, put: true },
+    sort: false,
+    animation: 150,
+    ghostClass: 'drag-ghost',
+    // filter prevents childrenZone from intercepting mousedown inside family-pair,
+    // which would conflict with family-pair's own Sortable (drag child-card to other tiers)
+    filter: '.family-pair',
+    preventOnFilter: false,
+    onAdd: (evt) => {
+      const data = dragState ? dragState.data : extractDataFromElement(evt.item);
+      evt.item.remove();
+      if (document.querySelector(`.child-card[data-id="${data.id}"]`)) {
+        showToast(`${data.name} đã có trong danh sách Con`, 'info');
+        dragState = null;
+        return;
+      }
       const ph = childrenZone.querySelector('.child-placeholder');
       if (ph) ph.remove();
-      const card = createChildCard(data);
-      childrenZone.appendChild(card);
+      removeExisting(data.id);
+      childrenZone.appendChild(createChildCard(data));
+      dragState = null;
       updateGrandZones();
       recalcShares();
-    } catch (e) {
-      putDataBackToPool(data, true);
-      console.error(e);
     }
+  });
+
+  // ─── INIT POOL ────────────────────────────────────────────────────────────────
+  Sortable.create(pool, {
+    group: { name: 'tree', pull: 'clone', put: false },
+    sort: false,
+    animation: 150,
+    ghostClass: 'drag-ghost',
+    chosenClass: 'drag-chosen',
+    draggable: '.person-row',
+    onStart: onDragStart,
+    onEnd: onDragEnd
   });
 
   function updateGrandZones() {
@@ -975,11 +1098,9 @@
     if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
       grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
     }
+    updateTier4Visibility();
   }
 
-  const ownerInput = document.getElementById('case-nguoi-chet');
-
-  document.addEventListener('drop', () => { updateGrandZones(); recalcShares(); });
   document.addEventListener('change', (e) => {
     if (e.target && e.target.classList && e.target.classList.contains('receive-input')) {
       recalcShares();
@@ -1106,7 +1227,6 @@
     const c = data.customer;
     const row = document.createElement('div');
     row.className = 'person-row';
-    row.setAttribute('draggable', 'true');
     row.dataset.id = c.id;
     row.dataset.name = c.ho_ten;
     row.dataset.doc = c.so_giay_to;
@@ -1118,8 +1238,35 @@
       <div class="meta">Sinh: ${c.ngay_sinh || '—'}</div>
       <div class="meta">Chết: ${c.ngay_chet || '—'}</div>
     `;
-    makeDraggable(row);
     pool.prepend(row);
+
+    const list = document.getElementById('inline-people-list');
+    if (list) {
+      const empty = list.querySelector('.inline-empty');
+      if (empty) empty.remove();
+      const item = document.createElement('div');
+      item.className = 'inline-people-row';
+      item.innerHTML = `
+        <div class="inline-cell">${c.ho_ten || ''}</div>
+        <div class="inline-cell">${c.gioi_tinh || ''}</div>
+        <div class="inline-cell">${c.ngay_sinh || ''}</div>
+        <div class="inline-cell">${c.ngay_chet || '—'}</div>
+        <div class="inline-cell">${c.so_giay_to || ''}</div>
+        <div class="inline-cell">${c.ngay_cap || ''}</div>
+        <div class="inline-cell">${c.dia_chi || ''}</div>
+      `;
+      list.prepend(item);
+    }
+
+    document.getElementById('p-ho-ten').value = '';
+    document.getElementById('p-gioi-tinh').value = '';
+    document.getElementById('p-ngay-sinh').value = '';
+    document.getElementById('p-ngay-chet').value = '';
+    document.getElementById('p-so-giay-to').value = '';
+    document.getElementById('p-ngay-cap').value = '';
+    document.getElementById('p-dia-chi').value = '';
+    document.getElementById('p-ho-ten').focus();
+
     if (c.ngay_chet && ownerInput && !ownerInput.value) {
       ownerInput.value = c.id;
       setOwnerFromSelect();

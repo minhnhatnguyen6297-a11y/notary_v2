@@ -1,27 +1,28 @@
-﻿from fastapi import APIRouter, Depends, Request, Form, HTTPException
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Request, Form, HTTPException, UploadFile, File
+from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import Optional, List, Union
 from datetime import date, datetime
 import io
+import json
 from pathlib import Path
 import re
 import unicodedata
+from uuid import uuid4
 from types import SimpleNamespace
 
 from database import get_db
-from models import InheritanceCase, Customer, Property, InheritanceParticipant
+from models import InheritanceCase, Customer, Property, InheritanceParticipant, WordTemplate
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
-
-
+WORD_TEMPLATE_UPLOAD_DIR = Path("word_templates/custom")
 def _hang_for_role(role: str) -> int:
     role = (role or "").strip()
-    if role in ("Cha", "Máº¹", "Vá»£/Chá»“ng", "Con", "ChÃ¡u", "Con_dau_re"):
+    if role in ("Cha", "Mẹ", "Vợ/Chồng", "Con", "Cháu", "Con_dau_re"):
         return 1
-    if role in ("Ã”ng/BÃ ", "Anh/Chá»‹/Em"):
+    if role in ("Ông/Bà", "Anh/Chị/Em"):
         return 2
     return 1
 
@@ -82,10 +83,11 @@ def list_cases(request: Request, db: Session = Depends(get_db), q: str = ""):
     return templates.TemplateResponse("cases/list.html", {"request": request, "cases": cases, "q": q})
 
 
+
 @router.get("/create")
 def create_form(request: Request, db: Session = Depends(get_db)):
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
-    # NgÆ°á»i cháº¿t = cÃ³ ngÃ y cháº¿t
+    # Người chết = có ngày chết
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
     from datetime import date as _date
@@ -97,7 +99,7 @@ def create_form(request: Request, db: Session = Depends(get_db)):
         "request": request, "obj": None,
         "deceased": deceased, "properties": properties, "errors": [],
         "field_errors": {}, "form": form,
-        "all_customers": all_customers, "participants": [], "participant_ids": set()
+        "all_customers": all_customers, "participants": [], "participant_ids": set(),
     })
 
 
@@ -125,16 +127,16 @@ def create(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Báº¯t buá»™c"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Báº¯t buá»™c"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Báº¯t buá»™c"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "NgÃ y khÃ´ng há»£p lá»‡"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -150,7 +152,7 @@ def create(
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
             "participants": posted_participants,
-            "participant_ids": posted_participant_ids
+            "participant_ids": posted_participant_ids,
         })
 
     try:
@@ -188,14 +190,14 @@ def create(
         return RedirectResponse(f"/cases/{c.id}", status_code=302)
     except Exception as e:
         db.rollback()
-        errors.append(f"Lá»—i táº¡o há»“ sÆ¡: {e}")
+        errors.append(f"Lỗi tạo hồ sơ: {e}")
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": None,
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
             "participants": posted_participants,
-            "participant_ids": posted_participant_ids
+            "participant_ids": posted_participant_ids,
         })
 
 
@@ -208,7 +210,7 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     available = [c for c in all_customers if c.id not in participant_ids and c.id != case.nguoi_chet_id]
     return templates.TemplateResponse("cases/detail.html", {
         "request": request, "case": case, "available": available,
-        "vai_tro_options": ["Vá»£/Chá»“ng", "Con", "Cha/Máº¹", "Anh/Chá»‹/Em"]
+        "vai_tro_options": ["Vợ/Chồng", "Con", "Cha/Mẹ", "Anh/Chị/Em"]
     })
 
 
@@ -234,7 +236,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "request": request, "obj": case,
         "deceased": deceased, "properties": properties, "errors": [],
         "field_errors": {}, "form": form,
-        "all_customers": all_customers, "participants": participants, "participant_ids": participant_ids
+        "all_customers": all_customers, "participants": participants, "participant_ids": participant_ids,
     })
 
 
@@ -262,16 +264,16 @@ def edit(
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Báº¯t buá»™c"
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Báº¯t buá»™c"
+        field_errors["tai_san_id"] = "Bắt buộc"
     if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Báº¯t buá»™c"
+        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
     if form["ngay_lap_ho_so"]:
         try:
             datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
         except ValueError:
-            field_errors["ngay_lap_ho_so"] = "NgÃ y khÃ´ng há»£p lá»‡"
+            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -286,7 +288,7 @@ def edit(
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
             "participants": posted_participants,
-            "participant_ids": posted_participant_ids
+            "participant_ids": posted_participant_ids,
         })
 
     try:
@@ -324,14 +326,14 @@ def edit(
         return RedirectResponse(f"/cases/{cid}", status_code=302)
     except Exception as e:
         db.rollback()
-        errors.append(f"Lá»—i cáº­p nháº­t há»“ sÆ¡: {e}")
+        errors.append(f"Lỗi cập nhật hồ sơ: {e}")
         return templates.TemplateResponse("cases/form.html", {
             "request": request, "obj": case,
             "deceased": deceased, "properties": properties,
             "errors": errors, "field_errors": field_errors, "form": form,
             "all_customers": all_customers,
             "participants": posted_participants,
-            "participant_ids": posted_participant_ids
+            "participant_ids": posted_participant_ids,
         })
 
 
@@ -355,6 +357,112 @@ def delete(cid: int, db: Session = Depends(get_db)):
     if case and not case.is_locked:
         db.delete(case); db.commit()
     return RedirectResponse("/cases", status_code=302)
+
+
+def _get_selected_word_template_path(db: Session) -> Optional[Path]:
+    active = (
+        db.query(WordTemplate)
+        .filter(WordTemplate.is_active == True)
+        .order_by(WordTemplate.id.desc())
+        .first()
+    )
+    if active and active.duong_dan_file:
+        p = Path(active.duong_dan_file)
+        if p.exists():
+            return p
+
+    template_candidates = [
+        Path(r"\\maychu\D\Minh\HỒ SƠ UBND CÁC XÃ\2. Mẫu thừa kế\xã_PCDS -.docx"),
+        Path("word_templates/xa_PCDS_template.docx"),
+    ]
+    existing_templates = [p for p in template_candidates if p.exists()]
+    if not existing_templates:
+        return None
+    return max(existing_templates, key=lambda p: p.stat().st_mtime)
+
+
+@router.get("/templates/manage")
+def word_templates_page(request: Request, db: Session = Depends(get_db), ok: str = "", err: str = ""):
+    items = db.query(WordTemplate).order_by(WordTemplate.id.desc()).all()
+    return templates.TemplateResponse("cases/templates.html", {
+        "request": request,
+        "items": items,
+        "ok": ok,
+        "err": err,
+    })
+
+
+@router.post("/templates/manage/upload")
+async def upload_word_template(
+    ten_mau: str = Form(...),
+    file_mau: UploadFile = File(...),
+    dat_mac_dinh: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    ten_mau = (ten_mau or "").strip()
+    if not ten_mau:
+        return RedirectResponse("/cases/templates/manage?err=Vui+long+nhap+ten+mau", status_code=302)
+    if not file_mau or not file_mau.filename:
+        return RedirectResponse("/cases/templates/manage?err=Vui+long+chon+file", status_code=302)
+    if not file_mau.filename.lower().endswith(".docx"):
+        return RedirectResponse("/cases/templates/manage?err=Chi+ho+tro+file+.docx", status_code=302)
+
+    WORD_TEMPLATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}.docx"
+    saved_path = WORD_TEMPLATE_UPLOAD_DIR / saved_name
+    content = await file_mau.read()
+    saved_path.write_bytes(content)
+
+    set_active = str(dat_mac_dinh).lower() in ("1", "true", "on", "yes")
+    if set_active:
+        db.query(WordTemplate).update({WordTemplate.is_active: False})
+
+    item = WordTemplate(
+        ten_mau=ten_mau,
+        ten_file_goc=file_mau.filename,
+        duong_dan_file=str(saved_path),
+        is_active=set_active,
+    )
+    db.add(item)
+    db.commit()
+    return RedirectResponse("/cases/templates/manage?ok=Tai+mau+thanh+cong", status_code=302)
+
+
+@router.post("/templates/manage/{tid}/activate")
+def activate_word_template(tid: int, db: Session = Depends(get_db)):
+    item = db.query(WordTemplate).filter(WordTemplate.id == tid).first()
+    if not item:
+        return RedirectResponse("/cases/templates/manage?err=Khong+tim+thay+mau", status_code=302)
+    db.query(WordTemplate).update({WordTemplate.is_active: False})
+    item.is_active = True
+    db.commit()
+    return RedirectResponse("/cases/templates/manage?ok=Da+chon+mau+mac+dinh", status_code=302)
+
+
+@router.post("/templates/manage/{tid}/delete")
+def delete_word_template(tid: int, db: Session = Depends(get_db)):
+    item = db.query(WordTemplate).filter(WordTemplate.id == tid).first()
+    if not item:
+        return RedirectResponse("/cases/templates/manage?err=Khong+tim+thay+mau", status_code=302)
+
+    was_active = bool(item.is_active)
+    file_path = Path(item.duong_dan_file or "")
+    db.delete(item)
+    db.commit()
+
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+
+    if was_active:
+        latest = db.query(WordTemplate).order_by(WordTemplate.id.desc()).first()
+        if latest:
+            latest.is_active = True
+            db.commit()
+
+    return RedirectResponse("/cases/templates/manage?ok=Da+xoa+mau", status_code=302)
 
 
 def _fmt_date(d: Optional[date]) -> str:
@@ -384,13 +492,13 @@ def _pick_core_people(case: InheritanceCase):
     owner = case.nguoi_chet
     spouse = None
     for p in case.participants:
-        if (p.vai_tro or "").strip() == "Vá»£/Chá»“ng":
+        if (p.vai_tro or "").strip() == "Vợ/Chồng":
             spouse = p.customer
             break
 
     pair = [c for c in [owner, spouse] if c is not None]
     male = next((c for c in pair if (c.gioi_tinh or "").strip().lower() == "nam"), None)
-    female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("ná»¯", "nu")), None)
+    female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("nữ", "nu")), None)
     person1 = male or owner or spouse
     person2 = female or (spouse if spouse and spouse != person1 else owner)
 
@@ -547,51 +655,51 @@ def export_word(cid: int, db: Session = Depends(get_db)):
 
     doc = Document()
 
-    # TiÃªu Ä‘á»
-    title = doc.add_heading("Cá»˜NG HÃ’A XÃƒ Há»˜I CHá»¦ NGHÄ¨A VIá»†T NAM", level=1)
+    # Tiêu đề
+    title = doc.add_heading("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sub = doc.add_paragraph("Äá»™c láº­p - Tá»± do - Háº¡nh phÃºc")
+    sub = doc.add_paragraph("Độc lập - Tự do - Hạnh phúc")
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     doc.add_paragraph()
 
-    van_ban_name = "VÄ‚N Báº¢N KHAI NHáº¬N DI Sáº¢N THá»ªA Káº¾" if case.loai_van_ban == "khai_nhan" else "VÄ‚N Báº¢N THá»ŽA THUáº¬N PHÃ‚N CHIA DI Sáº¢N THá»ªA Káº¾"
+    van_ban_name = "VĂN BẢN KHAI NHẬN DI SẢN THỪA KẾ" if case.loai_van_ban == "khai_nhan" else "VĂN BẢN THỎA THUẬN PHÂN CHIA DI SẢN THỪA KẾ"
     h = doc.add_heading(van_ban_name, level=2)
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     doc.add_paragraph()
 
-    # ThÃ´ng tin ngÆ°á»i cháº¿t
-    doc.add_heading("I. THÃ”NG TIN NGÆ¯á»œI Äá»‚ Láº I DI Sáº¢N", level=3)
+    # Thông tin người chết
+    doc.add_heading("I. THÔNG TIN NGƯỜI ĐỂ LẠI DI SẢN", level=3)
     nd = case.nguoi_chet
-    doc.add_paragraph(f"Há» vÃ  tÃªn: {nd.ho_ten}")
-    doc.add_paragraph(f"NgÃ y sinh: {nd.ngay_sinh.strftime('%d/%m/%Y') if nd.ngay_sinh else ''}")
-    doc.add_paragraph(f"NgÃ y cháº¿t: {nd.ngay_chet.strftime('%d/%m/%Y') if nd.ngay_chet else ''}")
-    doc.add_paragraph(f"Sá»‘ CCCD/Giáº¥y tá»: {nd.so_giay_to}")
-    doc.add_paragraph(f"Äá»‹a chá»‰ thÆ°á»ng trÃº: {nd.dia_chi}")
+    doc.add_paragraph(f"Họ và tên: {nd.ho_ten}")
+    doc.add_paragraph(f"Ngày sinh: {nd.ngay_sinh.strftime('%d/%m/%Y') if nd.ngay_sinh else ''}")
+    doc.add_paragraph(f"Ngày chết: {nd.ngay_chet.strftime('%d/%m/%Y') if nd.ngay_chet else ''}")
+    doc.add_paragraph(f"Số CCCD/Giấy tờ: {nd.so_giay_to}")
+    doc.add_paragraph(f"Địa chỉ thường trú: {nd.dia_chi}")
 
     doc.add_paragraph()
 
-    # ThÃ´ng tin tÃ i sáº£n
-    doc.add_heading("II. TÃ€I Sáº¢N", level=3)
+    # Thông tin tài sản
+    doc.add_heading("II. TÀI SẢN", level=3)
     ts = case.tai_san
-    doc.add_paragraph(f"Sá»‘ serial GCN: {ts.so_serial}")
-    doc.add_paragraph(f"Sá»‘ vÃ o sá»•: {ts.so_vao_so or ''}")
-    doc.add_paragraph(f"Sá»‘ thá»­a: {ts.so_thua_dat or ''} - Tá» báº£n Ä‘á»“ sá»‘: {ts.so_to_ban_do or ''}")
-    doc.add_paragraph(f"Äá»‹a chá»‰: {ts.dia_chi}")
-    doc.add_paragraph(f"Loáº¡i Ä‘áº¥t: {ts.loai_dat or ''}")
-    doc.add_paragraph(f"Thá»i háº¡n sá»­ dá»¥ng: {ts.thoi_han or ''}")
-    doc.add_paragraph(f"CÆ¡ quan cáº¥p: {ts.co_quan_cap or ''}")
+    doc.add_paragraph(f"Số serial GCN: {ts.so_serial}")
+    doc.add_paragraph(f"Số vào sổ: {ts.so_vao_so or ''}")
+    doc.add_paragraph(f"Số thửa: {ts.so_thua_dat or ''} - Tờ bản đồ số: {ts.so_to_ban_do or ''}")
+    doc.add_paragraph(f"Địa chỉ: {ts.dia_chi}")
+    doc.add_paragraph(f"Loại đất: {ts.loai_dat or ''}")
+    doc.add_paragraph(f"Thời hạn sử dụng: {ts.thoi_han or ''}")
+    doc.add_paragraph(f"Cơ quan cấp: {ts.co_quan_cap or ''}")
 
     doc.add_paragraph()
 
-    # NgÆ°á»i thá»«a káº¿
-    doc.add_heading("III. NHá»®NG NGÆ¯á»œI THá»ªA Káº¾", level=3)
+    # Người thừa kế
+    doc.add_heading("III. NHỮNG NGƯỜI THỪA KẾ", level=3)
     nhan = [p for p in case.participants if p.co_nhan_tai_san]
     tuchoi = [p for p in case.participants if not p.co_nhan_tai_san]
 
     if nhan:
-        doc.add_paragraph("Nhá»¯ng ngÆ°á»i nháº­n thá»«a káº¿:")
+        doc.add_paragraph("Những người nhận thừa kế:")
         for i, p in enumerate(nhan, 1):
             c = p.customer
             ty_le = float(p.ty_le or 0)
@@ -600,20 +708,20 @@ def export_word(cid: int, db: Session = Depends(get_db)):
 
     if tuchoi:
         doc.add_paragraph()
-        doc.add_paragraph("Nhá»¯ng ngÆ°á»i tá»« chá»‘i nháº­n di sáº£n:")
+        doc.add_paragraph("Những người từ chối nhận di sản:")
         for p in tuchoi:
-            doc.add_paragraph(f"- {p.customer.ho_ten} ({p.vai_tro}): Tá»« chá»‘i nháº­n")
+            doc.add_paragraph(f"- {p.customer.ho_ten} ({p.vai_tro}): Từ chối nhận")
 
     doc.add_paragraph()
-    doc.add_paragraph(f"NgÃ y láº­p vÄƒn báº£n: {case.ngay_lap_ho_so.strftime('%d thÃ¡ng %m nÄƒm %Y')}")
+    doc.add_paragraph(f"Ngày lập văn bản: {case.ngay_lap_ho_so.strftime('%d tháng %m năm %Y')}")
 
     doc.add_paragraph()
-    doc.add_paragraph("CÃ”NG CHá»¨NG VIÃŠN")
+    doc.add_paragraph("CÔNG CHỨNG VIÊN")
     doc.add_paragraph()
     doc.add_paragraph()
-    doc.add_paragraph("(KÃ½ vÃ  Ä‘Ã³ng dáº¥u)")
+    doc.add_paragraph("(Ký và đóng dấu)")
 
-    # Xuáº¥t ra stream
+    # Xuất ra stream
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -638,14 +746,9 @@ def export_word_from_template(cid: int, db: Session = Depends(get_db)):
     if not case:
         raise HTTPException(404)
 
-    template_candidates = [
-        Path(r"\\maychu\D\Minh\HỒ SƠ UBND CÁC XÃ\2. Mẫu thừa kế\xã_PCDS -.docx"),
-        Path("word_templates/xa_PCDS_template.docx"),
-    ]
-    existing_templates = [p for p in template_candidates if p.exists()]
-    if not existing_templates:
+    template_path = _get_selected_word_template_path(db)
+    if not template_path:
         raise HTTPException(status_code=500, detail="Khong tim thay file template Word.")
-    template_path = max(existing_templates, key=lambda p: p.stat().st_mtime)
 
     try:
         doc = Document(str(template_path))
@@ -665,5 +768,7 @@ def export_word_from_template(cid: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
 
 

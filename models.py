@@ -113,3 +113,15 @@ class InheritanceParticipant(Base):
     # Quan hệ
     ho_so    = relationship("InheritanceCase", back_populates="participants")
     customer = relationship("Customer",        back_populates="participations")
+
+
+class WordTemplate(Base):
+    """Luu cac file mau Word do nguoi dung tai len de xuat van ban."""
+    __tablename__ = "word_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ten_mau = Column(String(200), nullable=False)
+    ten_file_goc = Column(String(255), nullable=False)
+    duong_dan_file = Column(String(500), nullable=False)
+    is_active = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
