@@ -20,7 +20,7 @@ templates = Jinja2Templates(directory="templates")
 WORD_TEMPLATE_UPLOAD_DIR = Path("word_templates/custom")
 def _hang_for_role(role: str) -> int:
     role = (role or "").strip()
-    if role in ("Cha", "Mẹ", "Vợ/Chồng", "Con", "Cháu", "Con_dau_re"):
+    if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc", "Vợ/Chồng", "Con", "Cháu", "Con_dau_re"):
         return 1
     if role in ("Ông/Bà", "Anh/Chị/Em"):
         return 2
@@ -500,7 +500,12 @@ def _pick_core_people(case: InheritanceCase):
     male = next((c for c in pair if (c.gioi_tinh or "").strip().lower() == "nam"), None)
     female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("nữ", "nu")), None)
     person1 = male or owner or spouse
-    person2 = female or (spouse if spouse and spouse != person1 else owner)
+    if female:
+        person2 = female
+    elif spouse and spouse != person1:
+        person2 = spouse
+    else:
+        person2 = None  # không trùng person1
 
     excluded_ids = {c.id for c in [person1, person2] if c is not None}
     receivers = [p for p in case.participants if p.co_nhan_tai_san and p.customer_id not in excluded_ids]
@@ -570,7 +575,6 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
         m[f"[Năm chết {i}]"] = _safe_text(_fmt_date(c.ngay_chet) if c else "")
 
     m["[Năm chết]"] = m.get("[Năm chết 1]", "")
-    m["[Năm chết 2]"] = m.get("[Năm chết 2]", "")
     return m
 
 
