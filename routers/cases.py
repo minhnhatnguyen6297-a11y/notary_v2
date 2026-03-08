@@ -497,15 +497,22 @@ def _pick_core_people(case: InheritanceCase):
             break
 
     pair = [c for c in [owner, spouse] if c is not None]
-    male = next((c for c in pair if (c.gioi_tinh or "").strip().lower() == "nam"), None)
-    female = next((c for c in pair if (c.gioi_tinh or "").strip().lower() in ("nữ", "nu")), None)
-    person1 = male or owner or spouse
-    if female:
-        person2 = female
-    elif spouse and spouse != person1:
-        person2 = spouse
+    
+    nam = [c for c in pair if (c.gioi_tinh or "").strip().lower() == "nam"]
+    nu = [c for c in pair if (c.gioi_tinh or "").strip().lower() in ("nữ", "nu", "nu")]
+    
+    if len(nam) == 1 and len(nu) == 1:
+        person1 = nam[0]
+        person2 = nu[0]
+    elif len(pair) == 2:
+        person1 = pair[0]
+        person2 = pair[1]
+    elif len(pair) == 1:
+        person1 = pair[0]
+        person2 = None
     else:
-        person2 = None  # không trùng person1
+        person1 = None
+        person2 = None
 
     excluded_ids = {c.id for c in [person1, person2] if c is not None}
     receivers = [p for p in case.participants if p.co_nhan_tai_san and p.customer_id not in excluded_ids]
@@ -514,7 +521,10 @@ def _pick_core_people(case: InheritanceCase):
     non_receivers = sorted(non_receivers, key=lambda p: p.customer_id)
 
     person3 = receivers[0].customer if receivers else None
-    people_4_plus = [p.customer for p in non_receivers]
+    
+    rest_receivers = [p.customer for p in receivers[1:]] if receivers else []
+    rest_non_receivers = [p.customer for p in non_receivers]
+    people_4_plus = rest_receivers + rest_non_receivers
     return person1, person2, person3, people_4_plus
 
 
@@ -617,16 +627,32 @@ def _replace_text_placeholders(text: str, mapping: dict, normalized_mapping: dic
 
 
 def _replace_in_paragraph(paragraph, mapping: dict, normalized_mapping: dict):
-    runs = paragraph.runs
-    if not runs:
+    if not paragraph.runs:
         return
-    text = "".join(r.text for r in runs)
+        
+    # Check if there's anything to replace at all
+    text = "".join(r.text for r in paragraph.runs)
+    if "[" not in text or "]" not in text:
+        return
+
+    # Try run-by-run first to perfectly preserve inline formatting
+    for r in paragraph.runs:
+        if "[" in r.text and "]" in r.text:
+            new_t = _replace_text_placeholders(r.text, mapping, normalized_mapping)
+            if new_t != r.text:
+                r.text = new_t
+
+    # Re-evaluate text since runs might have changed
+    text = "".join(r.text for r in paragraph.runs)
+    if "[" not in text or "]" not in text:
+        return
+        
     new_text = _replace_text_placeholders(text, mapping, normalized_mapping)
-    if new_text == text:
-        return
-    runs[0].text = new_text
-    for r in runs[1:]:
-        r.text = ""
+    if new_text != text:
+        paragraph.runs[0].text = new_text
+        for r in paragraph.runs[1:]:
+            r.clear()
+
 
 
 def _replace_in_doc(doc, mapping: dict):
