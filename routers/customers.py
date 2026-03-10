@@ -166,6 +166,22 @@ def list_customers(request: Request, db: Session = Depends(get_db), q: str = "")
     return templates.TemplateResponse("customers/list.html", {"request": request, "customers": customers, "q": q})
 
 
+@router.get("/api/search")
+def search_customers(db: Session = Depends(get_db), q: str = "", limit: int = 10):
+    query = db.query(Customer)
+    if q:
+        query = query.filter(or_(
+            Customer.ho_ten.contains(q), 
+            Customer.so_giay_to.contains(q), 
+            Customer.dia_chi.contains(q)
+        ))
+    customers = query.order_by(Customer.ho_ten).limit(limit).all()
+    return JSONResponse({
+        "ok": True, 
+        "data": [to_customer_json(c) for c in customers]
+    })
+
+
 @router.get("/download-template")
 def download_template():
     import openpyxl

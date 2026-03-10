@@ -35,16 +35,16 @@
   .person-inline-grid {
     display: grid;
     grid-template-columns: 1.5fr .7fr .95fr .95fr 1fr .95fr 1.5fr auto;
-    gap: 6px;
+    gap: 4px;
     align-items: center;
   }
   .person-inline-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
   .mini-btn { font-size: 12px; padding: 4px 8px; }
-  .inline-people-list { margin-top: 8px; border: 1px dashed #d1d5db; border-radius: 8px; padding: 6px; min-height: 38px; background: #fcfcfd; }
+  .inline-people-list { margin-top: 6px; border: 1px dashed #d1d5db; border-radius: 6px; padding: 4px; min-height: 32px; background: #fcfcfd; }
   .inline-people-row {
     display: grid;
     grid-template-columns: 1.5fr .8fr .95fr .95fr 1fr .95fr 1.5fr;
-    gap: 6px;
+    gap: 4px;
     margin-bottom: 4px;
   }
   .inline-people-row:last-child { margin-bottom: 0; }
@@ -85,52 +85,52 @@
   }
   .tree-tier { border: 1px dashed #dbe3f3; border-radius: 12px; padding: 8px; margin-bottom: 8px; background: #fbfdff; }
   .tree-tier:last-child { margin-bottom: 0; }
-  .tier-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 6px; font-weight: 700; }
-  .tier-content { display: flex; align-items: flex-start; justify-content: center; gap: 10px; flex-wrap: wrap; }
-  .tree-group { display: flex; gap: 8px; align-items: flex-start; }
-  .tree-group .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .tier-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; font-weight: 700; }
+  .tier-content { display: flex; align-items: flex-start; justify-content: center; gap: 8px; flex-wrap: wrap; }
+  .tree-group { display: flex; gap: 6px; align-items: flex-start; }
+  .tree-group .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
 
-  .slot { width: 214px; min-height: 164px; border: 2px solid #cbd5f5; border-radius: 12px; padding: 6px; background: #f8fafc; display: flex; align-items: center; justify-content: center; text-align: center; position: relative; overflow: visible; }
+  .slot { width: 170px; min-height: 120px; border: 2px solid #cbd5f5; border-radius: 8px; padding: 4px; background: #f8fafc; display: flex; align-items: center; justify-content: center; text-align: center; position: relative; overflow: visible; }
   .slot.dragover { border-color: #2563eb; background: #eff6ff; }
-  .slot .placeholder { font-size: 12px; color: var(--muted); }
+  .slot .placeholder { font-size: 11px; color: var(--muted); }
 
-  .person-card { border: 2px solid #1f5fbf; border-radius: 12px; padding: 8px; background: #eaf2ff; width: 200px; height: 150px; box-shadow: 0 1px 6px rgba(0,0,0,.06); position: relative; overflow: visible; display: flex; flex-direction: column; justify-content: flex-start; z-index: 2; cursor: grab; user-select: none; }
+  .person-card { border: 2px solid #1f5fbf; border-radius: 8px; padding: 6px; background: #eaf2ff; width: 156px; height: 110px; box-shadow: 0 1px 4px rgba(0,0,0,.06); position: relative; overflow: visible; display: flex; flex-direction: column; justify-content: flex-start; z-index: 2; cursor: grab; user-select: none; }
   .person-card:active { cursor: grabbing; }
   .person-card.dragging { opacity: .5; }
 
-  .person-card .name { font-weight: 700; color: var(--navy); line-height: 1.2; min-height: 34px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; }
-  .person-card .meta { font-size: 11px; color: var(--muted); line-height: 1.15; pointer-events: none; }
-  .drag-grip { width: 36px; height: 6px; border-radius: 999px; background: #93c5fd; margin: 0 auto 4px auto; cursor: grab; }
-  .person-card .share-input { width: 76px !important; max-width: 76px; height: 24px; font-size: 12px; padding: 2px 6px; }
+  .person-card .name { font-size: 13px; font-weight: 700; color: var(--navy); line-height: 1.1; min-height: 28px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; }
+  .person-card .meta { font-size: 10px; color: var(--muted); line-height: 1.1; pointer-events: none; }
+  .drag-grip { width: 30px; height: 4px; border-radius: 999px; background: #93c5fd; margin: 0 auto 2px auto; cursor: grab; }
+  .person-card .share-input { width: 66px !important; max-width: 66px; height: 22px; font-size: 10px; padding: 2px 4px; }
   .person-card.invalid { border-color: #dc2626; box-shadow: 0 0 0 1px #fecaca; }
-  .card-warning { margin-top: 2px; font-size: 10px; color: #dc2626; font-weight: 700; line-height: 1.2; min-height: 12px; }
-  .card-remove-btn { position: absolute; top: -12px; right: -12px; width: 28px; height: 28px; border-radius: 999px; border: 1px solid #ef4444; background: #fff; color: #ef4444; font-size: 18px; font-weight: 700; line-height: 24px; cursor: pointer; padding: 0; z-index: 99; }
+  .card-warning { margin-top: 2px; font-size: 9px; color: #dc2626; font-weight: 700; line-height: 1.1; min-height: 10px; }
+  .card-remove-btn { position: absolute; top: -10px; right: -10px; width: 22px; height: 22px; border-radius: 999px; border: 1px solid #ef4444; background: #fff; color: #ef4444; font-size: 16px; font-weight: 700; line-height: 20px; cursor: pointer; padding: 0; z-index: 99; }
   .card-remove-btn:hover { background: #ef4444; color: #fff; }
 
-  .child-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; min-height: 70px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 8px; background: #f8fafc; width: 100%; align-items: stretch; }
+  .child-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px; min-height: 50px; border: 2px dashed #cbd5f5; border-radius: 8px; padding: 6px; background: #f8fafc; width: 100%; align-items: stretch; }
   .child-list.dragover { border-color: #2563eb; background: #eff6ff; }
-  .child-placeholder { font-size: 12px; color: var(--muted); }
-  .family-unit { border: 1px solid #bfdbfe; border-radius: 12px; padding: 6px; background: #eff6ff; width: 100%; min-width: 0; min-height: 188px; display: flex; flex-direction: column; justify-content: space-between; }
-  .family-pair { display: flex; align-items: flex-start; justify-content: center; gap: 8px; }
-  .family-link { display: flex; align-items: center; justify-content: center; min-width: 26px; color: #2563eb; font-weight: 700; font-size: 16px; }
-  .child-card { display: block; width: 200px; max-width: 100%; margin: 0 auto; }
-  .family-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-height: 14px; }
+  .child-placeholder { font-size: 11px; color: var(--muted); }
+  .family-unit { border: 1px solid #bfdbfe; border-radius: 8px; padding: 4px; background: #eff6ff; width: 100%; min-width: 0; min-height: 140px; display: flex; flex-direction: column; justify-content: space-between; }
+  .family-pair { display: flex; align-items: flex-start; justify-content: center; gap: 6px; }
+  .family-link { display: flex; align-items: center; justify-content: center; min-width: 20px; color: #2563eb; font-weight: 700; font-size: 14px; }
+  .child-card { display: block; width: 156px; max-width: 100%; margin: 0 auto; }
+  .family-meta { display: flex; align-items: center; gap: 4px; margin-top: 2px; min-height: 12px; }
   .family-meta .arrow-down { margin: 0; display: none; }
   .flow-note { font-size: 11px; font-weight: 700; color: #dc2626; }
-  .grand-list { display: flex; flex-wrap: wrap; gap: 8px; min-height: 60px; border: 2px dashed #cbd5f5; border-radius: 12px; padding: 8px; background: #f8fafc; width: 100%; }
+  .grand-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 50px; border: 2px dashed #cbd5f5; border-radius: 8px; padding: 6px; background: #f8fafc; width: 100%; }
   .grand-list.dragover { border-color: #2563eb; background: #eff6ff; }
-  .grand-group { border: 1px solid #bfdbfe; border-radius: 12px; padding: 6px; background: #eff6ff; min-width: 420px; }
-  .grand-group .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
-  .grand-head { display: flex; align-items: flex-start; gap: 6px; }
-  .grand-spouse-wrap { width: 210px; }
-  .grand-spouse-wrap .slabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
-  .grand-spouse-slot { border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 156px; background: #fff; display: flex; align-items: center; justify-content: center; text-align: center; overflow: visible; }
-  .grand-spouse-slot .placeholder { font-size: 11px; color: var(--muted); }
+  .grand-group { border: 1px solid #bfdbfe; border-radius: 8px; padding: 4px; background: #eff6ff; min-width: 340px; }
+  .grand-group .label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .grand-head { display: flex; align-items: flex-start; gap: 4px; }
+  .grand-spouse-wrap { width: 170px; }
+  .grand-spouse-wrap .slabel { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 2px; }
+  .grand-spouse-slot { border: 1px dashed #94a3b8; border-radius: 6px; padding: 4px; min-height: 120px; background: #fff; display: flex; align-items: center; justify-content: center; text-align: center; overflow: visible; }
+  .grand-spouse-slot .placeholder { font-size: 10px; color: var(--muted); }
   .grand-spouse-slot.dragover { border-color: #2563eb; background: #eff6ff; }
-  .grand-heirs-wrap { flex: 1; min-width: 220px; }
-  .grand-heirs-wrap .hlabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
-  .grand-zone { margin-top: 0; border: 1px dashed #94a3b8; border-radius: 8px; padding: 6px; min-height: 156px; background: #f8fafc; display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; overflow: visible; }
-  .grand-zone .placeholder { font-size: 11px; color: var(--muted); }
+  .grand-heirs-wrap { flex: 1; min-width: 180px; }
+  .grand-heirs-wrap .hlabel { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 2px; }
+  .grand-zone { margin-top: 0; border: 1px dashed #94a3b8; border-radius: 6px; padding: 4px; min-height: 120px; background: #f8fafc; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; overflow: visible; }
+  .grand-zone .placeholder { font-size: 10px; color: var(--muted); }
   .grand-zone.dragover { border-color: #2563eb; background: #eff6ff; }
 
   .spouse-connector { width: 40px; height: 2px; background: #64748b; margin-top: 36px; }
@@ -318,16 +318,23 @@
     </div>
     <div class="workbench">
       <div class="pool-panel">
-        <div class="pool-head">Danh sách người kéo-thả</div>
-        <div class="pool-body" id="people-pool">
-          {% for c in all_customers %}
-          {% if c.id not in participant_ids %}
-          <div class="person-row" draggable="true" data-id="{{ c.id }}" data-name="{{ c.ho_ten }}" data-doc="{{ c.so_giay_to }}" data-birth="{{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '') }}" data-death="{{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '') }}" data-gender="{{ c.gioi_tinh or '' }}">
-            <div class="name">{{ c.ho_ten }}</div>
-            <div class="meta">Sinh: {{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '—') }}</div>
-            <div class="meta">Chết: {{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '—') }}</div>
+        <div class="pool-head">
+          <span>Danh sách người kéo-thả</span>
+        </div>
+        <div class="p-2 border-bottom" style="background:#f8fafc">
+          <div class="input-group input-group-sm">
+            <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
+            <input type="text" id="pool-search-input" class="form-control" placeholder="Tìm tên, CCCD...">
           </div>
-          {% endif %}
+          <div id="pool-search-results" class="list-group position-absolute w-100 shadow-sm mt-1 z-3" style="max-height: 250px; overflow-y: auto; display: none;"></div>
+        </div>
+        <div class="pool-body" id="people-pool">
+          {% for p in participants %}
+          <div class="person-row" draggable="true" data-id="{{ p.customer.id }}" data-name="{{ p.customer.ho_ten }}" data-doc="{{ p.customer.so_giay_to }}" data-birth="{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}" data-death="{{ p.customer.ngay_chet.year if p.customer.ngay_chet and p.customer.ngay_chet.day == 1 and p.customer.ngay_chet.month == 1 else (p.customer.ngay_chet.strftime('%d/%m/%Y') if p.customer.ngay_chet else '') }}" data-gender="{{ p.customer.gioi_tinh or '' }}">
+            <div class="name">{{ p.customer.ho_ten }}</div>
+            <div class="meta">Sinh: {{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '—') }}</div>
+            <div class="meta">Chết: {{ p.customer.ngay_chet.year if p.customer.ngay_chet and p.customer.ngay_chet.day == 1 and p.customer.ngay_chet.month == 1 else (p.customer.ngay_chet.strftime('%d/%m/%Y') if p.customer.ngay_chet else '—') }}</div>
+          </div>
           {% endfor %}
         </div>
       </div>
@@ -340,17 +347,17 @@
             <div>
               <div class="label">Cha mẹ chủ đất</div>
               <div class="d-flex gap-2">
-                <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
-                <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
+                <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố</span></div>
+                <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ</span></div>
               </div>
             </div>
           </div>
           <div class="tree-group">
             <div>
-              <div class="label">Cha mẹ vợ/chồng</div>
+              <div class="label">Cha mẹ vợ/chồng chủ đất</div>
               <div class="d-flex gap-2">
-                <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
-                <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
+                <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố</span></div>
+                <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ</span></div>
               </div>
             </div>
           </div>
@@ -367,14 +374,14 @@
           <div class="tree-group">
             <div>
               <div class="label">Chủ đất</div>
-              <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
+              <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder"><i class="bi bi-person-fill"></i> kéo vào</span></div>
             </div>
           </div>
           <div class="family-link">↔</div>
           <div class="tree-group">
             <div>
               <div class="label">Vợ/Chồng</div>
-              <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
+              <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder"><i class="bi bi-person-heart"></i> kéo vào</span></div>
             </div>
           </div>
         </div>
@@ -384,7 +391,7 @@
         <div class="tier-title">Tầng 3 - Con đẻ</div>
         <div class="tier-content">
           <div class="child-list" id="children-zone">
-            <div class="child-placeholder">Thả con đẻ vào đây</div>
+            <div class="child-placeholder"><i class="bi bi-diagram-2"></i> Kéo thẻ con vào đây</div>
           </div>
         </div>
       </div>
@@ -393,7 +400,7 @@
         <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo <small style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(hiển thị khi có con đã mất)</small></div>
         <div class="tier-content">
           <div class="grand-list" id="grandchildren-zone">
-            <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>
+            <div class="child-placeholder"><i class="bi bi-diagram-3"></i> Tầng thừa kế thế vị sẽ hiển thị khi có người mất</div>
           </div>
         </div>
       </div>
@@ -773,12 +780,12 @@
   function restoreSlotPlaceholder(slotEl) {
     if (!slotEl || !slotEl.classList.contains('slot')) return;
     const labelMap = {
-      owner_father: 'Bố chủ đất',
-      owner_mother: 'Mẹ chủ đất',
-      spouse_father: 'Bố vợ/chồng',
-      spouse_mother: 'Mẹ vợ/chồng',
-      owner: 'Kéo chủ đất',
-      spouse: 'Kéo vợ/chồng'
+      owner_father: 'Bố',
+      owner_mother: 'Mẹ',
+      spouse_father: 'Bố',
+      spouse_mother: 'Mẹ',
+      owner: '<i class="bi bi-person-fill"></i> kéo vào',
+      spouse: '<i class="bi bi-person-heart"></i> kéo vào'
     };
     const txt = labelMap[slotEl.dataset.slot] || 'Kéo vào đây';
     slotEl.innerHTML = `<span class="placeholder">${txt}</span>`;
@@ -798,10 +805,10 @@
       restoreSlotPlaceholder(parent);
     }
     if (parent && parent.classList.contains('grand-spouse-slot') && !parent.querySelector('.person-card')) {
-      parent.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+      parent.innerHTML = '<span class="placeholder"><i class="bi bi-person-heart"></i> kéo vào</span>';
     }
     if (parent && parent.classList.contains('grand-zone') && !parent.querySelector('.person-card')) {
-      parent.innerHTML = '<span class="placeholder">Kéo con vào đây</span>';
+      parent.innerHTML = '<span class="placeholder"><i class="bi bi-diagram-2"></i> kéo con vào</span>';
     }
 
     if (wasChild && data.id) {
@@ -818,7 +825,7 @@
       family.remove();
     }
     if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
-      childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
+      childrenZone.innerHTML = '<div class="child-placeholder"><i class="bi bi-diagram-2"></i> Kéo thẻ con vào đây</div>';
     }
     if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
       grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
@@ -845,7 +852,7 @@
       onMove: onMoveValidate,
       onRemove: () => {
         if (!spouseSlot.querySelector('.person-card')) {
-          spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+          spouseSlot.innerHTML = '<span class="placeholder"><i class="bi bi-person-heart"></i> kéo vào</span>';
         }
         recalcShares();
       },
@@ -879,7 +886,7 @@
       onStart: onDragStart, onEnd: onDragEnd,
       onMove: onMoveValidate,
       onRemove: () => {
-        if (!zone.querySelector('.person-card')) zone.innerHTML = '<span class="placeholder">Kéo con vào đây</span>';
+        if (!zone.querySelector('.person-card')) zone.innerHTML = '<span class="placeholder"><i class="bi bi-diagram-2"></i> kéo con vào</span>';
         recalcShares();
       },
       onAdd: (evt) => {
@@ -915,12 +922,12 @@
         <div class="grand-head">
           <div class="grand-spouse-wrap">
             <div class="slabel">Vợ/chồng</div>
-            <div class="grand-spouse-slot"><span class="placeholder">Kéo vợ/chồng vào đây</span></div>
+            <div class="grand-spouse-slot"><span class="placeholder"><i class="bi bi-person-heart"></i> kéo vào</span></div>
           </div>
           <div class="family-link">↔</div>
           <div class="grand-heirs-wrap">
             <div class="hlabel">Con</div>
-            <div class="grand-zone"><span class="placeholder">Kéo con vào đây</span></div>
+            <div class="grand-zone"><span class="placeholder"><i class="bi bi-diagram-2"></i> kéo con vào</span></div>
           </div>
         </div>
       `;
@@ -966,7 +973,7 @@
         const childId = evt.item.dataset.id;
         family.remove();
         if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
-          childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
+          childrenZone.innerHTML = '<div class="child-placeholder"><i class="bi bi-diagram-2"></i> Kéo thẻ con vào đây</div>';
         }
         const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${childId}"]`);
         if (g) {
@@ -974,7 +981,7 @@
           g.remove();
         }
         if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
-          grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
+          grandchildrenZone.innerHTML = '<div class="child-placeholder"><i class="bi bi-diagram-3"></i> Tầng thừa kế thế vị sẽ hiển thị khi có người mất</div>';
         }
         updateGrandZones();
         recalcShares();
@@ -1096,7 +1103,7 @@
       group.style.display = '';
       const spouseSlot = group.querySelector('.grand-spouse-slot');
       if (spouseSlot && !spouseSlot.querySelector('.person-card')) {
-        spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
+        spouseSlot.innerHTML = '<span class="placeholder"><i class="bi bi-person-heart"></i> kéo vào</span>';
       }
     });
 
@@ -1228,6 +1235,67 @@
   updateGrandZones();
   recalcShares();
 
+  // Search Bar inside Pool
+  const searchInput = document.getElementById('pool-search-input');
+  const searchResults = document.getElementById('pool-search-results');
+  let searchTimeout = null;
+
+  searchInput?.addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    if (!q) {
+      searchResults.style.display = 'none';
+      return;
+    }
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      try {
+        const res = await fetch(`/customers/api/search?q=${encodeURIComponent(q)}&limit=15`);
+        const data = await res.json();
+        if (data.ok && data.data.length > 0) {
+          searchResults.innerHTML = data.data.map(c => `
+            <button type="button" class="list-group-item list-group-item-action py-2 px-3 text-start" data-customer='${JSON.stringify(c)}'>
+              <div class="fw-bold" style="font-size:13px">${c.ho_ten} <span class="text-muted fw-normal ms-1">(${c.so_giay_to})</span></div>
+              <div style="font-size:11px; color:#6b7280">Sinh: ${c.ngay_sinh || '—'} | Chết: ${c.ngay_chet || '—'}</div>
+            </button>
+          `).join('');
+          searchResults.style.display = 'block';
+        } else {
+          searchResults.innerHTML = '<div class="p-2 text-muted text-center" style="font-size:12px">Không tìm thấy kết quả</div>';
+          searchResults.style.display = 'block';
+        }
+      } catch (err) {
+        console.error("Search error:", err);
+      }
+    }, 300);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (searchResults && !searchResults.contains(e.target) && e.target !== searchInput) {
+      searchResults.style.display = 'none';
+    }
+  });
+
+  searchResults?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const cData = btn.dataset.customer;
+    if (!cData) return;
+    const c = JSON.parse(cData);
+    
+    // Check if already in tree or pool
+    if (document.querySelector(`.person-card[data-id="${c.id}"]`) || document.querySelector(`.person-row[data-id="${c.id}"]`)) {
+        showToast('Người này đã có trong danh sách kéo thả hoặc trên sơ đồ', 'info');
+    } else {
+        const data = {
+            id: c.id, name: c.ho_ten, doc: c.so_giay_to, gender: c.gioi_tinh || '', birth: c.ngay_sinh || '', death: c.ngay_chet || ''
+        };
+        putDataBackToPool(data, true);
+    }
+    searchInput.value = '';
+    searchResults.style.display = 'none';
+  });
+
+
   // Inline add person
   document.getElementById('btn-add-person')?.addEventListener('click', async () => {
     const err = document.getElementById('inline-person-error');
@@ -1249,36 +1317,81 @@
       return;
     }
     const c = data.customer;
-    const row = document.createElement('div');
-    row.className = 'person-row';
-    row.dataset.id = c.id;
-    row.dataset.name = c.ho_ten;
-    row.dataset.doc = c.so_giay_to;
-    row.dataset.gender = c.gioi_tinh || '';
-    row.dataset.birth = c.ngay_sinh || '';
-    row.dataset.death = c.ngay_chet || '';
-    row.innerHTML = `
-      <div class="name">${c.ho_ten}</div>
-      <div class="meta">Sinh: ${c.ngay_sinh || '—'}</div>
-      <div class="meta">Chết: ${c.ngay_chet || '—'}</div>
-    `;
-    pool.prepend(row);
+    const cDataObj = {
+        id: c.id, name: c.ho_ten, doc: c.so_giay_to, gender: c.gioi_tinh || '', birth: c.ngay_sinh || '', death: c.ngay_chet || ''
+    };
+    putDataBackToPool(cDataObj, true);
 
     const list = document.getElementById('inline-people-list');
     if (list) {
       const empty = list.querySelector('.inline-empty');
       if (empty) empty.remove();
       const item = document.createElement('div');
-      item.className = 'inline-people-row';
+      item.className = 'inline-people-row position-relative';
+      item.dataset.id = c.id;
       item.innerHTML = `
-        <div class="inline-cell">${c.ho_ten || ''}</div>
-        <div class="inline-cell">${c.gioi_tinh || ''}</div>
-        <div class="inline-cell">${c.ngay_sinh || ''}</div>
-        <div class="inline-cell">${c.ngay_chet || '—'}</div>
-        <div class="inline-cell">${c.so_giay_to || ''}</div>
-        <div class="inline-cell">${c.ngay_cap || ''}</div>
-        <div class="inline-cell">${c.dia_chi || ''}</div>
+        <div class="inline-cell p-ho-ten-val" contenteditable="true" spellcheck="false" title="Bấm để sửa">${c.ho_ten || ''}</div>
+        <div class="inline-cell p-gioi-tinh-val" contenteditable="true" spellcheck="false">${c.gioi_tinh || ''}</div>
+        <div class="inline-cell p-ngay-sinh-val" contenteditable="true" spellcheck="false">${c.ngay_sinh || ''}</div>
+        <div class="inline-cell p-ngay-chet-val" contenteditable="true" spellcheck="false">${c.ngay_chet || ''}</div>
+        <div class="inline-cell p-so-giay-to-val" contenteditable="true" spellcheck="false">${c.so_giay_to || ''}</div>
+        <div class="inline-cell p-ngay-cap-val" contenteditable="true" spellcheck="false">${c.ngay_cap || ''}</div>
+        <div class="inline-cell p-dia-chi-val" contenteditable="true" spellcheck="false">${c.dia_chi || ''}</div>
+        <div class="position-absolute d-flex gap-1" style="right: 6px; top: 6px;">
+            <button type="button" class="btn btn-sm btn-light btn-inline-save" title="Lưu thông tin" style="padding: 2px 6px; font-size: 11px;"><i class="bi bi-save text-primary"></i></button>
+            <button type="button" class="btn btn-sm btn-light btn-inline-del" title="Xóa hàng này" style="padding: 2px 6px; font-size: 11px;"><i class="bi bi-trash text-danger"></i></button>
+        </div>
       `;
+      
+      const btnSave = item.querySelector('.btn-inline-save');
+      const btnDel = item.querySelector('.btn-inline-del');
+      
+      btnSave.addEventListener('click', async () => {
+          const editPayload = new URLSearchParams({
+              ho_ten: item.querySelector('.p-ho-ten-val').textContent.trim(),
+              gioi_tinh: item.querySelector('.p-gioi-tinh-val').textContent.trim(),
+              ngay_sinh: item.querySelector('.p-ngay-sinh-val').textContent.trim(),
+              ngay_chet: item.querySelector('.p-ngay-chet-val').textContent.trim(),
+              so_giay_to: item.querySelector('.p-so-giay-to-val').textContent.trim(),
+              ngay_cap: item.querySelector('.p-ngay-cap-val').textContent.trim(),
+              dia_chi: item.querySelector('.p-dia-chi-val').textContent.trim()
+          });
+          const editRes = await fetch(`/customers/${c.id}/edit`, { method: 'POST', body: editPayload });
+          if(editRes.ok) {
+              btnSave.innerHTML = '<i class="bi bi-check text-success"></i>';
+              setTimeout(() => { btnSave.innerHTML = '<i class="bi bi-save text-primary"></i>'; }, 2000);
+              
+              // Cập nhật lại pool row và card nếu có trên tree
+              const newName = item.querySelector('.p-ho-ten-val').textContent.trim();
+              const newDoc = item.querySelector('.p-so-giay-to-val').textContent.trim();
+              
+              const pr = document.querySelector(`.person-row[data-id="${c.id}"]`);
+              if(pr) {
+                  pr.dataset.name = newName;
+                  pr.dataset.doc = newDoc;
+                  const nameEl = pr.querySelector('.name');
+                  if(nameEl) nameEl.textContent = newName;
+              }
+              const pc = document.querySelector(`.person-card[data-id="${c.id}"]`);
+              if(pc) {
+                  pc.dataset.name = newName;
+                  pc.dataset.doc = newDoc;
+                  const nameEl = pc.querySelector('.name');
+                  if(nameEl) nameEl.textContent = newName;
+              }
+          } else {
+              alert('Cập nhật thất bại. Vui lòng kiểm tra lại thông tin.');
+          }
+      });
+      
+      btnDel.addEventListener('click', () => {
+          if(confirm('Chỉ xóa hàng này khỏi danh sách xem nhanh (Không xóa khỏi csdl)?')) {
+              item.remove();
+              if(list.children.length === 0) {
+                  list.innerHTML = '<div class="inline-empty">Người thêm mới sẽ hiển thị tại đây.</div>';
+              }
+          }
+      });
       list.prepend(item);
     }
 

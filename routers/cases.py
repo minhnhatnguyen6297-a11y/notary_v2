@@ -187,7 +187,7 @@ def create(
                 )
                 db.add(p)
             db.commit()
-        return RedirectResponse(f"/cases/{c.id}", status_code=302)
+        return RedirectResponse(f"/cases/{c.id}/preview", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi tạo hồ sơ: {e}")
@@ -211,6 +211,60 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("cases/detail.html", {
         "request": request, "case": case, "available": available,
         "vai_tro_options": ["Vợ/Chồng", "Con", "Cha/Mẹ", "Anh/Chị/Em"]
+    })
+
+
+@router.get("/{cid}/preview")
+def preview(cid: int, request: Request, db: Session = Depends(get_db)):
+    case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
+    if not case: raise HTTPException(404)
+    
+    # Generate HTML content based on the text document mappings
+    # We use the existing mapping logic but format it into HTML for the preview
+    
+    # Simple placeholder HTML rendering logic for the WYSIWYG editor
+    # In a full solution, this would use a proper Word to HTML converter 
+    # or generate rich HTML based on the case type
+    
+    nguoi_chet = case.nguoi_chet
+    tai_san = case.tai_san
+    
+    document_html = f"""
+    <div style="font-family: 'Times New Roman', serif; padding: 20pt; line-height: 1.5; font-size: 14pt;">
+        <h2 style="text-align: center; text-transform: uppercase;">CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM</h2>
+        <h3 style="text-align: center; text-decoration: underline;">Độc lập - Tự do - Hạnh phúc</h3>
+        <br/><br/>
+        <h2 style="text-align: center; font-weight: bold;">VĂN BẢN KHAI NHẬN DI SẢN THỪA KẾ</h2>
+        <br/>
+        <p>Hôm nay, ngày {case.ngay_lap_ho_so.day} tháng {case.ngay_lap_ho_so.month} năm {case.ngay_lap_ho_so.year}, tại Phòng Công chứng...</p>
+        <br/>
+        <p><b>Chúng tôi gồm có:</b></p>
+    """
+    
+    for p in case.participants:
+        document_html += f"""
+        <p>
+            Ông/Bà: <b>{p.customer.ho_ten}</b><br/>
+            Sinh năm: {p.customer.ngay_sinh.year if p.customer.ngay_sinh else '...'}<br/>
+            CCCD số: {p.customer.so_giay_to}<br/>
+            Địa chỉ: {p.customer.dia_chi or '...'}
+        </p>
+        """
+        
+    document_html += f"""
+        <p>Là những người thừa kế theo pháp luật của Ông/Bà <b>{nguoi_chet.ho_ten}</b> (chết ngày {nguoi_chet.ngay_chet if nguoi_chet.ngay_chet else '...'}).</p>
+        <p><b>Di sản thừa kế gồm:</b></p>
+        <p>
+            {tai_san.hinh_thuc_su_dung if tai_san else '...'} tại địa chỉ {tai_san.dia_chi if tai_san else '...'}
+            giấy chứng nhận {tai_san.so_serial if tai_san else '...'}
+        </p>
+    </div>
+    """
+    
+    return templates.TemplateResponse("cases/preview.html", {
+        "request": request,
+        "case": case,
+        "html_content": document_html.strip()
     })
 
 
@@ -323,7 +377,7 @@ def edit(
                 )
                 db.add(p)
             db.commit()
-        return RedirectResponse(f"/cases/{cid}", status_code=302)
+        return RedirectResponse(f"/cases/{case.id}/preview", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi cập nhật hồ sơ: {e}")
