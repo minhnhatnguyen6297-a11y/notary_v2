@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Preview Văn Bản - Hồ sơ #{{ case.id }}{% endblock %}
+{% block topbar_title %}Preview & Soạn Thảo Văn Bản{% endblock %}
+
+{% block extra_head %}
+<!-- TinyMCE CDN -->
+<script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h2><i class="bi bi-file-earmark-word me-2" style="color:#2b579a"></i>Preview & Chỉnh sửa: Hồ sơ #{{ case.id }}</h2>
+    <div class="text-muted" style="font-size:13px">Bạn có thể tự do chỉnh sửa văn bản dưới đây trước khi xuất ra file Word.</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/cases/{{ case.id }}/edit" class="btn btn-outline-secondary"><i class="bi bi-pencil me-1"></i>Sửa phân bổ</a>
+    <button type="button" class="btn btn-primary" id="btn-export-word"><i class="bi bi-download me-1"></i>Tải Word (.docx)</button>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <form id="export-form" method="POST" action="/cases/{{ case.id }}/export-preview">
+      <textarea id="word-editor" name="html_content" style="width:100%; height:75vh; border:none; padding:20px;">
+        {{ html_content|safe }}
+      </textarea>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  tinymce.init({
+    selector: '#word-editor',
+    menubar: 'file edit view insert format tools table',
+    plugins: 'preview importcss searchreplace autolink autosave save directionality code visualblocks visualchars fullscreen image link media template codesample table charmap pagebreak nonbreaking anchor insertdatetime advlist lists wordcount help charmap quickbars emoticons',
+    toolbar: 'undo redo | bold italic underline strikethrough | fontfamily fontsize blocks | alignleft aligncenter alignright alignjustify | outdent indent |  numlist bullist | forecolor backcolor removeformat | pagebreak | charmap emoticons | fullscreen  preview save print | insertfile image media template link anchor codesample | ltr rtl',
+    toolbar_sticky: true,
+    height: '75vh',
+    language: 'vi',
+    content_style: 'body { font-family: "Times New Roman", Times, serif; font-size: 14pt; line-height: 1.5; margin: 2cm; background-color: #fff; }',
+    setup: function (editor) {
+      editor.on('init', function () {
+        editor.getBody().style.backgroundColor = '#ffffff';
+      });
+    }
+  });
+
+  document.getElementById('btn-export-word').addEventListener('click', function() {
+    tinymce.triggerSave();
+    const btn = this;
+    const oldHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang xử lý...';
+    btn.disabled = true;
+    
+    // Submit the form
+    document.getElementById('export-form').submit();
+    
+    // Restore button after 3 seconds (assuming download starts)
+    setTimeout(() => {
+      btn.innerHTML = oldHtml;
+      btn.disabled = false;
+    }, 3000);
+  });
+</script>
+{% endblock %}

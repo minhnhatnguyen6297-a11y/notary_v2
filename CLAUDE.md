@@ -1,166 +1,209 @@
-# CLAUDE.md — Hệ thống Quản lý Hồ sơ Công chứng (notary_v2)
+# CLAUDE.md — notary_v2
 
-## Mô tả dự án
-Ứng dụng web quản lý hồ sơ thừa kế đất đai tại phòng công chứng Việt Nam.
-Cho phép tạo hồ sơ, phân bổ tỷ lệ thừa kế tự động, và xuất văn bản Word.
+> Đọc file này trước khi làm bất kỳ thứ gì trong project.
+> Cập nhật khi có thay đổi kiến trúc hoặc fix bug xong.
 
-## Tech stack
-- **Backend:** Python 3.13, FastAPI, SQLAlchemy (ORM), SQLite (`notary.db`)
-- **Frontend:** Jinja2 templates, Bootstrap 5, Vanilla JS (no bundler)
-- **Thư viện:** python-docx (xuất Word), openpyxl (import Excel)
-- **Chạy:** `uvicorn main:app --reload` (xem `run.bat`)
+---
+
+## Tổng quan project
+
+Hệ thống quản lý hồ sơ **thừa kế đất đai** cho văn phòng công chứng (Việt Nam).
+- Luồng chính: tạo hồ sơ → kéo-thả cây thừa kế → tính tỉ lệ → xuất Word
+- Ngôn ngữ giao diện: **Tiếng Việt**
+- Chạy local (Windows), không có production server
+
+---
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Backend | Python 3.13 + FastAPI 0.111 + Uvicorn |
+| ORM | SQLAlchemy 2.0 + SQLite (`notary.db` trong project dir) |
+| Template | Jinja2 3.1 + Bootstrap 5 + Vanilla JS (không có bundler) |
+| Office | python-docx 1.1.2 (xuất Word), openpyxl 3.1.2 (import Excel) |
+| Drag-drop | SortableJS (CDN) |
+
+**Không có:** migrations, .env, build tool, test suite.
+
+---
 
 ## Cấu trúc thư mục
+
 ```
 notary_v2/
-├── main.py                  # FastAPI app, mount routers
-├── models.py                # SQLAlchemy models (Customer, Property, InheritanceCase, InheritanceParticipant)
-├── database.py              # SQLite engine, SessionLocal, get_db
+├── main.py                  # Entry point, mount routes
+├── database.py              # SQLite setup, get_db()
+├── models.py                # SQLAlchemy models
+├── requirements.txt
+├── notary.db                # Auto-tạo khi chạy lần đầu
+│
 ├── routers/
-│   ├── customers.py         # CRUD + Excel import + inline-create
-│   ├── properties.py        # CRUD + inline-create
-│   ├── cases.py             # CRUD + lock/unlock + Word export (MAIN MODULE)
-│   └── participants.py      # Add/edit/delete participant (legacy flow)
+│   ├── cases.py             # ★ Logic chính (999 dòng)
+│   ├── customers.py         # CRUD người + import Excel (499 dòng)
+│   ├── properties.py        # CRUD bất động sản (280 dòng)
+│   └── participants.py      # LEGACY — xung đột với form.html (71 dòng)
+│
 ├── templates/
-│   ├── base.html            # Layout chung, sidebar, CSS variables
+│   ├── base.html
 │   ├── cases/
-│   │   ├── form.html        # Form tạo/sửa hồ sơ + JS drag-drop + recalcShares()
-│   │   ├── detail.html      # Chi tiết hồ sơ + add participant form (legacy)
-│   │   └── list.html
-│   ├── customers/           # CRUD customers
-│   └── properties/          # CRUD properties
+│   │   ├── form.html        # ★★ File lớn nhất (~1750 dòng, 1300 dòng JS)
+│   │   ├── detail.html      # LEGACY — có xung đột (332 dòng)
+│   │   └── list.html, preview.html, _document_template.html
+│   ├── customers/           # form, detail, list, upload_result
+│   └── properties/          # form, detail, list
+│
 └── word_templates/
-    └── xa_PCDS_template.docx  # Template Word với placeholders [Tên 1], [CCCD 1]...
+    └── custom/              # Template .docx do user upload
 ```
 
-## Models quan trọng
+---
 
-```python
-Customer          # Người (sống hoặc đã chết). ngay_chet=NULL → còn sống
-Property          # Giấy chứng nhận QSD đất (sổ đỏ)
-InheritanceCase   # Hồ sơ thừa kế. trang_thai: "draft" | "locked"
-InheritanceParticipant  # Người tham gia hồ sơ. vai_tro, hang_thua_ke, ty_le
+## Database schema
+
+```
+Customer              (customers)
+  id, ho_ten, gioi_tinh, ngay_sinh, ngay_chet (NULL = còn sống)
+  so_giay_to (unique), ngay_cap, dia_chi
+
+Property              (properties)
+  id, so_serial (unique), so_thua_dat, so_to_ban_do
+  dia_chi, loai_dat, ngay_cap, co_quan_cap
+
+InheritanceCase       (inheritance_cases)
+  id, nguoi_chet_id (FK), tai_san_id (FK)
+  loai_van_ban: "khai_nhan" | "thoa_thuan"
+  trang_thai: "draft" | "locked"
+  ngay_lap_ho_so, ghi_chu
+
+InheritanceParticipant (inheritance_participants)
+  id, ho_so_id (FK cascade-delete), customer_id (FK)
+  vai_tro (String), hang_thua_ke (1|2|3)
+  co_nhan_tai_san (Bool), ty_le (Float), ghi_chu
+
+WordTemplate          (word_templates)
+  id, ten_mau, ten_file_goc, duong_dan_file, is_active
 ```
 
-## Logic nghiệp vụ chính
+---
 
-### Tính tỷ lệ thừa kế (JS — form.html: recalcShares)
-1. **Tài sản chung:** nếu `ngay_cap GCN >= ngay_ket_hon` → tài sản chung → vợ/chồng được 50% base
-2. **Estate pool:** 50% (tài sản chung) hoặc 100% (tài sản riêng)
-3. **Chia đều theo branch:** cha/mẹ + vợ/chồng + mỗi con = 1 unit
-4. **Con đã chết trước owner:** chỉ cháu nhận phần của con
-5. **Con đã chết sau owner:** vợ/chồng con + cháu nhận phần của con
+## Routes tóm tắt
 
-### Word export (Python — cases.py)
-- Template: `word_templates/xa_PCDS_template.docx` (ưu tiên) hoặc đường dẫn mạng
-- Placeholders: `[Tên 1]`, `[CCCD 1]`, `[Năm sinh 1]`, `[Địa chỉ 1]`... (slots 1-20)
-- `_pick_core_people()`: xác định ai là person1 (nam), person2 (nữ), person3 (thừa kế chính)
-- `_build_template_mapping()`: tạo dict placeholder → giá trị
-- `_replace_in_doc()`: thay thế trong tất cả paragraphs, tables, headers/footers
-
-### Inline-create (AJAX)
-- `POST /customers/inline-create` → JSON `{ok, customer}`
-- `POST /properties/inline-create` → JSON `{ok, property}`
-- Cho phép tạo người/tài sản ngay trong form hồ sơ mà không cần rời trang
-
-## CÁC LỖI ĐÃ BIẾT (cần sửa)
-
-### CRITICAL — Encoding mojibake trong cases.py
-File `routers/cases.py` bị lưu sai encoding tại một số hàm:
-- `_hang_for_role()` (dòng 20-26): chuỗi tiếng Việt bị garbled → luôn return 1
-- `_pick_core_people()` (dòng 387-393): không match được "Vợ/Chồng", "Nữ" → Word export sai
-- `vai_tro_options` trong `detail()` (dòng 211): chuỗi garbled → dropdown hiển thị ký tự rác
-- **Cách sửa:** mở file bằng editor hỗ trợ UTF-8, gõ lại các chuỗi tiếng Việt
-
-### CRITICAL JS — ReferenceError: `cardEl` undefined
-`form.html:629` — hàm `putDataBackToPool()` tham chiếu biến `cardEl` không tồn tại trong scope:
-```javascript
-// BUG: cardEl không được định nghĩa trong putDataBackToPool
-const stillUsedElsewhere = Array.from(...).some(n => n !== cardEl);
 ```
-→ crash khi gọi `putBackToPool(card)` không có `force=true`
+GET/POST  /cases/                   list / create form
+GET/POST  /cases/{id}/edit          edit form
+POST      /cases/{id}/lock|unlock   đổi trạng thái
+GET       /cases/{id}/export-word   ★ xuất .docx (active)
+GET       /cases/{id}/export-word-legacy  DEPRECATED — dead link
+POST      /cases/live-preview       live preview endpoint
 
-### Logic — isOptedIn() sai với người chết sau owner
-`form.html:1210`: `if (!!card.dataset.death) return false` — loại bỏ mọi người có ngày chết,
-kể cả người chết SAU chủ đất (vẫn được nhận theo luật)
+GET/POST  /customers/               list / create
+POST      /customers/upload-excel   batch import
+POST      /properties/inline-create JSON — quick add từ form
 
-### Logic — inline-create property thiếu ngay_cap trong response
-`properties.py:113-121`: không trả về `ngay_cap` → JS không tính được tài sản chung
-cho tài sản mới thêm inline
-
-### Dead code
-- `detail.html:266-271`: alert "Hồ sơ đã khoá" nằm trong `{% if not case.is_locked %}` → không bao giờ hiện
-- `export-word-legacy` endpoint: không có link nào trỏ vào
-- `placeExistingParticipants` dòng 1025: role 'Cha/Mẹ' cho mẹ không bao giờ chạy do `return` sớm
-
-## Hai luồng participant song song (CONFLICT)
-
-**Luồng A — Form drag-drop** (`/cases/create` hoặc `/cases/{id}/edit`):
-- Xóa toàn bộ participant cũ, insert lại từ hidden inputs
-- Chỉ lưu người có `share > 0`
-
-**Luồng B — Detail page** (`/participants/add`, `/participants/{id}/edit`):
-- Thêm/sửa từng người một
-
-**Conflict:** Edit qua Luồng A sẽ xóa tất cả thay đổi từ Luồng B
-
-## Conventions trong codebase
-
-### Date display
-```python
-# Python: hiển thị chỉ năm nếu ngày=01/01 (quy ước chỉ biết năm)
-if d.day == 1 and d.month == 1:
-    return str(d.year)
-else:
-    return d.strftime("%d/%m/%Y")
-```
-```javascript
-// JS: tương tự — yyyy → parse là 01/01/yyyy
-const yyyy = raw.match(/^(\d{4})$/);
-if (yyyy) return new Date(Number(yyyy[1]), 0, 1);
+POST      /participants/add         LEGACY
+POST      /participants/{id}/edit   LEGACY
+POST      /participants/{id}/delete LEGACY
 ```
 
-### Form pattern
-- GET handler: render template với `form={...}`, `errors=[]`, `field_errors={}`
-- POST handler: validate → nếu lỗi render lại form với data posted
-- Redirect after POST: `RedirectResponse(url, status_code=302)`
+---
 
-### Vietnamese ID logic
-```python
-# Từ 01/07/2024: "Căn cước" (Bộ Công an), trước đó: "Căn cước công dân" (Cục CSQLHC)
-# Từ 01/07/2024: "Cư trú tại", trước đó: "Thường trú tại"
+## File quan trọng nhất: `form.html`
+
+File ~1750 dòng, phần JS từ dòng ~425 đến cuối:
+
+| Function | Mục đích |
+|----------|----------|
+| `recalcShares()` | ★ Engine tính tỉ lệ thừa kế — đụng vào cẩn thận |
+| `placeExistingParticipants()` | Load participant đã lưu vào UI |
+| `createChildCard()` | Tạo card UI cho từng người |
+| `initSlotSortable()` | Khởi tạo SortableJS cho các slot |
+| `validateMove()` | Kiểm tra vị trí kéo hợp lệ |
+| `survivesAt(person, date)` | Người còn sống tại ngày X? |
+| `isOptedIn(person)` | Người có tham gia nhận tài sản không? |
+| `putDataBackToPool()` | Trả người về pool khi xóa khỏi slot |
+| `rebuildLandRowsValue()` | Serialize BĐS vào hidden field |
+| `handleNativeDragStart()` | Drag event handler |
+
+**Cấu trúc UI:**
+- Trái: form fields (chủ sở hữu, BĐS, ngày)
+- Giữa: people pool (nguồn kéo-thả)
+- Phải: cây sơ đồ thừa kế (slot cố định theo hàng)
+
+---
+
+## Flow xử lý chính
+
+```
+1. User mở /cases/create hoặc /cases/{id}/edit
+2. JS load danh sách khách hàng → hiển thị pool
+3. User kéo-thả vào cây → recalcShares() chạy tự động
+4. Submit form → POST → cases.py
+   → _build_temp_participants() parse form data
+   → Lưu InheritanceCase + InheritanceParticipant vào DB
+   → CHÚ Ý: chỉ lưu người có ty_le > 0
+5. User lock hồ sơ → POST /cases/{id}/lock
+6. Export Word → GET /cases/{id}/export-word
+   → _pick_core_people() trích xuất người
+   → _build_template_mapping() tạo dict placeholder
+   → python-docx thay thế {{placeholder}} trong template
+   → Trả file .docx
 ```
 
-## Lệnh thường dùng
+---
+
+## ⚠️ Bugs đã biết (CHƯA FIX)
+
+| # | Mức độ | File | Dòng | Mô tả |
+|---|--------|------|------|-------|
+| 1 | 🔴 HIGH | `cases.py` | ~21-27 | `_hang_for_role()` và `_pick_core_people()` dùng chuỗi UTF-8 bị mojibake → `hang_thua_ke` luôn = 1, Word export sai |
+| 2 | 🔴 HIGH | `form.html` | 629 | `cardEl` undefined trong `putDataBackToPool(force=false)` → crash JS |
+| 3 | 🟡 MED | `form.html` | 1210 | `isOptedIn()` loại nhầm người chết SAU owner → tính sai tỉ lệ |
+| 4 | 🟡 MED | `properties.py` | 113-121 | `inline-create` không trả `ngay_cap` trong JSON → joint asset bị lỗi |
+| 5 | 🟢 LOW | `detail.html` | 266-271 | Alert trong block `not is_locked` không bao giờ hiện (dead code) |
+
+---
+
+## ⚠️ Conflict kiến trúc cần biết
+
+**Hai luồng participant xung đột:**
+- `form.html` drag-drop: xóa toàn bộ participants rồi insert lại khi save → **đây là luồng chính**
+- `detail.html` + `participants.py`: legacy add/edit/delete từng người → **nên xóa về sau**
+
+**Hậu quả:** người ở Hàng 1 (cha/mẹ vợ/chồng) bị mất sau khi edit nếu `ty_le = 0`
+
+---
+
+## Conventions & gotchas
+
+- **Date display:** ngày `01/01/YYYY` → chỉ hiển thị năm (`YYYY`)
+- **Giới tính:** `"Nam"` / `"Nữ"` (có dấu)
+- **Loại văn bản:** `"khai_nhan"` / `"thoa_thuan"` (snake_case, không dấu)
+- **Trang thái:** `"draft"` / `"locked"`
+- **Encoding:** file Python phải là UTF-8 BOM-free; chuỗi tiếng Việt trong code → kiểm tra kỹ trước khi lưu
+- **SQLite:** không hỗ trợ `ALTER COLUMN` → nếu cần đổi schema thì phải drop/recreate hoặc migration thủ công
+- **Word template:** placeholder dạng `{{ten_nguoi}}`, `{{ngay_sinh}}`, v.v. — xem `word_templates/system_placeholder_reference.md`
+
+---
+
+## Chạy project
 
 ```bash
-# Khởi động server
-cd D:/notary_app/notary_v2
-.venv/Scripts/activate
+# Windows
+run.bat
+
+# Hoặc thủ công
 uvicorn main:app --reload --port 8000
-
-# Cài dependencies
-pip install -r requirements.txt
-
-# Xem DB (SQLite)
-sqlite3 notary.db ".tables"
-sqlite3 notary.db "SELECT * FROM inheritance_cases LIMIT 5;"
 ```
 
-## Template Word placeholders
+Mở: http://localhost:8000
 
-Slots 1-20, mỗi slot có:
-`[Tên N]`, `[Năm sinh N]`, `[CCCD N]`, `[Ngày cấp N]`, `[Địa chỉ N]`,
-`[Loại CC N]`, `[Nơi cấp CC N]`, `[Thường trú N]`, `[Năm chết N]`
+---
 
-Slots đặc biệt:
-`[Serial]`, `[Số vào sổ]`, `[Số thửa]`, `[Số tờ]`, `[Địa chỉ đất]`,
-`[Ngày]`, `[Tháng]`, `[Cơ quan cấp sổ]`, `[Ngày cấp sổ]`
+## Khi bắt đầu task mới
 
-Person1 = chủ đất (nam), Person2 = vợ/chồng (nữ), Person3 = thừa kế chính nhất.
-
-## Điều không nên làm
-- Không dùng `force=false` với `putBackToPool()` trong JS cho đến khi fix Bug cardEl
-- Không thêm người qua detail page rồi edit qua form drag-drop → mất dữ liệu
-- Không sửa encoding file cases.py bằng editor không hỗ trợ UTF-8 BOM
-- Không xóa Customer khi đã có InheritanceCase liên kết (cascade delete sẽ xóa participant)
+1. Đọc phần **Bugs đã biết** → đừng tạo regression
+2. Nếu sửa `form.html` → test kỹ `recalcShares()` sau khi thay đổi
+3. Nếu sửa `cases.py` → check encoding chuỗi tiếng Việt (đặc biệt `_hang_for_role`)
+4. Không xóa `participants.py` chưa — detail.html vẫn dùng
+5. Sau khi fix bug → cập nhật bảng Bugs ở trên (đánh dấu ✅ FIXED + ngày)

@@ -1,0 +1,82 @@
+<h1 style="text-align: center;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
+<h2 style="text-align: center;">Độc lập - Tự do - Hạnh phúc</h2>
+<p>&nbsp;</p>
+<h2 style="text-align: center;">{% if loai_van_ban == 'khai_nhan' %}VĂN BẢN KHAI NHẬN DI SẢN THỪA KẾ{% else %}VĂN BẢN THỎA THUẬN PHÂN CHIA DI SẢN THỪA KẾ{% endif %}</h2>
+<p>&nbsp;</p>
+
+<p>Hôm nay, ngày {{ ngay_lap.day if ngay_lap else '...' }} tháng {{ ngay_lap.month if ngay_lap else '...' }} năm {{ ngay_lap.year if ngay_lap else '...' }}, tại ....................................................., chúng tôi gồm có:</p>
+<p>&nbsp;</p>
+
+{% if flags.co_nguoi_dai_dien %}
+    <!-- Đoạn văn bản dành cho người đại diện -->
+    <p><i>(Trường hợp có người đại diện theo pháp luật hoặc ủy quyền)</i></p>
+    <p>Người đại diện: .....................................................</p>
+    <p>&nbsp;</p>
+{% endif %}
+
+<p><b>I. NGƯỜI ĐỂ LẠI DI SẢN:</b></p>
+<p>Ông/Bà: <b>{{ owner.ho_ten }}</b>, sinh năm: {{ owner.ngay_sinh.year if owner.ngay_sinh else '...' }}, chết ngày {{ owner.ngay_chet.strftime('%d/%m/%Y') if owner.ngay_chet else '...' }}</p>
+
+{% if spouses %}
+    <p>Vợ/chồng của Ông/Bà {{ owner.ho_ten }} là: 
+        {% for sp in spouses %}
+            <b>{{ sp.customer.ho_ten }}</b>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+    </p>
+{% endif %}
+<p>&nbsp;</p>
+
+<p><b>II. NHỮNG NGƯỜI THỪA KẾ:</b></p>
+
+{% if nhan %}
+    <p><b><i>* Những người nhận di sản:</i></b></p>
+    <ul>
+    {% for p in nhan %}
+        <li><b>{{ p.customer.ho_ten }}</b> ({{ p.vai_tro }}) - Sinh năm: {{ p.customer.ngay_sinh.year if p.customer.ngay_sinh else '...' }} - CCCD: {{ p.customer.so_giay_to }}</li>
+    {% endfor %}
+    </ul>
+{% endif %}
+
+{% if has_tu_choi %}
+    <p><b><i>* Những người từ chối nhận di sản:</i></b></p>
+    <ul>
+    {% for p in tuchoi %}
+        <li><b>{{ p.customer.ho_ten }}</b> ({{ p.vai_tro }}) - Sinh năm: {{ p.customer.ngay_sinh.year if p.customer.ngay_sinh else '...' }} - CCCD: {{ p.customer.so_giay_to }}</li>
+    {% endfor %}
+    </ul>
+    <p>Những người có tên trong danh sách từ chối đã lập văn bản từ chối nhận di sản thừa kế theo quy định của pháp luật.</p>
+{% endif %}
+
+<p>&nbsp;</p>
+<p><b>III. DI SẢN THỪA KẾ:</b></p>
+<p>Quyền sử dụng đất tại: <b>{{ ts.dia_chi }}</b></p>
+<p>Theo Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất số <b>{{ ts.so_serial }}</b>, số vào sổ cấp GCN: <b>{{ ts.so_vao_so }}</b> do {{ ts.co_quan_cap }} cấp ngày {{ ts.ngay_cap.strftime('%d/%m/%Y') if ts.ngay_cap else '...' }}.</p>
+<p>Thửa đất số: {{ ts.so_thua_dat }}, Tờ bản đồ số: {{ ts.so_to_ban_do }}.</p>
+<p>Diện tích: {{ ts.dien_tich if ts.dien_tich else '...' }} m&#178; (Bằng chữ: ........................................... mét vuông).</p>
+<p>Mục đích sử dụng: {{ ts.loai_dat }}.</p>
+<p>Thời hạn sử dụng: {{ ts.thoi_han }}.</p>
+<p>Nguồn gốc sử dụng: {{ ts.nguon_goc }}.</p>
+
+<p>&nbsp;</p>
+<p><b>IV. {{ 'THỎA THUẬN PHÂN CHIA' if loai_van_ban == 'thoa_thuan' else 'KHAI NHẬN DỊ SẢN' }}:</b></p>
+{% if loai_van_ban == 'thoa_thuan' %}
+    <p>Chúng tôi là những người được hưởng thừa kế hợp pháp của Ông/Bà <b>{{ owner.ho_ten }}</b>. Bằng văn bản này, chúng tôi cùng nhau thỏa thuận phân chia di sản thừa kế như sau:</p>
+    <p>Toàn bộ quyền sử dụng đất theo Giấy chứng nhận nói trên được chia lại cho:</p>
+    <ul>
+    {% for p in nhan %}
+        <li>Ông/Bà <b>{{ p.customer.ho_ten }}</b> được toàn quyền sở hữu, sử dụng và định đoạt phần tỷ lệ / diện tích tương ứng đối với tài sản thừa kế.</li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <p>Chúng tôi là những người được hưởng thừa kế hợp pháp của Ông/Bà <b>{{ owner.ho_ten }}</b>. Do không có người nào thuộc diện thừa kế khác và không có ai từ chối (trừ những người đã nêu tên từ chối ở trên), chúng tôi đồng ý cùng nhau khai nhận toàn bộ di sản thừa kế nêu trên.</p>
+{% endif %}
+
+<p>&nbsp;</p>
+<p><b>V. CAM KẾT CỦA CÁC BÊN:</b></p>
+<p>1. Những thông tin về nhân thân, về tình trạng tài sản và tài liệu đính kèm là đúng sự thật.</p>
+<p>2. Ngoài những người có tên nêu trên, Ông/Bà <b>{{ owner.ho_ten }}</b> không còn người thừa kế nào khác (như con đẻ, con nuôi, cha mẹ đẻ, cha mẹ nuôi).</p>
+<p>3. Di sản thừa kế này không bị thế chấp, cầm cố, bảo lãnh, không bị kê biên và không có tranh chấp.</p>
+
+<p>&nbsp;</p>
+<p style="text-align: right;"><b>NGƯỜI LẬP VĂN BẢN</b></p>
+<p style="text-align: right;"><i>(Ký, ghi rõ họ tên và điểm chỉ)</i></p>
