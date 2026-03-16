@@ -1,315 +1,68 @@
 {% extends "base.html" %}
-{% block title %}Xem trước & Soạn thảo Hồ sơ{% endblock %}
-{% block topbar_title %}Trình soạn thảo Hồ sơ thừa kế{% endblock %}
+{% block title %}Preview Văn Bản - Hồ sơ #{{ case.id }}{% endblock %}
+{% block topbar_title %}Preview & Soạn Thảo Văn Bản{% endblock %}
+
+{% block extra_head %}
+<!-- TinyMCE CDN -->
+<script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js" referrerpolicy="origin"></script>
+{% endblock %}
 
 {% block content %}
-<style>
-  .preview-container {
-    display: grid;
-    grid-template-columns: 220px 1fr 1fr;
-    gap: 15px;
-    height: calc(100vh - 140px);
-    overflow: hidden;
-  }
-  
-  /* Left panel for Pool */
-  .panel-pool {
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .panel-pool-header {
-    background: #f8fafc;
-    padding: 10px 12px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: var(--navy);
-    border-bottom: 1px solid #e5e7eb;
-  }
-  .panel-pool-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
-  }
-  .compact-person {
-    padding: 8px 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    margin-bottom: 8px;
-    background: #f8fafc;
-    font-size: 11px;
-    line-height: 1.3;
-  }
-  .compact-person:last-child { margin-bottom: 0; }
-  .compact-person .name { font-weight: 700; font-size: 12px; color: var(--navy); margin-bottom: 2px;}
-  .compact-person .role { color: #2563eb; font-weight: 600; }
-  
-  /* Center panel for Tree View */
-  .panel-tree {
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .panel-tree-header {
-    background: #f8fafc;
-    padding: 10px 12px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--navy);
-    border-bottom: 1px solid #e5e7eb;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .panel-tree-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 15px;
-    background-color: #fafbfc;
-    background-image:
-      linear-gradient(to right, rgba(148,163,184,.1) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(148,163,184,.1) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-  
-  /* Right panel for Editor */
-  .panel-editor {
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .panel-editor-header {
-    background: #f8fafc;
-    padding: 8px 12px;
-    border-bottom: 1px solid #e5e7eb;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .panel-editor-body {
-    flex: 1;
-    overflow: hidden;
-  }
-  
-  /* Mini tree nodes for display only */
-  .mini-node {
-    border: 1px solid #1f5fbf;
-    background: #eaf2ff;
-    border-radius: 6px;
-    padding: 6px 8px;
-    font-size: 11px;
-    width: 130px;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  }
-  .mini-node .label { font-size: 9px; color: #2563eb; font-weight: 600; text-transform: uppercase; margin-bottom: 2px; }
-  .mini-node .name { font-weight: 700; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mini-node.dead { opacity: 0.6; border-color: #94a3b8; background: #f1f5f9; }
-  .mini-node.dead .empty-label { color: #64748b; font-style: italic; }
-  
-  .mini-tier {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 15px;
-    margin-bottom: 20px;
-  }
-  .mini-row { display: flex; gap: 15px; align-items: center; justify-content: center; }
-  .mini-link { color: #cbd5e1; font-weight: bold; }
-  
-  /* Make TinyMCE fit the container */
-  .tox-tinymce { border: none !important; border-radius: 0 !important; }
-</style>
-
-<div class="d-flex justify-content-between align-items-center mb-2">
+<div class="page-header d-flex justify-content-between align-items-center mb-3">
   <div>
-    <h4 class="mb-0 text-navy fw-bold"><i class="bi bi-file-earmark-word me-2 text-primary"></i>Hồ sơ #{{ case.id }}</h4>
-    <div class="text-muted" style="font-size: 13px;">{{ case.nguoi_chet.ho_ten }} - Lập ngày {{ case.ngay_lap_ho_so.strftime('%d/%m/%Y') }}</div>
+    <h2><i class="bi bi-file-earmark-word me-2" style="color:#2b579a"></i>Preview & Chỉnh sửa: Hồ sơ #{{ case.id }}</h2>
+    <div class="text-muted" style="font-size:13px">Bạn có thể tự do chỉnh sửa văn bản dưới đây trước khi xuất ra file Word.</div>
   </div>
   <div class="d-flex gap-2">
-    <a href="/cases/{{ case.id }}/edit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil me-1"></i>Sửa thông tin</a>
-    <a href="/cases" class="btn btn-sm btn-outline-secondary">Xong (về ds)</a>
+    <a href="/cases/{{ case.id }}/edit" class="btn btn-outline-secondary"><i class="bi bi-pencil me-1"></i>Sửa phân bổ</a>
+    <button type="button" class="btn btn-primary" id="btn-export-word"><i class="bi bi-download me-1"></i>Tải Word (.docx)</button>
   </div>
 </div>
 
-<div class="preview-container">
-  
-  <!-- Left Panel: Pool -->
-  <div class="panel-pool">
-    <div class="panel-pool-header">Người tham gia</div>
-    <div class="panel-pool-body">
-      {% for p in case.participants %}
-      <div class="compact-person">
-        <div class="name">{{ p.customer.ho_ten }}</div>
-        <div class="role"><i class="bi bi-person-badge me-1"></i>{{ p.vai_tro }}</div>
-        <div class="text-muted mt-1">Sinh: {{ p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '—' }}</div>
-        <div class="text-muted">CCCD: {{ p.customer.so_giay_to }}</div>
-        {% if p.ty_le > 0 %}
-        <div class="text-success fw-bold" style="font-size: 10px; margin-top: 4px;">Kỷ phần: {{ p.ty_le }}%</div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- Center Panel: Tree Diagram -->
-  <div class="panel-tree">
-    <div class="panel-tree-header">
-      <div>Sơ đồ phả hệ (Rút gọn)</div>
-    </div>
-    <div class="panel-tree-body">
-      {# We render a very simplified view of the participants to give context #}
-      
-      {% set owner_parents = case.participants | selectattr('vai_tro', 'in', ['Cha', 'Mẹ']) | list %}
-      {% if owner_parents %}
-      <div class="mini-tier">
-        <div class="text-muted" style="font-size:10px; font-weight:bold; letter-spacing:0.5px">PHÂN NHÁNH 1</div>
-        <div class="mini-row">
-          {% for p in owner_parents %}
-          <div class="mini-node {{ 'dead' if p.customer.ngay_chet else '' }}">
-            <div class="label">{{ p.vai_tro }}</div>
-            <div class="name" title="{{ p.customer.ho_ten }}">{{ p.customer.ho_ten }}</div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
-      
-      <div class="mini-tier">
-        <div class="text-muted" style="font-size:10px; font-weight:bold; letter-spacing:0.5px">CHỦ ĐẤT & VỢ CHỒNG</div>
-        <div class="mini-row">
-          <div class="mini-node dead border-primary bg-white">
-            <div class="label text-danger">Chủ đất (Đã mất)</div>
-            <div class="name" title="{{ case.nguoi_chet.ho_ten }}">{{ case.nguoi_chet.ho_ten }}</div>
-          </div>
-          
-          {% set spouse = case.participants | selectattr('vai_tro', 'eq', 'Vợ/Chồng') | first %}
-          {% if spouse %}
-          <div class="mini-link">↔</div>
-          <div class="mini-node {{ 'dead' if spouse.customer.ngay_chet else '' }}">
-            <div class="label">Vợ / Chồng</div>
-            <div class="name" title="{{ spouse.customer.ho_ten }}">{{ spouse.customer.ho_ten }}</div>
-          </div>
-          {% endif %}
-        </div>
-      </div>
-      
-      {% set children = case.participants | selectattr('vai_tro', 'eq', 'Con') | list %}
-      {% if children %}
-      <div class="mini-tier">
-        <div class="text-muted" style="font-size:10px; font-weight:bold; letter-spacing:0.5px">CÁC CON</div>
-        <div class="mini-row" style="flex-wrap: wrap;">
-          {% for p in children %}
-          <div class="mini-node {{ 'dead' if p.customer.ngay_chet else '' }}">
-            <div class="label">Con</div>
-            <div class="name" title="{{ p.customer.ho_ten }}">{{ p.customer.ho_ten }}</div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
-      
-      {% set grand = case.participants | selectattr('vai_tro', 'in', ['Cháu', 'Con_dau_re']) | list %}
-      {% if grand %}
-      <div class="mini-tier">
-        <div class="text-muted" style="font-size:10px; font-weight:bold; letter-spacing:0.5px">THẾ VỊ / HÀNG TIẾP THEO</div>
-        <div class="mini-row" style="flex-wrap: wrap;">
-          {% for p in grand %}
-          <div class="mini-node {{ 'dead' if p.customer.ngay_chet else '' }}">
-            <div class="label">{{ p.vai_tro | replace('Con_dau_re', 'Con Dâu/Rể') }}</div>
-            <div class="name" title="{{ p.customer.ho_ten }}">{{ p.customer.ho_ten }}</div>
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
-      
-    </div>
-  </div>
-
-  <!-- Right Panel: Word JS Editor -->
-  <div class="panel-editor">
-    <div class="panel-editor-header">
-      <div class="fw-bold" style="font-size: 13px; color: var(--navy);">Soạn thảo văn bản</div>
-      <button class="btn btn-sm btn-primary" id="btn-download-word">
-        <i class="bi bi-file-earmark-word me-1"></i>Tải Word (.docx)
-      </button>
-    </div>
-    <div class="panel-editor-body">
-      <textarea id="word-editor">{{ html_content | safe }}</textarea>
-    </div>
+<div class="card shadow-sm">
+  <div class="card-body p-0">
+    <form id="export-form" method="POST" action="/cases/{{ case.id }}/export-preview">
+      <textarea id="word-editor" name="html_content" style="width:100%; height:75vh; border:none; padding:20px;">
+        {{ html_content|safe }}
+      </textarea>
+    </form>
   </div>
 </div>
+{% endblock %}
 
-<!-- Scripts for TinyMCE and HTML to DOCX -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tinymce/6.8.3/tinymce.min.js"></script>
-<script src="https://unpkg.com/html-docx-js/dist/html-docx.js"></script>
-
+{% block extra_js %}
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    tinymce.init({
-      selector: '#word-editor',
-      height: '100%',
-      menubar: false,
-      plugins: [
-        'advlist', 'autolink', 'lists', 'link', 'image', 'charmap', 'preview',
-        'anchor', 'searchreplace', 'visualblocks', 'code', 'fullscreen',
-        'insertdatetime', 'media', 'table', 'code', 'help', 'wordcount'
-      ],
-      toolbar: 'undo redo | blocks | ' +
-        'bold italic underline | alignleft aligncenter ' +
-        'alignright alignjustify | bullist numlist | ' +
-        'removeformat | help',
-      content_style: 'body { font-family: "Times New Roman", Times, serif; font-size: 14pt; padding: 20px; line-height: 1.5; }',
-      setup: function (editor) {
-        editor.on('init', function () {
-            // Focus implementation can go here if needed
-        });
-      }
-    });
+  tinymce.init({
+    selector: '#word-editor',
+    menubar: 'file edit view insert format tools table',
+    plugins: 'preview importcss searchreplace autolink autosave save directionality code visualblocks visualchars fullscreen image link media template codesample table charmap pagebreak nonbreaking anchor insertdatetime advlist lists wordcount help charmap quickbars emoticons',
+    toolbar: 'undo redo | bold italic underline strikethrough | fontfamily fontsize blocks | alignleft aligncenter alignright alignjustify | outdent indent |  numlist bullist | forecolor backcolor removeformat | pagebreak | charmap emoticons | fullscreen  preview save print | insertfile image media template link anchor codesample | ltr rtl',
+    toolbar_sticky: true,
+    height: '75vh',
+    language: 'vi',
+    content_style: 'body { font-family: "Times New Roman", Times, serif; font-size: 14pt; line-height: 1.5; margin: 2cm; background-color: #fff; }',
+    setup: function (editor) {
+      editor.on('init', function () {
+        editor.getBody().style.backgroundColor = '#ffffff';
+      });
+    }
+  });
 
-    document.getElementById('btn-download-word').addEventListener('click', function() {
-      const content = tinymce.get('word-editor').getContent();
-      
-      // html-docx requires a specific HTML structure to parse correctly
-      const htmlString = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-          <meta charset="utf-8">
-          <style>
-              body { font-family: "Times New Roman", Times, serif; font-size: 14pt; line-height: 1.5; }
-              p { margin-top: 0; margin-bottom: 10pt; }
-              h1, h2, h3 { text-align: center; }
-          </style>
-      </head>
-      <body>
-          ${content}
-      </body>
-      </html>`;
-      
-      const converted = htmlDocx.asBlob(htmlString, { orientation: 'portrait', margins: {top: 1440, right: 1440, bottom: 1440, left: 1440}});
-      const filename = 'Ho_so_{{ case.id }}.docx';
-      
-      // Create memory link for download
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(converted);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-    });
+  document.getElementById('btn-export-word').addEventListener('click', function() {
+    tinymce.triggerSave();
+    const btn = this;
+    const oldHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Đang xử lý...';
+    btn.disabled = true;
+    
+    // Submit the form
+    document.getElementById('export-form').submit();
+    
+    // Restore button after 3 seconds (assuming download starts)
+    setTimeout(() => {
+      btn.innerHTML = oldHtml;
+      btn.disabled = false;
+    }, 3000);
   });
 </script>
 {% endblock %}

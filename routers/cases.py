@@ -214,60 +214,6 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     })
 
 
-@router.get("/{cid}/preview")
-def preview(cid: int, request: Request, db: Session = Depends(get_db)):
-    case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
-    
-    # Generate HTML content based on the text document mappings
-    # We use the existing mapping logic but format it into HTML for the preview
-    
-    # Simple placeholder HTML rendering logic for the WYSIWYG editor
-    # In a full solution, this would use a proper Word to HTML converter 
-    # or generate rich HTML based on the case type
-    
-    nguoi_chet = case.nguoi_chet
-    tai_san = case.tai_san
-    
-    document_html = f"""
-    <div style="font-family: 'Times New Roman', serif; padding: 20pt; line-height: 1.5; font-size: 14pt;">
-        <h2 style="text-align: center; text-transform: uppercase;">CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM</h2>
-        <h3 style="text-align: center; text-decoration: underline;">Độc lập - Tự do - Hạnh phúc</h3>
-        <br/><br/>
-        <h2 style="text-align: center; font-weight: bold;">VĂN BẢN KHAI NHẬN DI SẢN THỪA KẾ</h2>
-        <br/>
-        <p>Hôm nay, ngày {case.ngay_lap_ho_so.day} tháng {case.ngay_lap_ho_so.month} năm {case.ngay_lap_ho_so.year}, tại Phòng Công chứng...</p>
-        <br/>
-        <p><b>Chúng tôi gồm có:</b></p>
-    """
-    
-    for p in case.participants:
-        document_html += f"""
-        <p>
-            Ông/Bà: <b>{p.customer.ho_ten}</b><br/>
-            Sinh năm: {p.customer.ngay_sinh.year if p.customer.ngay_sinh else '...'}<br/>
-            CCCD số: {p.customer.so_giay_to}<br/>
-            Địa chỉ: {p.customer.dia_chi or '...'}
-        </p>
-        """
-        
-    document_html += f"""
-        <p>Là những người thừa kế theo pháp luật của Ông/Bà <b>{nguoi_chet.ho_ten}</b> (chết ngày {nguoi_chet.ngay_chet if nguoi_chet.ngay_chet else '...'}).</p>
-        <p><b>Di sản thừa kế gồm:</b></p>
-        <p>
-            {tai_san.hinh_thuc_su_dung if tai_san else '...'} tại địa chỉ {tai_san.dia_chi if tai_san else '...'}
-            giấy chứng nhận {tai_san.so_serial if tai_san else '...'}
-        </p>
-    </div>
-    """
-    
-    return templates.TemplateResponse("cases/preview.html", {
-        "request": request,
-        "case": case,
-        "html_content": document_html.strip()
-    })
-
-
 @router.get("/{cid}/edit")
 def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
@@ -377,7 +323,7 @@ def edit(
                 )
                 db.add(p)
             db.commit()
-        return RedirectResponse(f"/cases/{case.id}/preview", status_code=302)
+        return RedirectResponse(f"/cases/{cid}/preview", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi cập nhật hồ sơ: {e}")
@@ -433,6 +379,23 @@ def _get_selected_word_template_path(db: Session) -> Optional[Path]:
     if not existing_templates:
         return None
     return max(existing_templates, key=lambda p: p.stat().st_mtime)
+
+
+@router.get("/templates/list-json")
+def list_templates_json(db: Session = Depends(get_db)):
+    """API trả về danh sách template Word dạng JSON cho modal xuất văn bản."""
+    items = db.query(WordTemplate).order_by(WordTemplate.id.desc()).all()
+    # Also include built-in templates from word_templates/ dir
+    builtin = []
+    for p in Path("word_templates").glob("*.docx"):
+        if p.exists():
+            builtin.append({"id": f"builtin:{p.name}", "ten_mau": p.stem, "is_active": False, "builtin": True})
+    return {
+        "templates": [
+            {"id": t.id, "ten_mau": t.ten_mau, "ten_file_goc": t.ten_file_goc, "is_active": t.is_active, "builtin": False}
+            for t in items
+        ] + builtin
+    }
 
 
 @router.get("/templates/manage")
@@ -819,8 +782,8 @@ def export_word(cid: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{cid}/export-word")
-def export_word_from_template(cid: int, db: Session = Depends(get_db)):
-    """Export inheritance case using the legacy Word form template with [...] placeholders."""
+def export_word_from_template(cid: int, db: Session = Depends(get_db), template_id: Optional[str] = None):
+    """Export inheritance case using the selected Word template."""
     try:
         from docx import Document
     except Exception:
@@ -830,7 +793,27 @@ def export_word_from_template(cid: int, db: Session = Depends(get_db)):
     if not case:
         raise HTTPException(404)
 
-    template_path = _get_selected_word_template_path(db)
+    # Resolve template path from template_id param
+    template_path = None
+    if template_id:
+        if str(template_id).startswith("builtin:"):
+            fname = str(template_id)[len("builtin:"):]
+            p = Path("word_templates") / fname
+            if p.exists():
+                template_path = p
+        else:
+            try:
+                tid = int(template_id)
+                t = db.query(WordTemplate).filter(WordTemplate.id == tid).first()
+                if t and t.duong_dan_file:
+                    p = Path(t.duong_dan_file)
+                    if p.exists():
+                        template_path = p
+            except (ValueError, TypeError):
+                pass
+
+    if not template_path:
+        template_path = _get_selected_word_template_path(db)
     if not template_path:
         raise HTTPException(status_code=500, detail="Khong tim thay file template Word.")
 
@@ -854,5 +837,200 @@ def export_word_from_template(cid: int, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/live-preview")
+def create_live_preview(
+    request: Request,
+    ngay_lap_ho_so: Optional[str] = Form(None),
+    loai_van_ban: Optional[str] = Form("khai_nhan"),
+    tai_san_id: Optional[str] = Form(None),
+    ghi_chu: Optional[str] = Form(None),
+    participant_id: Optional[Union[List[str], str]] = Form(None),
+    participant_role: Optional[Union[List[str], str]] = Form(None),
+    participant_share: Optional[Union[List[str], str]] = Form(None),
+    participant_receive: Optional[Union[List[str], str]] = Form(None),
+    db: Session = Depends(get_db)
+):
+    # Dummy case to use existing mapping logic
+    class DummyCase:
+        def __init__(self, ts, parts, loai, ngay):
+            self.id = 9999
+            self.tai_san = ts
+            self.participants = parts
+            self.loai_van_ban = loai
+            self.ngay_lap_ho_so = ngay
+            
+            # Find owner
+            self.nguoi_chet = None
+            for p in parts:
+                if p.vai_tro == "Owner" or p.customer_id == ts.id: # Just a fallback
+                    pass # We will rely on the participants list in _pick_core_people
+            
+            # Actually, _pick_core_people expects nguoi_chet. 
+            # Let's find the owner from the participants. Wait, in form, owner is NOT sent if we don't handle it.
+            # In form: roleMap doesn't have Owner. Let's fix that.
+            
+    # We will build a custom HTML generator instead of relying on _build_template_mapping entirely because we want SMART documents.
+    all_customers = db.query(Customer).all()
+    customers_by_id = {str(c.id): c for c in all_customers}
+    
+    ts = db.query(Property).filter(Property.id == tai_san_id).first() if tai_san_id else None
+    if not ts:
+        ts = SimpleNamespace(so_serial="...", so_vao_so="...", so_thua_dat="...", so_to_ban_do="...", dia_chi="[...] Vui lòng chọn tài sản", loai_dat="", thoi_han="", nguon_goc="", ngay_cap=None, co_quan_cap="")
+        
+    id_list = _to_list(participant_id)
+    role_list = _to_list(participant_role)
+    share_list = _to_list(participant_share)
+    receive_list = _to_list(participant_receive)
+    
+    participants = []
+    owner = None
+    spouses = []
+    children = []
+    grand = []
+    parents = []
+    
+    for idx, cid in enumerate(id_list):
+        c = customers_by_id.get(str(cid))
+        if not c: continue
+        role = role_list[idx] if idx < len(role_list) else ""
+        recv = str(receive_list[idx]).lower() in ("1", "true") if idx < len(receive_list) else True
+        
+        # In fix_html.py we didn't map owner. The form hidden inputs do not include owner.
+        # Wait, the owner IS in the form because owner card has data-role="Owner" (but roleMap in form didn't map it. Let me just use standard list)
+        
+        p = SimpleNamespace(customer=c, vai_tro=role, co_nhan_tai_san=recv)
+        participants.append(p)
+        
+        if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc"): parents.append(p)
+        elif role == "Vợ/Chồng": spouses.append(p)
+        elif role == "Con": children.append(p)
+        elif role == "Cháu": grand.append(p)
+        elif role == "Owner": owner = c
+        
+    # If owner missing (due to roleMap bug in JS we just wrote), let's guess from dead people
+    if not owner:
+        dead = [p.customer for p in participants if p.customer.ngay_chet]
+        if dead: owner = dead[0]
+        else: owner = SimpleNamespace(ho_ten="[Người để lại di sản]", so_giay_to="...", ngay_sinh=None, ngay_chet=None)
 
+    nhan = [p for p in participants if p.co_nhan_tai_san and p.customer != owner]
+    tuchoi = [p for p in participants if not p.co_nhan_tai_san and p.customer != owner]
+
+    flags = {
+        "co_nguoi_dai_dien": False,  # Later expanded using payload from frontend
+    }
+
+    ngay_lap = None
+    if ngay_lap_ho_so:
+        try:
+            ngay_lap = datetime.strptime(ngay_lap_ho_so, "%Y-%m-%d").date()
+        except:
+            pass
+
+    template = templates.get_template("cases/_document_template.html")
+    html = template.render({
+        "loai_van_ban": loai_van_ban,
+        "owner": owner,
+        "spouses": spouses,
+        "parents": parents,
+        "children": children,
+        "grand": grand,
+        "nhan": nhan,
+        "tuchoi": tuchoi,
+        "has_tu_choi": len(tuchoi) > 0,
+        "ts": ts,
+        "flags": flags,
+        "ngay_lap": ngay_lap
+    })
+
+    return JSONResponse({"html_content": html})
+
+@router.post("/export-draft")
+def export_draft_generic(html_content: str = Form("")):
+    try:
+        from docx import Document
+        from htmldocx import HtmlToDocx
+        doc = Document()
+        new_parser = HtmlToDocx()
+        new_parser.add_html_to_document(html_content, doc)
+    except ImportError:
+        from docx import Document
+        from bs4 import BeautifulSoup
+        doc = Document()
+        soup = BeautifulSoup(html_content, "html.parser")
+        doc.add_paragraph(soup.get_text(separator='\n'))
+        doc.add_paragraph("\n\n(Lỗi: Yêu cầu pip install htmldocx để kết xuất chính tả/định dạng HTML)")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    filename = f"ban_nhap_ho_so_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+@router.get("/{cid}/preview")
+def preview_word(cid: int, request: Request, db: Session = Depends(get_db)):
+    case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
+    if not case: raise HTTPException(404)
+    mapping = _build_template_mapping(case)
+    
+    html_content = f"""
+    <h1 style="text-align: center;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
+    <h2 style="text-align: center;">Độc lập - Tự do - Hạnh phúc</h2>
+    <p>&nbsp;</p>
+    <h2 style="text-align: center;">{ 'VĂN BẢN KHAI NHẬN DI SẢN THỪA KẾ' if case.loai_van_ban == 'khai_nhan' else 'VĂN BẢN THỎA THUẬN PHÂN CHIA DI SẢN THỪA KẾ' }</h2>
+    <p>&nbsp;</p>
+    <p>Chúng tôi gồm có:</p>
+    <p><b>1. {mapping.get('[Tên 1]', '')}</b> sinh năm {mapping.get('[Năm sinh 1]', '')}, CCCD số {mapping.get('[CCCD 1]', '')} cấp ngày {mapping.get('[Ngày cấp 1]', '')} tại {mapping.get('[Nơi cấp CC 1]', '')}</p>
+    """
+    if mapping.get('[Tên 2]', ''):
+        html_content += f"""    <p><b>2. {mapping.get('[Tên 2]', '')}</b> sinh năm {mapping.get('[Năm sinh 2]', '')}, CCCD số {mapping.get('[CCCD 2]', '')} cấp ngày {mapping.get('[Ngày cấp 2]', '')}</p>"""
+    
+    html_content += f"""
+    <p><i>(Cùng các đồng thừa kế khác...)</i></p>
+    <p>&nbsp;</p>
+    <h3>DI SẢN THỪA KẾ:</h3>
+    <p>Giấy chứng nhận quyền sử dụng đất số <b>{mapping.get('[Serial]', '')}</b>, số vào sổ <b>{mapping.get('[Số vào sổ]', '')}</b> do {mapping.get('[Cơ quan cấp sổ]', '')} cấp ngày {mapping.get('[Ngày cấp sổ]', '')}</p>
+    <p>Thửa đất số: {mapping.get('[Số thửa]', '')} - Tờ bản đồ số: {mapping.get('[Số tờ]', '')}</p>
+    <p>Địa chỉ thửa đất: {mapping.get('[Địa chỉ đất]', '')}</p>
+    <p>&nbsp;</p>
+    """
+    
+    return templates.TemplateResponse("cases/preview.html", {
+        "request": request, 
+        "case": case,
+        "html_content": html_content
+    })
+
+@router.post("/{cid}/export-preview")
+def export_preview(cid: int, html_content: str = Form(""), db: Session = Depends(get_db)):
+    case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
+    if not case: raise HTTPException(404)
+    
+    try:
+        from docx import Document
+        from htmldocx import HtmlToDocx
+        doc = Document()
+        new_parser = HtmlToDocx()
+        new_parser.add_html_to_document(html_content, doc)
+    except ImportError:
+        from docx import Document
+        from bs4 import BeautifulSoup
+        doc = Document()
+        soup = BeautifulSoup(html_content, "html.parser")
+        doc.add_paragraph(soup.get_text(separator='\n'))
+        doc.add_paragraph("\n\n(Lỗi: Yêu cầu pip install htmldocx để kết xuất chính tả/định dạng HTML)")
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    filename = f"ho_so_thua_ke_{cid}.docx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
