@@ -1,10 +1,13 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 
 from database import engine, Base
-from routers import customers, properties, cases, participants
+from routers import customers, properties, cases, participants, ocr
 
 # Tạo tất cả bảng trong database khi khởi động
 Base.metadata.create_all(bind=engine)
@@ -19,6 +22,7 @@ app.include_router(customers.router,    prefix="/customers",    tags=["Khách h�
 app.include_router(properties.router,   prefix="/properties",   tags=["Tài sản"])
 app.include_router(cases.router,        prefix="/cases",        tags=["Hồ sơ thừa kế"])
 app.include_router(participants.router, prefix="/participants",  tags=["Người tham gia"])
+app.include_router(ocr.router,                                   tags=["OCR"])
 
 
 @app.get("/")

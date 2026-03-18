@@ -230,6 +230,9 @@
         <div class="person-inline-actions">
           <a href="/customers/download-template" class="btn btn-outline-secondary mini-btn">Tải mẫu Excel</a>
           <button type="button" class="btn btn-outline-secondary mini-btn" data-bs-toggle="modal" data-bs-target="#importExcelModal">Import Excel</button>
+          <button type="button" class="btn btn-warning mini-btn fw-bold" data-bs-toggle="modal" data-bs-target="#ocrModal" title="Tải ảnh CCCD/giấy tờ lên để tự động điền thông tin">
+            <i class="bi bi-camera me-1"></i>OCR ảnh
+          </button>
         </div>
         <div id="inline-people-list" class="inline-people-list"><div class="inline-empty">Người thêm mới sẽ hiển thị tại đây.</div></div>
       </div><!-- /card-body Người tham gia -->
@@ -406,6 +409,84 @@
   </div>
   </form>
 </div>
+
+<!-- ═══ Modal OCR Ảnh giấy tờ ═══════════════════════════════════════════════ -->
+<div class="modal fade" id="ocrModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content" style="min-height:70vh;">
+
+      <div class="modal-header py-2" style="background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;">
+        <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Nhập dữ liệu từ ảnh giấy tờ</h5>
+        <div class="d-flex align-items-center gap-3 ms-auto me-3">
+          <span id="ocr-config-badge" class="badge bg-secondary" style="font-size:11px;">Kiểm tra cấu hình...</span>
+          <span id="ocr-cost-badge" class="badge" style="background:rgba(255,255,255,.15);font-size:11px;display:none;">$0.0000</span>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body p-0 d-flex" style="min-height:60vh;">
+
+        <!-- ── Cột trái: Upload + Queue ──────────────────────────────────── -->
+        <div style="width:320px;min-width:320px;border-right:1px solid #e5e7eb;padding:16px;display:flex;flex-direction:column;gap:12px;background:#fafafa;">
+
+          <!-- Drop zone -->
+          <div id="ocr-drop-zone"
+               style="border:2px dashed #93c5fd;border-radius:10px;padding:24px 12px;text-align:center;cursor:pointer;background:#eff6ff;transition:.2s;"
+               onclick="document.getElementById('ocr-file-input').click()"
+               ondragover="ocrDragOver(event)" ondrop="ocrDrop(event)" ondragleave="ocrDragLeave(event)">
+            <input type="file" id="ocr-file-input" accept="image/*" multiple style="display:none" onchange="ocrHandleFiles(this.files)">
+            <div style="font-size:32px;margin-bottom:8px;">🪪</div>
+            <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Kéo thả hoặc nhấn để chọn</div>
+            <div style="font-size:11px;color:#64748b;">CCCD, sổ đỏ, giấy kết hôn...<br>Nhiều ảnh cùng lúc, thứ tự bất kỳ</div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:6px;">Hoặc dán ảnh <kbd>Ctrl+V</kbd></div>
+          </div>
+
+          <!-- Hàng nút điều khiển -->
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-primary flex-grow-1" id="ocr-btn-extract" onclick="ocrExtractAll()" disabled>
+              <span id="ocr-btn-text"><i class="bi bi-magic me-1"></i>Trích xuất</span>
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="ocrClearAll()" title="Xoá tất cả ảnh">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+
+          <!-- Danh sách ảnh đã chọn -->
+          <div id="ocr-queue" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:80px;">
+            <div style="font-size:11px;color:#94a3b8;text-align:center;padding:12px 0;" id="ocr-queue-empty">Chưa có ảnh nào</div>
+          </div>
+
+          <div style="font-size:10px;color:#94a3b8;border-top:1px solid #e5e7eb;padding-top:8px;">
+            💡 CCCD có QR → miễn phí. Ảnh khác → AI (~$0.0005/ảnh)
+          </div>
+        </div>
+
+        <!-- ── Cột phải: Kết quả ─────────────────────────────────────────── -->
+        <div style="flex:1;padding:16px;overflow-y:auto;" id="ocr-results-panel">
+          <div id="ocr-results-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#94a3b8;">
+            <div style="font-size:48px;margin-bottom:12px;opacity:.4;">📋</div>
+            <div style="font-size:14px;font-weight:500;">Kết quả sẽ hiển thị ở đây</div>
+            <div style="font-size:12px;margin-top:4px;">Tải ảnh lên và nhấn "Trích xuất"</div>
+          </div>
+          <div id="ocr-results-list" style="display:none;"></div>
+        </div>
+
+      </div><!-- /modal-body -->
+
+      <div class="modal-footer py-2 justify-content-between">
+        <div style="font-size:12px;color:#64748b;" id="ocr-summary-text"></div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-success" id="ocr-btn-add-all" onclick="ocrAddAllToPool()" style="display:none;">
+            <i class="bi bi-person-plus me-1"></i>Thêm tất cả vào pool
+          </button>
+          <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Đóng</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<!-- ═══ /Modal OCR ══════════════════════════════════════════════════════════ -->
 
 <!-- Modal Import Excel -->
 <div class="modal fade" id="importExcelModal" tabindex="-1" aria-labelledby="importExcelModalLabel" aria-hidden="true">
@@ -1967,5 +2048,617 @@ function refreshPoolAfterImport() {
     form.submit();
     setTimeout(() => form.remove(), 1000);
   }
+</script>
+
+<!-- jsQR: quét QR code phía client (miễn phí, không tốn token) -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+//  OCR MODULE — Nhập dữ liệu từ ảnh giấy tờ
+// ════════════════════════════════════════════════════════════════════════════
+
+const OCR = (() => {
+  // ── State ──────────────────────────────────────────────────────────────
+  let imageQueue  = [];   // [{id, file, dataUrl, name, status, sizeKB}]
+  let ocrResults  = [];   // [{person|property|marriage, source, filename}]
+  let totalCostUSD = 0;
+
+  // ── Drag/drop helpers ──────────────────────────────────────────────────
+  window.ocrDragOver  = e => { e.preventDefault(); document.getElementById('ocr-drop-zone').style.borderColor='#2563eb'; };
+  window.ocrDragLeave = e => { document.getElementById('ocr-drop-zone').style.borderColor='#93c5fd'; };
+  window.ocrDrop      = e => { e.preventDefault(); ocrDragLeave(e); ocrHandleFiles(e.dataTransfer.files); };
+
+  // ── Paste Ctrl+V ───────────────────────────────────────────────────────
+  document.addEventListener('paste', e => {
+    const modal = document.getElementById('ocrModal');
+    if (!modal || !modal.classList.contains('show')) return;
+    const items = e.clipboardData?.items || [];
+    const imgs  = Array.from(items).filter(i => i.type.startsWith('image/'));
+    if (!imgs.length) return;
+    const files = imgs.map(i => i.getAsFile()).filter(Boolean);
+    ocrHandleFiles(files);
+  });
+
+  // ── Resize ảnh (client-side, canvas) ──────────────────────────────────
+  async function resizeImage(file, maxPx = 1000) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(img.width  * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve({ dataUrl: ev.target.result, sizeKB: Math.round(blob.size/1024) });
+          reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.82);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // ── QR Scan (jsQR) ─────────────────────────────────────────────────────
+  async function tryQRScan(dataUrl) {
+    if (typeof jsQR === 'undefined') return null;
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width; canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        try {
+          const imgData = canvas.getContext('2d').getImageData(0, 0, img.width, img.height);
+          const code = jsQR(imgData.data, img.width, img.height, {inversionAttempts:"attemptBoth"});
+          resolve(code ? code.data : null);
+        } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  }
+
+  // ── Parse QR data → person object ─────────────────────────────────────
+  function parseQRToPerson(qrText) {
+    const raw = String(qrText || '').trim();
+    if (!raw) return null;
+
+    const p = { ho_ten:'', so_giay_to:'', ngay_sinh:'', gioi_tinh:'', dia_chi:'', ngay_cap:'' };
+
+    // Format phổ biến: pipe-separated
+    // "036090027472|TRAN VAN SAU|17071990|Nam|dia_chi|02072021|..."
+    const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 3) {
+      // Tìm số CCCD 12 chữ số
+      const cccdPart = parts.find(p => /^\d{12}$/.test(p));
+      if (cccdPart) p.so_giay_to = cccdPart;
+
+      // Tìm họ tên: phần toàn chữ, ≥ 6 ký tự
+      const namePart = parts.find(p => /^[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼỀẾỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỴỶỸ\s]+$/i.test(p) && p.length >= 4 && !/^\d/.test(p));
+      if (namePart) p.ho_ten = namePart.toUpperCase();
+
+      // Ngày sinh: ddmmyyyy (8 chữ số) hoặc dd/mm/yyyy
+      const dates = parts.filter(p => /^\d{8}$/.test(p) || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(p));
+      if (dates[0]) p.ngay_sinh = normalizeDate(dates[0]);
+      if (dates[1]) p.ngay_cap  = normalizeDate(dates[1]);
+
+      // Giới tính
+      const genderPart = parts.find(p => /^(Nam|Nữ|Nu|Male|Female)$/i.test(p));
+      if (genderPart) p.gioi_tinh = /^(Nam|Male)$/i.test(genderPart) ? 'Nam' : 'Nữ';
+
+      // Địa chỉ: phần dài nhất có dấu phẩy hoặc từ khoá địa lý
+      const addrPart = parts
+        .filter(p => p.length > 10 && (p.includes(',') || /(phường|xã|huyện|tỉnh|quận|thành phố)/i.test(p)))
+        .sort((a,b) => b.length - a.length)[0];
+      if (addrPart) p.dia_chi = addrPart;
+    } else {
+      // Fallback: tìm 12 số CCCD
+      const m = raw.match(/\b(\d{12})\b/);
+      if (m) p.so_giay_to = m[1];
+    }
+
+    // Nếu không có thông tin cần thiết → bỏ
+    if (!p.so_giay_to && !p.ho_ten) return null;
+    return p;
+  }
+
+  function normalizeDate(s) {
+    if (!s) return '';
+    const t = String(s).replace(/\s/g,'');
+    // ddmmyyyy
+    if (/^\d{8}$/.test(t)) return `${t.slice(0,2)}/${t.slice(2,4)}/${t.slice(4,8)}`;
+    // dd/mm/yyyy or dd-mm-yyyy
+    const m = t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (m) return `${m[1].padStart(2,'0')}/${m[2].padStart(2,'0')}/${m[3]}`;
+    return s;
+  }
+
+  // ── Nhận files từ input/drop/paste ────────────────────────────────────
+  window.ocrHandleFiles = async function(files) {
+    for (const f of Array.from(files)) {
+      if (!f || !f.type.startsWith('image/')) continue;
+      const id = Date.now() + '_' + Math.random().toString(36).slice(2);
+      const entry = { id, file: f, name: f.name, dataUrl: null, status: 'pending', sizeKB: 0 };
+      imageQueue.push(entry);
+      renderQueue();
+      const {dataUrl, sizeKB} = await resizeImage(f, 1000);
+      entry.dataUrl = dataUrl;
+      entry.sizeKB  = sizeKB;
+      renderQueue();
+    }
+    document.getElementById('ocr-btn-extract').disabled = !imageQueue.length;
+  };
+
+  // ── Render hàng đợi ảnh ────────────────────────────────────────────────
+  function renderQueue() {
+    const container = document.getElementById('ocr-queue');
+    const empty     = document.getElementById('ocr-queue-empty');
+    if (!imageQueue.length) {
+      container.innerHTML = '';
+      container.appendChild(empty);
+      document.getElementById('ocr-btn-extract').disabled = true;
+      return;
+    }
+    empty.style.display = 'none';
+    // Chỉ re-render những item chưa có DOM
+    imageQueue.forEach(item => {
+      if (container.querySelector(`[data-id="${item.id}"]`)) {
+        // Cập nhật status nếu đổi
+        const statusEl = container.querySelector(`[data-id="${item.id}"] .ocr-item-status`);
+        if (statusEl) statusEl.innerHTML = statusHtml(item);
+        return;
+      }
+      const el = document.createElement('div');
+      el.dataset.id = item.id;
+      el.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:7px 8px;';
+      el.innerHTML = `
+        <img src="${item.dataUrl || ''}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0;background:#f1f5f9;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>
+          <div class="ocr-item-status" style="font-size:10px;">${statusHtml(item)}</div>
+          ${item.sizeKB ? `<div style="font-size:9px;color:#94a3b8;">${item.sizeKB}KB sau resize</div>` : ''}
+        </div>
+        <button onclick="ocrRemoveItem('${item.id}')" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:2px 4px;" title="Xoá">✕</button>
+      `;
+      container.appendChild(el);
+    });
+  }
+
+  function statusHtml(item) {
+    // Support both old string calls and new item object calls
+    const s = typeof item === 'string' ? item : item.status;
+    const errMsg = typeof item === 'object' ? (item._errorMsg || '') : '';
+    if (s === 'pending')    return '<span style="color:#64748b;">⏳ Chờ xử lý</span>';
+    if (s === 'qr')         return '<span style="color:#059669;">✅ QR (miễn phí)</span>';
+    if (s === 'processing') return '<span style="color:#d97706;">⚙️ Đang trích xuất...</span>';
+    if (s === 'ai')         return '<span style="color:#2563eb;">🤖 AI OCR</span>';
+    if (s === 'ai_back')    return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
+    if (s === 'error')      return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
+    return s;
+  }
+
+  window.ocrRemoveItem = function(id) {
+    imageQueue = imageQueue.filter(i => i.id !== id);
+    const el = document.querySelector(`#ocr-queue [data-id="${id}"]`);
+    if (el) el.remove();
+    if (!imageQueue.length) {
+      document.getElementById('ocr-queue-empty').style.display = '';
+      document.getElementById('ocr-btn-extract').disabled = true;
+    }
+  };
+
+  window.ocrClearAll = function() {
+    imageQueue = [];
+    ocrResults = [];
+    document.getElementById('ocr-queue').innerHTML = '';
+    document.getElementById('ocr-queue').appendChild(document.getElementById('ocr-queue-empty'));
+    document.getElementById('ocr-queue-empty').style.display = '';
+    document.getElementById('ocr-btn-extract').disabled = true;
+    document.getElementById('ocr-results-empty').style.display = 'flex';
+    document.getElementById('ocr-results-list').style.display  = 'none';
+    document.getElementById('ocr-results-list').innerHTML = '';
+    document.getElementById('ocr-btn-add-all').style.display = 'none';
+    document.getElementById('ocr-summary-text').textContent = '';
+  };
+
+  // ── Trích xuất tất cả ──────────────────────────────────────────────────
+  window.ocrExtractAll = async function() {
+    const pending = imageQueue.filter(i => i.status === 'pending');
+    if (!pending.length) return;
+
+    const btn = document.getElementById('ocr-btn-extract');
+    btn.disabled = true;
+    document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
+
+    // ── Bước 1: QR scan tất cả (client-side, miễn phí) ──────────────────
+    const needsAI = [];
+    for (const item of pending) {
+      item.status = 'processing';
+      renderQueue();
+      const qrText = await tryQRScan(item.dataUrl);
+      if (qrText) {
+        const person = parseQRToPerson(qrText);
+        if (person) {
+          item.status = 'qr';
+          item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
+          renderQueue();
+          continue;
+        }
+      }
+      needsAI.push(item);
+    }
+
+    // ── Bước 2: Gửi ảnh cần AI (1 lần gọi duy nhất) ────────────────────
+    if (needsAI.length) {
+      try {
+        const formData = new FormData();
+        for (const item of needsAI) {
+          // Chuyển dataUrl về Blob để gửi
+          const res  = await fetch(item.dataUrl);
+          const blob = await res.blob();
+          formData.append('files', blob, item.name);
+        }
+        const resp = await fetch('/api/ocr/analyze', { method: 'POST', body: formData });
+        if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
+        const data = await resp.json();
+
+        // Ước tính chi phí (input ~1300 tokens/ảnh × $0.15/1M + output ~400 × $0.6/1M)
+        const aiCount = needsAI.length;
+        const estCost = aiCount * (1300 * 0.15 + 400 * 0.6) / 1_000_000;
+        totalCostUSD += estCost;
+        updateCostBadge();
+
+        // Gắn kết quả vào từng item
+        const persons    = data.persons    || [];
+        const properties = data.properties || [];
+        const marriages  = data.marriages  || [];
+
+        // Map filename → kết quả (index TẤT CẢ files trong _files[] để back cũng được đánh dấu)
+        const byFile = {};
+        for (const p of persons) {
+          for (const f of (p._files || []).filter(Boolean)) {
+            (byFile[f] = byFile[f] || []).push({type:'person', data: p});
+          }
+        }
+        for (const pr of properties)(byFile[pr._file || '']      = byFile[pr._file || ''] || []).push({type:'property',  data: pr});
+        for (const m of marriages)  (byFile[m._file  || '']      = byFile[m._file  || ''] || []).push({type:'marriage',   data: m});
+
+        for (const item of needsAI) {
+          const results = byFile[item.name] || [];
+          if (results.length) {
+            const r = results[0];
+            // Mặt sau CCCD đã ghép → show "ai (mặt sau)" không cần thêm vào ocrResults
+            const isBackOnly = r.type === 'person' && r.data?._source?.includes('+back')
+                               && r.data?._files?.[1] === item.name;
+            item.status  = isBackOnly ? 'ai_back' : 'ai';
+            item._result = { ...r, source: 'AI', filename: item.name };
+          } else {
+            item.status  = 'error';
+            item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+          }
+          renderQueue();
+        }
+
+        // Gom tất cả kết quả AI (persons đã được ghép nhóm bởi backend)
+        ocrResults.push(...persons.map(p    => ({type:'person',   data:p,  source:'AI'})));
+        ocrResults.push(...properties.map(p => ({type:'property', data:p,  source:'AI'})));
+        ocrResults.push(...marriages.map(m  => ({type:'marriage',  data:m,  source:'AI'})));
+
+      } catch(e) {
+        for (const item of needsAI) { item.status = 'error'; item._errorMsg = e.message; renderQueue(); }
+        showToast('Lỗi OCR: ' + e.message, 'danger');
+      }
+    }
+
+    // ── Bước 3: Gom thêm kết quả QR ─────────────────────────────────────
+    for (const item of pending.filter(i => i.status === 'qr' && i._result)) {
+      ocrResults.push(item._result);
+    }
+
+    renderResults();
+
+    btn.disabled = false;
+    document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-magic me-1"></i>Trích xuất';
+  };
+
+  function updateCostBadge() {
+    const badge = document.getElementById('ocr-cost-badge');
+    if (!badge) return;
+    badge.style.display = '';
+    badge.textContent = `~$${totalCostUSD.toFixed(4)} (~${Math.round(totalCostUSD * 25400)}đ hôm nay)`;
+  }
+
+  // ── Render kết quả ─────────────────────────────────────────────────────
+  function renderResults() {
+    const empty = document.getElementById('ocr-results-empty');
+    const list  = document.getElementById('ocr-results-list');
+    if (!ocrResults.length) return;
+
+    empty.style.display = 'none';
+    list.style.display  = '';
+
+    const persons    = ocrResults.filter(r => r.type === 'person');
+    const properties = ocrResults.filter(r => r.type === 'property');
+    const marriages  = ocrResults.filter(r => r.type === 'marriage');
+
+    let html = '';
+
+    if (persons.length) {
+      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:10px;">
+        <i class="bi bi-people me-1"></i>Người (${persons.length})
+      </div>`;
+      persons.forEach((r, i) => {
+        const d = r.data || {};
+        html += personCard(d, i, r.source);
+      });
+    }
+
+    if (marriages.length) {
+      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin:14px 0 10px;">
+        <i class="bi bi-heart me-1"></i>Quan hệ hôn nhân (${marriages.length})
+      </div>`;
+      marriages.forEach((r, i) => {
+        const d = r.data || {};
+        html += marriageCard(d, i);
+      });
+    }
+
+    if (properties.length) {
+      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin:14px 0 10px;">
+        <i class="bi bi-house me-1"></i>Tài sản (${properties.length})
+      </div>`;
+      properties.forEach((r, i) => {
+        html += propertyCard(r.data || {}, i);
+      });
+    }
+
+    list.innerHTML = html;
+
+    // Hiện nút "Thêm tất cả"
+    if (persons.length) {
+      document.getElementById('ocr-btn-add-all').style.display = '';
+    }
+
+    // Summary
+    const qrCount = ocrResults.filter(r => r.source === 'QR').length;
+    const aiCount = ocrResults.filter(r => r.source === 'AI').length;
+    document.getElementById('ocr-summary-text').textContent =
+      `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
+  }
+
+  function personCard(d, idx, source) {
+    const srcBadge = source === 'QR'
+      ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;">QR ✓</span>`
+      : `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;">AI</span>`;
+    const matchBadge = d._source?.includes('+back')
+      ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:8px;">2 mặt ✓</span>` : '';
+
+    return `
+    <div class="ocr-person-card" data-idx="${idx}"
+         style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-weight:700;font-size:14px;color:#1e3a5f;">
+          <i class="bi bi-person me-1" style="color:#2563eb;"></i>
+          <span class="ocr-field-name">${d.ho_ten || '(chưa đọc được tên)'}</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">${srcBadge}${matchBadge}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        ${ocrField('Họ tên', 'ho_ten', d.ho_ten, idx)}
+        ${ocrField('Giới tính', 'gioi_tinh', d.gioi_tinh, idx, true)}
+        ${ocrField('Ngày sinh', 'ngay_sinh', d.ngay_sinh, idx)}
+        ${ocrField('Số CCCD/CMND', 'so_giay_to', d.so_giay_to, idx)}
+        ${ocrField('Ngày cấp', 'ngay_cap', d.ngay_cap, idx)}
+        ${ocrField('Ngày mất', 'ngay_chet', d.ngay_chet || '', idx)}
+      </div>
+      <div style="margin-bottom:10px;">
+        ${ocrField('Địa chỉ', 'dia_chi', d.dia_chi, idx, false, true)}
+      </div>
+      <div style="display:flex;gap-8px;justify-content:flex-end;">
+        <button class="btn btn-sm btn-success" onclick="ocrAddPersonToPool(${idx})" style="font-size:12px;">
+          <i class="bi bi-person-plus me-1"></i>Thêm vào pool
+        </button>
+      </div>
+    </div>`;
+  }
+
+  function ocrField(label, key, val, idx, isGender=false, fullWidth=false) {
+    const input = isGender
+      ? `<select class="form-select form-select-sm ocr-input" data-idx="${idx}" data-key="${key}" style="font-size:12px;"
+               onchange="ocrUpdateField(${idx},'${key}',this.value)">
+           <option value="">—</option>
+           <option value="Nam" ${val==='Nam'?'selected':''}>Nam</option>
+           <option value="Nữ" ${val==='Nữ'?'selected':''}>Nữ</option>
+         </select>`
+      : `<input type="text" class="form-control form-control-sm ocr-input" data-idx="${idx}" data-key="${key}"
+               value="${(val||'').replace(/"/g,'&quot;')}" style="font-size:12px;"
+               oninput="ocrUpdateField(${idx},'${key}',this.value)">`;
+    const style = fullWidth ? 'grid-column:1/-1;' : '';
+    return `<div style="${style}">
+      <div style="font-size:10px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">${label}</div>
+      ${input}
+    </div>`;
+  }
+
+  function marriageCard(d, idx) {
+    return `
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
+      <div style="font-size:12px;font-weight:700;color:#6b21a8;margin-bottom:8px;">
+        <i class="bi bi-heart-fill me-1"></i>${d.chong?.ho_ten || '?'} ↔ ${d.vo?.ho_ten || '?'}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+        <div><span style="color:#64748b;">Ngày đăng ký:</span> ${d.ngay_dang_ky || '—'}</div>
+        <div><span style="color:#64748b;">Nơi đăng ký:</span> ${d.noi_dang_ky || '—'}</div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:#94a3b8;">
+        💡 Thông tin hôn nhân — bổ sung quan hệ sau khi thêm người vào pool
+      </div>
+    </div>`;
+  }
+
+  function propertyCard(d, idx) {
+    return `
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
+      <div style="font-weight:700;font-size:13px;color:#065f46;margin-bottom:8px;">
+        <i class="bi bi-house me-1"></i>Serial: ${d.so_serial || '—'}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+        <div><span style="color:#64748b;">Số thửa:</span> ${d.so_thua_dat || '—'}</div>
+        <div><span style="color:#64748b;">Tờ bản đồ:</span> ${d.so_to_ban_do || '—'}</div>
+        <div><span style="color:#64748b;">Loại đất:</span> ${d.loai_dat || '—'}</div>
+        <div><span style="color:#64748b;">Ngày cấp:</span> ${d.ngay_cap || '—'}</div>
+        <div style="grid-column:1/-1;"><span style="color:#64748b;">Địa chỉ:</span> ${d.dia_chi || '—'}</div>
+      </div>
+      <div style="margin-top:8px;text-align:right;">
+        <button class="btn btn-sm btn-outline-success" onclick="ocrFillProperty(${idx})" style="font-size:12px;">
+          <i class="bi bi-house-add me-1"></i>Điền vào form tài sản
+        </button>
+      </div>
+    </div>`;
+  }
+
+  // ── Cập nhật field khi user sửa ────────────────────────────────────────
+  window.ocrUpdateField = function(idx, key, val) {
+    if (ocrResults[idx]?.data) ocrResults[idx].data[key] = val;
+  };
+
+  // ── Thêm người vào pool ────────────────────────────────────────────────
+  window.ocrAddPersonToPool = async function(idx) {
+    const r = ocrResults.filter(x => x.type === 'person')[idx];
+    if (!r) return;
+
+    // Đọc giá trị hiện tại từ input fields trong card
+    const card = document.querySelector(`.ocr-person-card[data-idx="${idx}"]`);
+    if (card) {
+      card.querySelectorAll('.ocr-input').forEach(el => {
+        if (r.data) r.data[el.dataset.key] = el.value;
+      });
+    }
+
+    const d = r.data || {};
+    const btn = card?.querySelector('.btn-success');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+
+    const payload = new URLSearchParams({
+      ho_ten:     d.ho_ten    || '',
+      gioi_tinh:  d.gioi_tinh || '',
+      ngay_sinh:  d.ngay_sinh || '',
+      ngay_chet:  d.ngay_chet || '',
+      so_giay_to: d.so_giay_to|| '',
+      ngay_cap:   d.ngay_cap  || '',
+      dia_chi:    d.dia_chi   || '',
+    });
+
+    try {
+      const resp = await fetch('/customers/inline-create', { method: 'POST', body: payload });
+      const data = await resp.json();
+      if (!data.ok) {
+        const msg = Object.keys(data.errors || {}).join(', ');
+        showToast(`Lỗi thêm người: ${msg}`, 'danger');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>Thêm vào pool'; }
+        return;
+      }
+      const c = data.customer;
+      addPersonRowToPool(c);
+      // Đánh dấu đã thêm
+      if (card) {
+        card.style.borderColor = '#10b981';
+        card.style.background  = '#f0fdf4';
+        if (btn) btn.innerHTML = '<i class="bi bi-check me-1"></i>Đã thêm';
+      }
+      showToast(`✅ Đã thêm: ${c.ho_ten}`, 'success');
+    } catch(e) {
+      showToast('Lỗi kết nối: ' + e.message, 'danger');
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>Thêm vào pool'; }
+    }
+  };
+
+  function addPersonRowToPool(c) {
+    const pool = document.getElementById('people-pool');
+    if (!pool || document.querySelector(`.person-row[data-id="${c.id}"]`)) return;
+    const row = document.createElement('div');
+    row.className = 'person-row';
+    row.draggable = true;
+    row.dataset.id     = c.id;
+    row.dataset.name   = c.ho_ten;
+    row.dataset.doc    = c.so_giay_to;
+    row.dataset.gender = c.gioi_tinh || '';
+    row.dataset.birth  = c.ngay_sinh || '';
+    row.dataset.death  = c.ngay_chet || '';
+    row.ondragstart = e => window.handleNativeDragStart(e, JSON.stringify({
+      id: c.id, name: c.ho_ten||'', doc: c.so_giay_to||'',
+      gender: c.gioi_tinh||'', birth: c.ngay_sinh||'', death: c.ngay_chet||''
+    }));
+    row.innerHTML = `
+      <div class="name">${c.ho_ten}</div>
+      <div class="meta">Sinh: ${c.ngay_sinh || '—'} &nbsp;|&nbsp; ${c.gioi_tinh || '—'}</div>
+      <div class="meta">CCCD: ${c.so_giay_to || '—'}</div>
+    `;
+    pool.prepend(row);
+    // Cập nhật inline-people-list
+    const list  = document.getElementById('inline-people-list');
+    const empty = list?.querySelector('.inline-empty');
+    if (empty) empty.remove();
+    const item  = document.createElement('div');
+    item.className = 'inline-people-row';
+    item.innerHTML = `
+      <div class="inline-cell">${c.ho_ten||''}</div>
+      <div class="inline-cell">${c.gioi_tinh||''}</div>
+      <div class="inline-cell">${c.ngay_sinh||''}</div>
+      <div class="inline-cell">${c.ngay_chet||'—'}</div>
+      <div class="inline-cell">${c.so_giay_to||''}</div>
+      <div class="inline-cell">${c.ngay_cap||''}</div>
+      <div class="inline-cell">${c.dia_chi||''}</div>`;
+    if (list) list.prepend(item);
+  }
+
+  // ── Thêm tất cả người cùng lúc ─────────────────────────────────────────
+  window.ocrAddAllToPool = async function() {
+    const persons = ocrResults.filter(r => r.type === 'person');
+    for (let i = 0; i < persons.length; i++) {
+      await ocrAddPersonToPool(i);
+    }
+  };
+
+  // ── Điền vào form tài sản ──────────────────────────────────────────────
+  window.ocrFillProperty = function(idx) {
+    const r = ocrResults.filter(x => x.type === 'property')[idx];
+    if (!r) return;
+    const d = r.data || {};
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    set('pr-so-serial',  d.so_serial);
+    set('pr-so-thua',    d.so_thua_dat);
+    set('pr-so-to',      d.so_to_ban_do);
+    set('pr-dia-chi',    d.dia_chi);
+    set('pr-ngay-cap',   d.ngay_cap);
+    set('pr-co-quan',    d.co_quan_cap);
+    // Đóng modal, cuộn đến form tài sản
+    bootstrap.Modal.getInstance(document.getElementById('ocrModal'))?.hide();
+    document.getElementById('pr-so-serial')?.scrollIntoView({behavior:'smooth', block:'center'});
+    showToast('✅ Đã điền thông tin tài sản', 'success');
+  };
+
+  // ── Kiểm tra config khi mở modal ──────────────────────────────────────
+  document.getElementById('ocrModal')?.addEventListener('show.bs.modal', async () => {
+    const badge = document.getElementById('ocr-config-badge');
+    try {
+      const resp = await fetch('/api/ocr/config');
+      const cfg  = await resp.json();
+      if (cfg.configured) {
+        badge.className = 'badge bg-success';
+        badge.textContent = `✓ ${cfg.model}`;
+      } else {
+        badge.className = 'badge bg-danger';
+        badge.textContent = '⚠ Chưa có API key';
+      }
+    } catch {
+      badge.className = 'badge bg-secondary';
+      badge.textContent = 'Không kiểm tra được';
+    }
+  });
+
+})(); // end OCR module
 </script>
 {% endblock %}
