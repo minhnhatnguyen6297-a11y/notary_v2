@@ -3,9 +3,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 
-from database import engine, Base
+from database import engine, Base, migrate_customers_nullable
 from routers import customers, properties, cases, participants
 
+# Migrate schema trước khi create_all (chuyển customers sang nullable)
+migrate_customers_nullable()
 # Tạo tất cả bảng trong database khi khởi động
 Base.metadata.create_all(bind=engine)
 

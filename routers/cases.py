@@ -108,21 +108,16 @@ def create(
     request: Request,
     nguoi_chet_id: Optional[str] = Form(None),
     tai_san_id: Optional[str] = Form(None),
-    ngay_lap_ho_so: Optional[str] = Form(None),
-    loai_van_ban: Optional[str] = Form("khai_nhan"),
-    ghi_chu: Optional[str] = Form(None),
     participant_id: Optional[Union[List[str], str]] = Form(None),
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
+    from datetime import date as _date
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
-        "ngay_lap_ho_so": (ngay_lap_ho_so or "").strip(),
-        "loai_van_ban": (loai_van_ban or "khai_nhan").strip(),
-        "ghi_chu": (ghi_chu or "").strip(),
     }
     errors = []
     field_errors = {}
@@ -130,13 +125,6 @@ def create(
         field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
         field_errors["tai_san_id"] = "Bắt buộc"
-    if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
-    if form["ngay_lap_ho_so"]:
-        try:
-            datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
-        except ValueError:
-            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -158,8 +146,8 @@ def create(
     try:
         c = InheritanceCase(
             nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
-            ngay_lap_ho_so=datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date(),
-            loai_van_ban=form["loai_van_ban"], ghi_chu=form["ghi_chu"] or None
+            ngay_lap_ho_so=_date.today(),
+            loai_van_ban="khai_nhan", ghi_chu=None
         )
         db.add(c); db.commit(); db.refresh(c)
         pid_list = _to_list(participant_id)
@@ -230,6 +218,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "tai_san_id": str(case.tai_san_id) if case.tai_san_id else "",
         "ngay_lap_ho_so": case.ngay_lap_ho_so.isoformat() if case.ngay_lap_ho_so else "",
         "loai_van_ban": case.loai_van_ban or "khai_nhan",
+        "noi_niem_yet": case.noi_niem_yet or "",
         "ghi_chu": case.ghi_chu or "",
     }
     return templates.TemplateResponse("cases/form.html", {
@@ -244,8 +233,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
 def edit(
     cid: int, request: Request,
     nguoi_chet_id: Optional[str] = Form(None), tai_san_id: Optional[str] = Form(None),
-    ngay_lap_ho_so: Optional[str] = Form(None), loai_van_ban: Optional[str] = Form("khai_nhan"),
-    ghi_chu: Optional[str] = Form(None),
+    noi_niem_yet: Optional[str] = Form(None),
     participant_id: Optional[Union[List[str], str]] = Form(None),
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
@@ -257,9 +245,7 @@ def edit(
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
-        "ngay_lap_ho_so": (ngay_lap_ho_so or "").strip(),
-        "loai_van_ban": (loai_van_ban or "khai_nhan").strip(),
-        "ghi_chu": (ghi_chu or "").strip(),
+        "noi_niem_yet": (noi_niem_yet or "").strip(),
     }
     errors = []
     field_errors = {}
@@ -267,13 +253,6 @@ def edit(
         field_errors["nguoi_chet_id"] = "Bắt buộc"
     if not form["tai_san_id"]:
         field_errors["tai_san_id"] = "Bắt buộc"
-    if not form["ngay_lap_ho_so"]:
-        field_errors["ngay_lap_ho_so"] = "Bắt buộc"
-    if form["ngay_lap_ho_so"]:
-        try:
-            datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
-        except ValueError:
-            field_errors["ngay_lap_ho_so"] = "Ngày không hợp lệ"
 
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     deceased = [c for c in all_customers if c.ngay_chet is not None]
@@ -293,8 +272,7 @@ def edit(
 
     try:
         case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
-        case.ngay_lap_ho_so = datetime.strptime(form["ngay_lap_ho_so"], "%Y-%m-%d").date()
-        case.loai_van_ban = form["loai_van_ban"]; case.ghi_chu = form["ghi_chu"] or None
+        case.noi_niem_yet = form["noi_niem_yet"] or None
         db.commit()
         db.query(InheritanceParticipant).filter(InheritanceParticipant.ho_so_id == case.id).delete()
         db.commit()
@@ -505,6 +483,70 @@ def _safe_text(v) -> str:
     return s
 
 
+def _so_thanh_chu(so: float) -> str:
+    """Chuyển số thực (diện tích m²) thành chữ tiếng Việt."""
+    if so is None:
+        return ""
+    don_vi = ["", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
+    hang = ["", "mười", "trăm", "nghìn", "", "", "triệu", "", "", "tỷ"]
+
+    def _doc_ba_chu_so(n: int) -> str:
+        tram = n // 100
+        chuc = (n % 100) // 10
+        dv   = n % 10
+        result = ""
+        if tram:
+            result += don_vi[tram] + " trăm"
+            if chuc == 0 and dv:
+                result += " linh " + don_vi[dv]
+            elif chuc:
+                result += " " + (don_vi[chuc] + " mươi" if chuc > 1 else "mười")
+                if dv == 1 and chuc > 1:
+                    result += " mốt"
+                elif dv == 5 and chuc > 0:
+                    result += " lăm"
+                elif dv:
+                    result += " " + don_vi[dv]
+        elif chuc:
+            result += (don_vi[chuc] + " mươi" if chuc > 1 else "mười")
+            if dv == 1 and chuc > 1:
+                result += " mốt"
+            elif dv == 5 and chuc > 0:
+                result += " lăm"
+            elif dv:
+                result += " " + don_vi[dv]
+        elif dv:
+            result += don_vi[dv]
+        return result.strip()
+
+    # Tách phần nguyên và thập phân
+    phan_nguyen = int(so)
+    phan_le_str = ""
+    if so != phan_nguyen:
+        le = round(so - phan_nguyen, 6)
+        dec_s = f"{le:.6f}".split(".")[1].rstrip("0")
+        if dec_s:
+            phan_le_str = " phẩy " + " ".join(don_vi[int(d)] for d in dec_s)
+
+    if phan_nguyen == 0:
+        return ("không" + phan_le_str).strip()
+
+    # Xử lý số nguyên
+    parts = []
+    n = phan_nguyen
+    ty  = n // 1_000_000_000; n %= 1_000_000_000
+    tr  = n // 1_000_000;     n %= 1_000_000
+    ng  = n // 1_000;         n %= 1_000
+    dv3 = n
+
+    if ty:  parts.append(_doc_ba_chu_so(ty) + " tỷ")
+    if tr:  parts.append(_doc_ba_chu_so(tr) + " triệu")
+    if ng:  parts.append(_doc_ba_chu_so(ng) + " nghìn")
+    if dv3: parts.append(_doc_ba_chu_so(dv3))
+
+    return (" ".join(parts) + phan_le_str).strip()
+
+
 def _pick_core_people(case: InheritanceCase):
     owner = case.nguoi_chet
     spouse = None
@@ -556,28 +598,58 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
     for idx, c in enumerate(people_4_plus[:17], start=4):
         people_slots[idx] = c
 
+    import json as _json
+    from datetime import date as _date_cls
+    today = _date_cls.today()
+
+    noi_niem_yet = _safe_text(case.noi_niem_yet) if case.noi_niem_yet else _safe_text(ts.dia_chi)
+
+    # Phân tích land_rows_json để lấy dữ liệu từng loại đất
+    land_rows = []
+    if ts.land_rows_json:
+        try:
+            land_rows = _json.loads(ts.land_rows_json)
+        except Exception:
+            pass
+
+    # Tổng diện tích: ưu tiên tính từ land_rows, fallback về ts.dien_tich
+    if land_rows:
+        total = 0.0
+        for r in land_rows:
+            try:
+                total += float(r.get("dien_tich") or 0)
+            except (ValueError, TypeError):
+                pass
+        dien_tich_so = total if total > 0 else ts.dien_tich
+    else:
+        dien_tich_so = ts.dien_tich
+
+    dien_tich_str = f"{dien_tich_so:g}" if dien_tich_so else ""
+    dien_tich_chu = _so_thanh_chu(dien_tich_so).capitalize() if dien_tich_so else ""
+
+    loai_so_val = _safe_text(ts.loai_so) or "Giấy chứng nhận quyền sử dụng đất"
+
     m = {
         "[Tên file]": f"ho_so_thua_ke_{case.id}",
-        "[Niêm Yết]": _safe_text(ts.dia_chi),
-        "[NIÊM YẾT]": _safe_text(ts.dia_chi),
-        "[Loại sổ]": _safe_text("Giấy chứng nhận quyền sử dụng đất"),
+        "[Niêm Yết]": noi_niem_yet,
+        "[NIÊM YẾT]": noi_niem_yet.upper() if noi_niem_yet else "",
+        "[Loại sổ]": loai_so_val,
         "[Địa chỉ đất]": _safe_text(ts.dia_chi),
         "[Serial]": _safe_text(ts.so_serial),
         "[Số vào sổ]": _safe_text(ts.so_vao_so),
         "[Số thửa]": _safe_text(ts.so_thua_dat),
         "[Số tờ]": _safe_text(ts.so_to_ban_do),
-        "[Diện tích]": "",
-        "[Diện tích chữ]": "",
+        "[Diện tích]": dien_tich_str,
+        "[Diện tích chữ]": dien_tich_chu,
         "[Hình thức sử dụng]": _safe_text(ts.hinh_thuc_su_dung),
         "[Loại đất]": _safe_text(ts.loai_dat),
-        "[Thời hạn 1]": _safe_text(ts.thoi_han),
         "[Nguồn gốc]": _safe_text(ts.nguon_goc),
         "[Ngày cấp sổ]": _fmt_date(ts.ngay_cap),
         "[Cơ quan cấp sổ]": _safe_text(ts.co_quan_cap),
-        "[Ngày]": str(case.ngay_lap_ho_so.day) if case.ngay_lap_ho_so else "",
-        "[Tháng]": f"{case.ngay_lap_ho_so.month:02d}" if case.ngay_lap_ho_so else "",
-        "[Ngày chữ]": "",
-        "[Tháng chữ]": "",
+        "[Ngày]": str(today.day),
+        "[Tháng]": f"{today.month:02d}",
+        "[Ngày chữ]": _so_thanh_chu(today.day),
+        "[Tháng chữ]": _so_thanh_chu(today.month),
         "[Người ủy quyền]": "",
         "[Người ủy quyền2]": "",
         "[Số công chứng]": "",
@@ -602,6 +674,25 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
         m[f"[Năm chết {i}]"] = _safe_text(_fmt_date(c.ngay_chet) if c else "")
 
     m["[Năm chết]"] = m.get("[Năm chết 1]", "")
+
+    # Mapping từng loại đất theo số thứ tự: [Loại đất N], [Diện tích N], [Thời hạn N]
+    for i, row in enumerate(land_rows[:10], start=1):
+        loai = str(row.get("loai_dat", "")).strip()
+        dien = str(row.get("dien_tich", "")).strip()
+        thoi = str(row.get("thoi_han", "")).strip()
+        m[f"[Loại đất {i}]"] = loai
+        m[f"[Diện tích {i}]"] = dien
+        m[f"[Thời hạn {i}]"] = thoi
+    # Xóa giá trị cho các slot vượt quá số dòng thực tế (tối đa 10)
+    for i in range(len(land_rows) + 1, 11):
+        m[f"[Loại đất {i}]"] = ""
+        m[f"[Diện tích {i}]"] = ""
+        m[f"[Thời hạn {i}]"] = ""
+
+    # [Thời hạn 1] alias → dòng đầu tiên hoặc ts.thoi_han (backward compat)
+    if not m.get("[Thời hạn 1]") and ts.thoi_han:
+        m["[Thời hạn 1]"] = _safe_text(ts.thoi_han)
+
     return m
 
 

@@ -68,12 +68,14 @@ Customer              (customers)
 
 Property              (properties)
   id, so_serial (unique), so_thua_dat, so_to_ban_do
-  dia_chi, loai_dat, ngay_cap, co_quan_cap
+  dia_chi, dien_tich (Float m²), loai_dat, hinh_thuc_su_dung
+  thoi_han, nguon_goc, ngay_cap, co_quan_cap, so_vao_so
 
 InheritanceCase       (inheritance_cases)
   id, nguoi_chet_id (FK), tai_san_id (FK)
   loai_van_ban: "khai_nhan" | "thoa_thuan"
   trang_thai: "draft" | "locked"
+  noi_niem_yet (String) — tên xã/thị trấn lập văn bản
   ngay_lap_ho_so, ghi_chu
 
 InheritanceParticipant (inheritance_participants)

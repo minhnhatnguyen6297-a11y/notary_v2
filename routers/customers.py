@@ -3,6 +3,7 @@
 import io
 from datetime import date, datetime
 from typing import Any, Dict, Optional
+from sqlalchemy.exc import IntegrityError
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
@@ -379,22 +380,35 @@ def inline_create(
     dia_chi: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
-    form = {
-        "ho_ten": (ho_ten or "").strip(),
-        "gioi_tinh": (gioi_tinh or "").strip(),
-        "ngay_sinh": (ngay_sinh or "").strip(),
-        "ngay_chet": (ngay_chet or "").strip(),
-        "so_giay_to": (so_giay_to or "").strip(),
-        "ngay_cap": (ngay_cap or "").strip(),
-        "dia_chi": (dia_chi or "").strip(),
-    }
-    cleaned, errors = validate_customer_form(form, db)
-    if errors:
-        return JSONResponse({"ok": False, "errors": errors}, status_code=400)
+    name = (ho_ten or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "errors": {"ho_ten": "Bat buoc"}}, status_code=400)
 
-    c = Customer(**cleaned)
+    so_giay_to_val = (so_giay_to or "").strip() or None
+    # If CCCD already exists, load that customer instead of failing
+    if so_giay_to_val:
+        existing = db.query(Customer).filter(Customer.so_giay_to == so_giay_to_val).first()
+        if existing:
+            return JSONResponse({"ok": True, "customer": to_customer_json(existing)})
+
+    c = Customer(
+        ho_ten=name,
+        gioi_tinh=normalize_gender(gioi_tinh or "") or None,
+        ngay_sinh=parse_date(ngay_sinh or "", allow_year_only=True),
+        ngay_chet=parse_date(ngay_chet or "", allow_year_only=True),
+        so_giay_to=so_giay_to_val,
+        ngay_cap=parse_date(ngay_cap or "", allow_year_only=True),
+        dia_chi=(dia_chi or "").strip() or None,
+    )
     db.add(c)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(Customer).filter(Customer.so_giay_to == so_giay_to_val).first()
+        if existing:
+            return JSONResponse({"ok": True, "customer": to_customer_json(existing)})
+        return JSONResponse({"ok": False, "errors": {"so_giay_to": "Trùng"}}, status_code=400)
     db.refresh(c)
     return JSONResponse({"ok": True, "customer": to_customer_json(c)})
 

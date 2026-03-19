@@ -48,6 +48,21 @@
           <input type="text" name="nguon_goc" class="form-control" value="{{ f.get('nguon_goc','') if f else (obj.nguon_goc if obj else '') }}" placeholder="Ví dụ: Do nhà nước giao không thu tiền">
         </div>
 
+        <div class="col-12">
+          <label class="form-label">Loại Giấy chứng nhận</label>
+          <select name="loai_so" class="form-select">
+            <option value="">-- Chọn loại GCN --</option>
+            {% set _loai_so_val = f.get('loai_so','') if f else (obj.loai_so if obj else '') %}
+            {% for ls in [
+              'Giấy chứng nhận quyền sử dụng đất',
+              'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất',
+              'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất'
+            ] %}
+            <option value="{{ ls }}" {{ 'selected' if _loai_so_val == ls }}>{{ ls }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
         <div class="col-12 mt-2"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN THỬa ĐẤT</h6></div>
 
         <div class="col-md-3">
@@ -57,6 +72,10 @@
         <div class="col-md-3">
           <label class="form-label">Số tờ bản đồ</label>
           <input type="text" name="so_to_ban_do" class="form-control" value="{{ f.get('so_to_ban_do','') if f else (obj.so_to_ban_do if obj else '') }}" placeholder="Ví dụ: 08">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Diện tích (m²)</label>
+          <input type="number" step="0.1" min="0" name="dien_tich" class="form-control" value="{{ f.get('dien_tich','') if f else (obj.dien_tich if obj and obj.dien_tich is not none else '') }}" placeholder="Ví dụ: 120.5">
         </div>
         <div class="col-md-3">
           <label class="form-label">Loại đất</label>
@@ -69,12 +88,7 @@
         </div>
         <div class="col-md-3">
           <label class="form-label">Hình thức sử dụng</label>
-          <select name="hinh_thuc_su_dung" class="form-select">
-            <option value="">-- Chọn --</option>
-            {% for h in ['Riêng', 'Chung vợ chồng', 'Chung khác'] %}
-            <option value="{{ h }}" {{ 'selected' if (f.get('hinh_thuc_su_dung') == h) or (obj and obj.hinh_thuc_su_dung == h and not f.get('hinh_thuc_su_dung')) }}>{{ h }}</option>
-            {% endfor %}
-          </select>
+          <input type="text" name="hinh_thuc_su_dung" class="form-control" value="{{ f.get('hinh_thuc_su_dung','') if f else (obj.hinh_thuc_su_dung if obj else '') }}" placeholder="Ví dụ: Riêng / Chung vợ chồng">
         </div>
 
         <div class="col-md-6 required">

@@ -8,7 +8,14 @@
 {% set f = form or {} %}
 
 <div class="page-header">
-  <h2><i class="bi bi-folder-plus me-2" style="color:var(--gold)"></i>{{ 'Chỉnh sửa hồ sơ #' + obj.id|string if obj else 'Tạo hồ sơ thừa kế mới' }}</h2>
+  <h2>
+    <i class="bi bi-folder-plus me-2" style="color:var(--gold)"></i>{{ 'Chỉnh sửa hồ sơ #' + obj.id|string if obj else 'Tạo hồ sơ thừa kế mới' }}
+    {% if obj and obj.ngay_lap_ho_so %}
+      <small class="text-muted fw-normal ms-2" style="font-size:13px;">
+        <i class="bi bi-calendar3 me-1"></i>Ngày lập: {{ obj.ngay_lap_ho_so.strftime('%d/%m/%Y') }}
+      </small>
+    {% endif %}
+  </h2>
   <div class="d-flex gap-2">
     <a href="/cases" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
   </div>
@@ -19,6 +26,7 @@
 <form method="post" action="{{ action }}" id="case-form">
 <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
 <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
+<input type="hidden" name="noi_niem_yet" id="case-noi-niem-yet" value="{{ f.get('noi_niem_yet', obj.noi_niem_yet if obj and obj.noi_niem_yet else '') }}">
 <style>
   .page-header { margin-bottom: 10px; }
   .card { margin-bottom: 10px !important; }
@@ -34,18 +42,34 @@
 
   .person-inline-grid {
     display: grid;
-    grid-template-columns: 1.5fr .7fr .95fr .95fr 1fr .95fr 1.5fr auto;
-    gap: 6px;
+    grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr;
+    gap: 1px;
     align-items: center;
   }
+  .person-inline-grid .form-control,
+  .person-inline-grid .form-select {
+    border-radius: 0;
+    padding: 4px 6px;
+    font-size: 13px;
+    height: 32px;
+  }
+  .person-inline-grid .form-control:focus,
+  .person-inline-grid .form-select:focus {
+    z-index: 1;
+    position: relative;
+  }
+  .person-inline-grid .form-control:first-child { border-radius: 4px 0 0 4px; }
+  .person-inline-grid .form-control:last-child,
+  .person-inline-grid .form-select:last-child { border-radius: 0 4px 4px 0; }
   .person-inline-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+  .card-body.inline-form { padding: 8px 10px; }
   .mini-btn { font-size: 12px; padding: 4px 8px; }
   .inline-people-list { margin-top: 8px; border: 1px dashed #d1d5db; border-radius: 8px; padding: 6px; min-height: 38px; background: #fcfcfd; }
   .inline-people-row {
     display: grid;
-    grid-template-columns: 1.5fr .8fr .95fr .95fr 1fr .95fr 1.5fr;
-    gap: 6px;
-    margin-bottom: 4px;
+    grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr;
+    gap: 1px;
+    margin-bottom: 2px;
   }
   .inline-people-row:last-child { margin-bottom: 0; }
   .inline-cell {
@@ -58,14 +82,32 @@
   }
   .inline-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
 
+  .person-edit-row {
+    display: grid;
+    grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 60px;
+    gap: 1px;
+    margin-bottom: 2px;
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 3px;
+  }
+  .person-edit-row .form-control,
+  .person-edit-row .form-select {
+    border-radius: 0; border: none; border-right: 1px solid #e5e7eb;
+    padding: 3px 6px; font-size: 12px; height: 30px; background: transparent;
+  }
+  .person-edit-row .form-control:focus,
+  .person-edit-row .form-select:focus { background: #fffde7; box-shadow: none; border-color: transparent; }
+  .person-edit-row .row-actions { display: flex; gap: 2px; padding: 2px 3px; align-items: center; }
+  .btn-xs { padding: 1px 6px; font-size: 11px; line-height: 1.6; }
+
   .property-compact .border.rounded { padding: 8px !important; }
   .property-compact .table-sm th,
   .property-compact .table-sm td { padding: 4px; font-size: 12px; }
 
-  .workbench { display: block; }
-  .pool-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; height: 100%; display: flex; flex-direction: column; }
+  .pool-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
   .pool-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; background: #fafafa; }
-  .pool-body { flex-grow: 1; overflow-y: auto; overflow-x: hidden; min-height: 200px; }
+  .pool-body { flex-grow: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
   .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; border-left: 3px solid transparent; cursor: grab; }
   .person-row:active { cursor: grabbing; }
   .person-row.dragging { opacity: .5; }
@@ -176,124 +218,89 @@
   .tox-notifications-container, .tox-promotion, .tox-statusbar__branding { display: none !important; }
 </style>
 
-<div class="container-fluid" style="height: calc(100vh - 80px); overflow: hidden; padding-bottom: 20px;">
-  <form id="case-form" method="post" action="/cases/{{ obj.id if obj else '' }}{{ '/edit' if obj else '/create' }}" class="h-100">
-    <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
-    <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
-    
-    <div class="row h-100 mx-0" style="flex-wrap: nowrap; overflow: hidden;">
-      <!-- Cột Trái: Nhập liệu & Khung chờ kéo thả -->
-      <div class="col-md-4 col-sm-4 d-flex flex-column gap-2 h-100" style="overflow-y: auto; padding-right: 10px; border-right: 1px solid #e5e7eb;">
-    <div class="card mb-2">
-  <div class="card-header compact-title"><i class="bi bi-file-earmark-text me-1"></i>Thiết lập hồ sơ</div>
-  <div class="card-body">
-    <div class="row g-3">
-      <div class="col-md-4">
-        <label class="form-label required">Ngày lập hồ sơ</label>
-        <input type="date" name="ngay_lap_ho_so" class="form-control {% if fe.ngay_lap_ho_so %}is-invalid{% endif %}"
-               value="{{ f.get('ngay_lap_ho_so','') if f else (obj.ngay_lap_ho_so.isoformat() if obj else '') }}" required>
-        {% if fe.ngay_lap_ho_so %}<div class="invalid-feedback">{{ fe.ngay_lap_ho_so }}</div>{% endif %}
-      </div>
-      <div class="col-md-4">
-        <label class="form-label required">Loại văn bản</label>
-        <select name="loai_van_ban" class="form-select">
-          <option value="khai_nhan" {{ 'selected' if (f.get('loai_van_ban') == 'khai_nhan') or (not f.get('loai_van_ban') and (not obj or obj.loai_van_ban == 'khai_nhan')) }}>Văn bản khai nhận di sản</option>
-          <option value="thoa_thuan" {{ 'selected' if (f.get('loai_van_ban') == 'thoa_thuan') or (obj and obj.loai_van_ban == 'thoa_thuan' and not f.get('loai_van_ban')) }}>Văn bản thỏa thuận phân chia</option>
-        </select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label">Ghi chú</label>
-        <input type="text" name="ghi_chu" class="form-control"
-               value="{{ f.get('ghi_chu','') if f else (obj.ghi_chu if obj else '') }}" placeholder="Ghi chú tuỳ chọn...">
-      </div>
-    </div>
-  </div>
-</div>
-    <div class="card">
-      <div class="card-header compact-title"><i class="bi bi-person-plus me-1"></i>Người tham gia hồ sơ thừa kế</div>
-      <div class="card-body inline-form">
-        <div id="inline-person-error" class="alert alert-danger d-none"></div>
-        <div class="person-inline-grid">
-          <input type="text" class="form-control" id="p-ho-ten" placeholder="Họ và tên *">
-          <select class="form-select" id="p-gioi-tinh">
-            <option value="">Giới tính *</option>
-            <option value="Nam">Nam</option>
-            <option value="Nữ">Nữ</option>
-          </select>
-          <input type="text" class="form-control" id="p-ngay-sinh" placeholder="Ngày sinh *">
-          <input type="text" class="form-control" id="p-ngay-chet" placeholder="Ngày chết">
-          <input type="text" class="form-control" id="p-so-giay-to" placeholder="Số giấy tờ *">
-          <input type="text" class="form-control" id="p-ngay-cap" placeholder="Ngày cấp *">
-          <input type="text" class="form-control" id="p-dia-chi" placeholder="Địa chỉ *">
-          <button type="button" id="btn-add-person" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm</button>
-        </div>
-        <div class="person-inline-actions">
-          <a href="/customers/download-template" class="btn btn-outline-secondary mini-btn">Tải mẫu Excel</a>
-          <button type="button" class="btn btn-outline-secondary mini-btn" data-bs-toggle="modal" data-bs-target="#importExcelModal">Import Excel</button>
-        </div>
-        <div id="inline-people-list" class="inline-people-list"><div class="inline-empty">Người thêm mới sẽ hiển thị tại đây.</div></div>
-      </div><!-- /card-body Người tham gia -->
-    </div><!-- /card Người tham gia -->
-    <div class="card property-compact">
-      <div class="card-header compact-title"><i class="bi bi-house-add me-1"></i>Tài sản</div>
-      <div class="card-body inline-form">
-        <div id="inline-prop-error" class="alert alert-danger d-none"></div>
-        <div class="row g-2">
-          <div class="col-3">
-            <input type="text" class="form-control" id="pr-so-serial" placeholder="Số Serial *">
-          </div>
-          <div class="col-3">
-            <input type="text" class="form-control" id="pr-so-vao-so" placeholder="Số vào sổ">
-          </div>
-          <div class="col-3">
-            <input type="text" class="form-control" id="pr-so-thua" placeholder="Số thửa đất">
-          </div>
-          <div class="col-3">
-            <input type="text" class="form-control" id="pr-so-to" placeholder="Số tờ bản đồ">
-          </div>
-          <div class="col-12">
-            <input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ đất *">
-          </div>
-          <div class="col-6">
-            <input type="text" class="form-control" id="pr-hinh-thuc" placeholder="Hình thức sử dụng">
-          </div>
-          <div class="col-6">
-            <input type="text" class="form-control" id="pr-nguon-goc" placeholder="Nguồn gốc đất">
-          </div>
-          <div class="col-6">
-            <input type="text" class="form-control" id="pr-ngay-cap" placeholder="Ngày cấp sổ (dd/mm/yyyy)">
-          </div>
-          <div class="col-6">
-            <input type="text" class="form-control" id="pr-co-quan" placeholder="Cơ quan cấp">
-          </div>
-          <div class="col-12">
-            <div class="border rounded p-2 bg-light">
-              <div class="d-flex justify-content-between align-items-center mb-2">
-                <div class="fw-600" style="font-size:12px; text-transform:uppercase; letter-spacing:.5px;">Diện tích - Loại đất - Thời hạn</div>
-                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-land-row">Thêm dòng</button>
+<div class="case-layout-wrap" style="height: calc(100vh - 80px); overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 10px 8px;">
+
+  <!-- ══ TẦNG 1: Tài sản + Người tham gia ══ -->
+  <div class="d-flex gap-2 flex-shrink-0" style="border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">
+
+    <!-- Tài sản (~36%) -->
+    <div style="flex: 0 0 36%; min-width: 0; overflow-y: auto;">
+      <div class="card property-compact mb-0">
+        <div class="card-header compact-title"><i class="bi bi-house-add me-1"></i>Tài sản</div>
+        <div class="card-body inline-form">
+          <div id="inline-prop-error" class="alert alert-danger d-none"></div>
+          <div class="row g-2">
+            <div class="col-3"><input type="text" class="form-control" id="pr-so-serial" placeholder="Số Serial *"></div>
+            <div class="col-3"><input type="text" class="form-control" id="pr-so-vao-so" placeholder="Số vào sổ"></div>
+            <div class="col-3"><input type="text" class="form-control" id="pr-so-thua" placeholder="Số thửa đất"></div>
+            <div class="col-3"><input type="text" class="form-control" id="pr-so-to" placeholder="Số tờ bản đồ"></div>
+            <div class="col-12"><input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ đất *"></div>
+            <div class="col-12">
+              <select class="form-select" id="pr-loai-so">
+                <option value="">-- Loại GCN --</option>
+                <option value="Giấy chứng nhận quyền sử dụng đất">GCN quyền sử dụng đất</option>
+                <option value="Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất">GCN QSDĐ + nhà ở + tài sản khác</option>
+                <option value="Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất">GCN QSDĐ + tài sản gắn liền</option>
+              </select>
+            </div>
+            <div class="col-6"><input type="text" class="form-control" id="pr-hinh-thuc" placeholder="Hình thức sử dụng"></div>
+            <div class="col-6"><input type="text" class="form-control" id="pr-nguon-goc" placeholder="Nguồn gốc đất"></div>
+            <div class="col-12"><input type="text" class="form-control" id="pr-noi-niem-yet" placeholder="Nơi niêm yết (Tên xã/thị trấn)" value="{{ obj.noi_niem_yet if obj and obj.noi_niem_yet else '' }}"></div>
+            <div class="col-6"><input type="text" class="form-control" id="pr-ngay-cap" placeholder="Ngày cấp sổ (dd/mm/yyyy)"></div>
+            <div class="col-6"><input type="text" class="form-control" id="pr-co-quan" placeholder="Cơ quan cấp"></div>
+            <div class="col-12">
+              <div class="border rounded p-2 bg-light">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="fw-600" style="font-size:12px; text-transform:uppercase; letter-spacing:.5px;">Diện tích - Loại đất - Thời hạn</div>
+                  <button type="button" class="btn btn-sm btn-outline-primary" id="btn-add-land-row">Thêm dòng</button>
+                </div>
+                <table class="table table-sm mb-1">
+                  <thead><tr><th>Loại đất</th><th>Diện tích (m²)</th><th>Thời hạn</th><th></th></tr></thead>
+                  <tbody id="land-rows"></tbody>
+                  <tfoot>
+                    <tr style="background:#f0f9f4; font-weight:700;">
+                      <td style="font-size:12px;">Tổng diện tích</td>
+                      <td id="land-total-area" style="font-size:12px; color:#065f46;">0</td>
+                      <td colspan="2"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+                <input type="hidden" id="pr-land-rows" value="">
               </div>
-              <table class="table table-sm mb-1">
-                <thead>
-                  <tr>
-                    <th>Loại đất</th>
-                    <th>Diện tích (m²)</th>
-                    <th>Thời hạn</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="land-rows"></tbody>
-                <tfoot>
-                  <tr style="background:#f0f9f4; font-weight:700;">
-                    <td style="font-size:12px;">Tổng diện tích</td>
-                    <td id="land-total-area" style="font-size:12px; color:#065f46;">0</td>
-                    <td colspan="2"></td>
-                  </tr>
-                </tfoot>
-              </table>
-              <input type="hidden" id="pr-land-rows" value="">
             </div>
           </div>
-    <div class="pool-panel">
+        </div>
+      </div>
+    </div>
+
+    <!-- Người tham gia (~64%) -->
+    <div style="flex: 1; min-width: 0;">
+      <div class="card mb-0">
+        <div class="card-header compact-title d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-person-plus me-1"></i>Người tham gia hồ sơ thừa kế</span>
+          <div class="d-flex gap-2 align-items-center">
+            <a href="/customers/download-template" class="btn btn-outline-secondary mini-btn">Tải mẫu Excel</a>
+            <button type="button" class="btn btn-outline-secondary mini-btn" data-bs-toggle="modal" data-bs-target="#importExcelModal">Import Excel</button>
+            <button type="button" id="btn-add-person" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Thêm</button>
+          </div>
+        </div>
+        <div class="card-body inline-form" style="padding-top: 6px;">
+          <div id="inline-person-error" class="alert alert-danger d-none"></div>
+          <div id="inline-people-list" class="inline-people-list" style="min-height: 130px; max-height: 220px; overflow-y: auto;">
+            <div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm người vào hồ sơ.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /TẦNG 1 -->
+
+  <!-- ══ TẦNG 2: Pool kéo-thả + Sơ đồ ══ -->
+  <div class="d-flex gap-2 flex-grow-1 overflow-hidden" style="min-height: 0;">
+
+    <!-- Pool (~22%) -->
+    <div style="flex: 0 0 22%; min-width: 0; display: flex; flex-direction: column;">
+      <div class="pool-panel" style="height: 100%;">
         <div class="pool-head">Danh sách người kéo-thả</div>
         <div class="px-2 py-2 border-bottom bg-light">
           <input type="text" id="pool-search-input" class="form-control form-control-sm" placeholder="Tìm người trong hệ thống..." autocomplete="off">
@@ -301,110 +308,105 @@
             <div id="pool-search-results" class="list-group position-absolute w-100 shadow-sm" style="z-index: 1000; display:none; max-height: 200px; overflow-y: auto;"></div>
           </div>
         </div>
-        <div class="pool-body" id="people-pool">
-          <!-- Pool trống theo thiết kế mới. Người dùng tìm kiếm hoặc thêm mới để thẻ xuất hiện ở đây -->
-        </div>
+        <div class="pool-body" id="people-pool"></div>
       </div>
-    </div><!-- /row.g-2 -->
-    </div><!-- /card-body Tài sản -->
-    </div><!-- /card.property-compact -->
-  </div><!-- /col-md-3 -->
-
-      <!-- Cột Phải: Sơ đồ kéo thả & Preview Văn bản -->
-      <div class="col-md-8 col-sm-8 d-flex flex-column h-100 ps-3">
-        <div class="card flex-grow-1 d-flex flex-column mb-0 shadow-sm border-0 h-100 w-100">
-      <div class="card-header d-flex justify-content-between align-items-center bg-white border-bottom pt-3 pb-2">
-        <div style="font-weight:700; font-size:14px; color:var(--navy);">
-          <i class="bi bi-diagram-3 me-1" style="color:var(--gold)"></i>Sơ đồ thừa kế
-        </div>
-        <div class="d-flex gap-2">
-          <button type="button" class="btn btn-sm btn-outline-success fw-bold px-3" id="btn-open-export" data-bs-toggle="modal" data-bs-target="#exportWordModal">
-            <i class="bi bi-file-word me-1"></i>Xuất văn bản
-          </button>
-          <a href="/cases" class="btn btn-sm btn-light border fw-bold text-muted">Huỷ</a>
-          <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="btn-submit-case">
-            <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Lưu hồ sơ' }}
-          </button>
-        </div>
-      </div>
-        
-        <div class="card-body p-0 d-flex flex-column h-100" style="background-color: var(--cream); position: relative;">
-            <div id="tree-warnings" class="warning-box d-none m-3 position-absolute top-0 start-0 z-3" style="z-index:10;">
-      <div class="title">Cảnh báo nghiệp vụ</div>
-      <ul id="tree-warnings-list"></ul>
     </div>
-            <div class="tree-wrap" style="overflow-y: auto; height: 100%;">
-      <div class="tree-tier">
-        <div class="tier-title">Tầng 1 - Cha mẹ</div>
-        <div class="tier-content">
-          <div class="tree-group">
-            <div>
-              <div class="label">Cha mẹ chủ đất</div>
-              <div class="d-flex gap-2">
-                <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
-                <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
+
+    <!-- Sơ đồ (~78%) -->
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div class="card shadow-sm border-0 d-flex flex-column" style="height: 100%;">
+        <div class="card-header d-flex justify-content-between align-items-center bg-white border-bottom pt-3 pb-2">
+          <div style="font-weight:700; font-size:14px; color:var(--navy);">
+            <i class="bi bi-diagram-3 me-1" style="color:var(--gold)"></i>Sơ đồ thừa kế
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-success fw-bold px-3" id="btn-open-export" data-bs-toggle="modal" data-bs-target="#exportWordModal">
+              <i class="bi bi-file-word me-1"></i>Xuất văn bản
+            </button>
+            <a href="/cases" class="btn btn-sm btn-light border fw-bold text-muted">Huỷ</a>
+            <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="btn-submit-case">
+              <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Lưu hồ sơ' }}
+            </button>
+          </div>
+        </div>
+        <div class="card-body p-0 flex-grow-1 overflow-hidden" style="background-color: var(--cream); position: relative;">
+          <div id="tree-warnings" class="warning-box d-none m-3 position-absolute top-0 start-0 z-3" style="z-index:10;">
+            <div class="title">Cảnh báo nghiệp vụ</div>
+            <ul id="tree-warnings-list"></ul>
+          </div>
+          <div class="tree-wrap" style="overflow-y: auto; height: 100%;">
+            <div class="tree-tier">
+              <div class="tier-title">Tầng 1 - Cha mẹ</div>
+              <div class="tier-content">
+                <div class="tree-group">
+                  <div>
+                    <div class="label">Cha mẹ chủ đất</div>
+                    <div class="d-flex gap-2">
+                      <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ đất</span></div>
+                      <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ đất</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="tree-group">
+                  <div>
+                    <div class="label">Cha mẹ vợ/chồng</div>
+                    <div class="d-flex gap-2">
+                      <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
+                      <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tree-tier">
+              <div class="tier-title">Tầng 2 - Chủ đất và vợ/chồng</div>
+              <div class="marriage-wrap">
+                <label class="form-label mb-1" style="font-size:12px; font-weight:600">Ngày kết hôn</label>
+                <input type="text" id="marriage-date" class="form-control form-control-sm" placeholder="yyyy hoặc dd/mm/yyyy">
+              </div>
+              <div class="tier-content">
+                <div class="tree-group">
+                  <div>
+                    <div class="label">Chủ đất</div>
+                    <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
+                  </div>
+                </div>
+                <div class="family-link">↔</div>
+                <div class="tree-group">
+                  <div>
+                    <div class="label">Vợ/Chồng</div>
+                    <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tree-tier">
+              <div class="tier-title">Tầng 3 - Con đẻ</div>
+              <div class="tier-content">
+                <div class="child-list" id="children-zone">
+                  <div class="child-placeholder">Thả con đẻ vào đây</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tree-tier" id="tier4-section" style="display:none">
+              <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo <small style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(hiển thị khi có con đã mất)</small></div>
+              <div class="tier-content">
+                <div class="grand-list" id="grandchildren-zone">
+                  <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>
+                </div>
               </div>
             </div>
           </div>
-          <div class="tree-group">
-            <div>
-              <div class="label">Cha mẹ vợ/chồng</div>
-              <div class="d-flex gap-2">
-                <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố vợ/chồng</span></div>
-                <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ vợ/chồng</span></div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
-
-      <div class="tree-tier">
-        <div class="tier-title">Tầng 2 - Chủ đất và vợ/chồng</div>
-        <div class="marriage-wrap">
-          <label class="form-label mb-1" style="font-size:12px; font-weight:600">Ngày kết hôn</label>
-          <input type="text" id="marriage-date" class="form-control form-control-sm" placeholder="yyyy hoặc dd/mm/yyyy">
-        </div>
-        <div class="tier-content">
-          <div class="tree-group">
-            <div>
-              <div class="label">Chủ đất</div>
-              <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span></div>
-            </div>
-          </div>
-          <div class="family-link">↔</div>
-          <div class="tree-group">
-            <div>
-              <div class="label">Vợ/Chồng</div>
-              <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo vợ/chồng</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="tree-tier">
-        <div class="tier-title">Tầng 3 - Con đẻ</div>
-        <div class="tier-content">
-          <div class="child-list" id="children-zone">
-            <div class="child-placeholder">Thả con đẻ vào đây</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="tree-tier" id="tier4-section" style="display:none">
-        <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo <small style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(hiển thị khi có con đã mất)</small></div>
-        <div class="tier-content">
-          <div class="grand-list" id="grandchildren-zone">
-            <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>
-          </div>
-        </div>
-      </div>
-      </div>
-        </div>
-      </div>
-      <div id="participants-hidden"></div>
     </div>
-  </div>
-  </form>
+
+  </div><!-- /TẦNG 2 -->
+
+  <div id="participants-hidden"></div>
 </div>
 
 <!-- Modal Import Excel -->
@@ -1563,87 +1565,116 @@ function refreshPoolAfterImport() {
   updateGrandZones();
   recalcShares();
 
-  // Auto-capitalize person name (first letter of each word)
-  document.getElementById('p-ho-ten')?.addEventListener('input', function() {
-    const pos = this.selectionStart;
-    this.value = this.value.replace(/\b(\p{L})/gu, c => c.toUpperCase());
-    this.setSelectionRange(pos, pos);
-  });
-
-  // Inline add person
-  document.getElementById('btn-add-person')?.addEventListener('click', async () => {
-    const err = document.getElementById('inline-person-error');
-    err.classList.add('d-none'); err.textContent = '';
-    const payload = new URLSearchParams({
-      ho_ten: document.getElementById('p-ho-ten').value,
-      gioi_tinh: document.getElementById('p-gioi-tinh').value,
-      ngay_sinh: document.getElementById('p-ngay-sinh').value,
-      ngay_chet: document.getElementById('p-ngay-chet').value,
-      so_giay_to: document.getElementById('p-so-giay-to').value,
-      ngay_cap: document.getElementById('p-ngay-cap').value,
-      dia_chi: document.getElementById('p-dia-chi').value
-    });
-    const res = await fetch('/customers/inline-create', { method: 'POST', body: payload });
-    const data = await res.json();
-    if (!data.ok) {
-      err.textContent = 'Thiếu/không hợp lệ: ' + Object.keys(data.errors).join(', ');
-      err.classList.remove('d-none');
-      return;
-    }
-    const c = data.customer;
-    const row = document.createElement('div');
-    row.className = 'person-row';
-    row.draggable = true;
-    row.ondragstart = (e) => window.handleNativeDragStart(e, JSON.stringify({
-      id: c.id, name: c.ho_ten||'', doc: c.so_giay_to||'', gender: c.gioi_tinh||'', birth: c.ngay_sinh||'', death: c.ngay_chet||''
-    }));
-    row.dataset.id = c.id;
-    row.dataset.name = c.ho_ten;
-    row.dataset.doc = c.so_giay_to;
-    row.dataset.gender = c.gioi_tinh || '';
-    row.dataset.birth = c.ngay_sinh || '';
-    row.dataset.death = c.ngay_chet || '';
-    row.innerHTML = `
-      <div class="name">${c.ho_ten}</div>
-      <div class="meta">Sinh: ${c.ngay_sinh || '—'}</div>
-      <div class="meta">Chết: ${c.ngay_chet || '—'}</div>
-    `;
-    pool.prepend(row);
-
+  // ── Inline add person (editable row, like land table) ──
+  function addPersonEditRow() {
     const list = document.getElementById('inline-people-list');
-    if (list) {
-      const empty = list.querySelector('.inline-empty');
-      if (empty) empty.remove();
-      const item = document.createElement('div');
-      item.className = 'inline-people-row';
-      item.innerHTML = `
-        <div class="inline-cell">${c.ho_ten || ''}</div>
-        <div class="inline-cell">${c.gioi_tinh || ''}</div>
-        <div class="inline-cell">${c.ngay_sinh || ''}</div>
-        <div class="inline-cell">${c.ngay_chet || '—'}</div>
-        <div class="inline-cell">${c.so_giay_to || ''}</div>
-        <div class="inline-cell">${c.ngay_cap || ''}</div>
-        <div class="inline-cell">${c.dia_chi || ''}</div>
-      `;
-      list.prepend(item);
+    const empty = list.querySelector('.inline-empty');
+    if (empty) empty.remove();
+
+    const row = document.createElement('div');
+    row.className = 'person-edit-row';
+    row.innerHTML = `
+      <input type="text" class="form-control pr-ho-ten" placeholder="Họ và tên (bắt buộc)" autocomplete="off">
+      <select class="form-select pr-gioi">
+        <option value="">Giới</option>
+        <option value="Nam">Nam</option>
+        <option value="Nữ">Nữ</option>
+      </select>
+      <input type="text" class="form-control pr-ngay-sinh" placeholder="dd/mm/yyyy">
+      <input type="text" class="form-control pr-ngay-chet" placeholder="dd/mm/yyyy">
+      <input type="text" class="form-control pr-so-giay-to" placeholder="Số CCCD/CMND">
+      <input type="text" class="form-control pr-ngay-cap" placeholder="dd/mm/yyyy">
+      <input type="text" class="form-control pr-dia-chi" placeholder="Địa chỉ">
+      <div class="row-actions">
+        <button type="button" class="btn btn-xs btn-success btn-save-person-row" title="Lưu người">✓</button>
+        <button type="button" class="btn btn-xs btn-outline-danger btn-del-person-row" title="Xoá">✕</button>
+      </div>
+    `;
+
+    // Auto-capitalize name
+    const nameInput = row.querySelector('.pr-ho-ten');
+    nameInput.addEventListener('input', function() {
+      const pos = this.selectionStart;
+      this.value = this.value.replace(/\b(\p{L})/gu, c => c.toUpperCase());
+      this.setSelectionRange(pos, pos);
+    });
+
+    // Save button → call API, person jumps into pool
+    async function savePersonRow() {
+      const nameVal = row.querySelector('.pr-ho-ten').value.trim();
+      if (!nameVal) {
+        row.querySelector('.pr-ho-ten').style.borderBottom = '2px solid #f87171';
+        row.querySelector('.pr-ho-ten').focus();
+        return;
+      }
+      row.querySelector('.pr-ho-ten').style.borderBottom = '';
+
+      const btn = row.querySelector('.btn-save-person-row');
+      btn.disabled = true; btn.textContent = '…';
+
+      const payload = new URLSearchParams({
+        ho_ten: nameVal,
+        gioi_tinh: row.querySelector('.pr-gioi').value,
+        ngay_sinh: row.querySelector('.pr-ngay-sinh').value,
+        ngay_chet: row.querySelector('.pr-ngay-chet').value,
+        so_giay_to: row.querySelector('.pr-so-giay-to').value,
+        ngay_cap: row.querySelector('.pr-ngay-cap').value,
+        dia_chi: row.querySelector('.pr-dia-chi').value
+      });
+      const res = await fetch('/customers/inline-create', { method: 'POST', body: payload });
+      const data = await res.json();
+      if (!data.ok) {
+        btn.disabled = false; btn.textContent = '✓';
+        row.style.borderColor = '#f87171';
+        return;
+      }
+      const c = data.customer;
+
+      // Jump to pool
+      if (!pool.querySelector(`.person-row[data-id="${c.id}"]`)) {
+        const poolRow = document.createElement('div');
+        poolRow.className = 'person-row';
+        poolRow.draggable = true;
+        poolRow.ondragstart = (e) => window.handleNativeDragStart(e, JSON.stringify({
+          id: c.id, name: c.ho_ten||'', doc: c.so_giay_to||'', gender: c.gioi_tinh||'', birth: c.ngay_sinh||'', death: c.ngay_chet||''
+        }));
+        poolRow.dataset.id = c.id; poolRow.dataset.name = c.ho_ten;
+        poolRow.dataset.doc = c.so_giay_to||''; poolRow.dataset.gender = c.gioi_tinh||'';
+        poolRow.dataset.birth = c.ngay_sinh||''; poolRow.dataset.death = c.ngay_chet||'';
+        poolRow.innerHTML = `<div class="name">${c.ho_ten}</div><div class="meta">Sinh: ${c.ngay_sinh||'—'}</div><div class="meta">Chết: ${c.ngay_chet||'—'}</div>`;
+        pool.prepend(poolRow);
+        poolRow.style.background = '#d1fae5';
+        setTimeout(() => { poolRow.style.background = ''; }, 800);
+      }
+
+      row.remove();
+      if (!list.querySelector('.person-edit-row, .inline-people-row')) {
+        list.innerHTML = '<div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm người vào hồ sơ.</div>';
+      }
+
+      if (c.ngay_chet && ownerInput && !ownerInput.value) {
+        ownerInput.value = c.id;
+        setOwnerFromSelect(); updateGrandZones(); recalcShares();
+      }
     }
 
-    document.getElementById('p-ho-ten').value = '';
-    document.getElementById('p-gioi-tinh').value = '';
-    document.getElementById('p-ngay-sinh').value = '';
-    document.getElementById('p-ngay-chet').value = '';
-    document.getElementById('p-so-giay-to').value = '';
-    document.getElementById('p-ngay-cap').value = '';
-    document.getElementById('p-dia-chi').value = '';
-    document.getElementById('p-ho-ten').focus();
+    row.querySelector('.btn-save-person-row').addEventListener('click', savePersonRow);
+    // Enter on last field also saves
+    row.querySelector('.pr-dia-chi').addEventListener('keydown', e => { if (e.key === 'Enter') savePersonRow(); });
 
-    if (c.ngay_chet && ownerInput && !ownerInput.value) {
-      ownerInput.value = c.id;
-      setOwnerFromSelect();
-      updateGrandZones();
-      recalcShares();
-    }
-  });
+    // Delete button
+    row.querySelector('.btn-del-person-row').addEventListener('click', () => {
+      row.remove();
+      if (!list.querySelector('.person-edit-row, .inline-people-row')) {
+        list.innerHTML = '<div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm người vào hồ sơ.</div>';
+      }
+    });
+
+    list.appendChild(row);
+    nameInput.focus();
+  }
+
+  document.getElementById('btn-add-person')?.addEventListener('click', addPersonEditRow);
 
   // Inline add property
   function rebuildLandRowsValue() {
@@ -1662,11 +1693,11 @@ function refreshPoolAfterImport() {
     if (totalEl) totalEl.textContent = totalArea % 1 === 0 ? totalArea : totalArea.toFixed(2);
   }
 
-  document.getElementById('btn-add-land-row')?.addEventListener('click', () => {
+  function addLandRow(defaultType = '') {
     const tbody = document.getElementById('land-rows');
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><input type="text" class="form-control form-control-sm land-type" placeholder="ONT"></td>
+      <td><input type="text" class="form-control form-control-sm land-type" value="${defaultType}" placeholder="ONT"></td>
       <td><input type="text" class="form-control form-control-sm land-area" placeholder="220"></td>
       <td><input type="text" class="form-control form-control-sm land-term" placeholder="Lâu dài"></td>
       <td><button type="button" class="btn btn-sm btn-outline-danger btn-del-row">Xoá</button></td>
@@ -1675,7 +1706,18 @@ function refreshPoolAfterImport() {
     tr.querySelector('.btn-del-row').addEventListener('click', () => { tr.remove(); rebuildLandRowsValue(); });
     tr.querySelectorAll('input').forEach(i => i.addEventListener('input', rebuildLandRowsValue));
     rebuildLandRowsValue();
-  });
+    return tr;
+  }
+
+  document.getElementById('btn-add-land-row')?.addEventListener('click', () => addLandRow());
+
+  // Default 3 rows: ONT, CLN, NTS
+  (function() {
+    const tbody = document.getElementById('land-rows');
+    if (tbody && tbody.children.length === 0) {
+      ['ONT', 'CLN', 'NTS'].forEach(t => addLandRow(t));
+    }
+  })();
 
   document.getElementById('btn-add-prop')?.addEventListener('click', async () => {
     const err = document.getElementById('inline-prop-error');
@@ -1688,11 +1730,16 @@ function refreshPoolAfterImport() {
       so_thua_dat: document.getElementById('pr-so-thua').value,
       so_to_ban_do: document.getElementById('pr-so-to').value,
       land_rows: document.getElementById('pr-land-rows').value,
+      loai_so: document.getElementById('pr-loai-so').value,
       hinh_thuc_su_dung: document.getElementById('pr-hinh-thuc').value,
       nguon_goc: document.getElementById('pr-nguon-goc').value,
       ngay_cap: document.getElementById('pr-ngay-cap').value,
-      co_quan_cap: document.getElementById('pr-co-quan').value
+      co_quan_cap: document.getElementById('pr-co-quan').value,
     });
+    // Sync noi_niem_yet vào hidden field
+    const noiNiemYetVal = document.getElementById('pr-noi-niem-yet').value;
+    const hiddenNoi = document.getElementById('case-noi-niem-yet');
+    if (hiddenNoi && noiNiemYetVal) hiddenNoi.value = noiNiemYetVal;
     const res = await fetch('/properties/inline-create', { method: 'POST', body: payload });
     const data = await res.json();
     if (!data.ok) {
@@ -1855,6 +1902,10 @@ function refreshPoolAfterImport() {
     const sel = document.getElementById('pr-tai-san-select');
     const hidden = document.getElementById('case-tai-san');
     if (sel && hidden && !hidden.value && sel.value) hidden.value = sel.value;
+    // Sync noi_niem_yet từ visible input vào hidden field
+    const noiInput = document.getElementById('pr-noi-niem-yet');
+    const noiFld = document.getElementById('case-noi-niem-yet');
+    if (noiInput && noiFld) noiFld.value = noiInput.value;
     const holder = document.getElementById('participants-hidden');
     holder.innerHTML = '';
 

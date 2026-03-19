@@ -10,12 +10,12 @@ class Customer(Base):
 
     id           = Column(Integer, primary_key=True, index=True)
     ho_ten       = Column(String(200), nullable=False)
-    gioi_tinh    = Column(String(10),  nullable=False)          # Nam / Nữ
-    ngay_sinh    = Column(Date,        nullable=False)
+    gioi_tinh    = Column(String(10),  nullable=True)           # Nam / Nữ
+    ngay_sinh    = Column(Date,        nullable=True)
     ngay_chet    = Column(Date,        nullable=True)            # NULL = còn sống
-    so_giay_to   = Column(String(50),  nullable=False, unique=True)
-    ngay_cap     = Column(Date,        nullable=False)
-    dia_chi      = Column(Text,        nullable=False)
+    so_giay_to   = Column(String(50),  nullable=True,  unique=True)
+    ngay_cap     = Column(Date,        nullable=True)
+    dia_chi      = Column(Text,        nullable=True)
     created_at   = Column(DateTime,    server_default=func.now())
 
     # Quan hệ
@@ -30,7 +30,7 @@ class Customer(Base):
     def _moc_cccd_moi(self):
         """01/07/2024 — ngưỡng phân biệt CCCD cũ/mới."""
         from datetime import date
-        return self.ngay_cap and self.ngay_cap >= date(2024, 7, 1)
+        return self.ngay_cap and self.ngay_cap >= date(2024, 10, 1)
 
     @property
     def loai_giay_to(self):
@@ -59,6 +59,9 @@ class Property(Base):
     so_to_ban_do      = Column(String(100), nullable=True)
     dia_chi           = Column(Text,        nullable=False)
     loai_dat          = Column(String(100), nullable=True)
+    dien_tich         = Column(Float,        nullable=True)
+    loai_so           = Column(String(200), nullable=True)   # Loại GCN (3 loại)
+    land_rows_json    = Column(Text,        nullable=True)   # JSON: [{loai_dat, dien_tich, thoi_han}]
     hinh_thuc_su_dung = Column(String(100), nullable=True)
     thoi_han          = Column(String(100), nullable=True)
     nguon_goc         = Column(Text,        nullable=True)
@@ -80,6 +83,7 @@ class InheritanceCase(Base):
     ngay_lap_ho_so   = Column(Date,    nullable=False)
     loai_van_ban     = Column(String(50), default="khai_nhan")   # khai_nhan / thoa_thuan
     trang_thai       = Column(String(20), default="draft")       # draft / locked
+    noi_niem_yet     = Column(String(200), nullable=True)        # Tên xã/thị trấn nơi lập văn bản
     ghi_chu          = Column(Text,    nullable=True)
     created_at       = Column(DateTime, server_default=func.now())
 

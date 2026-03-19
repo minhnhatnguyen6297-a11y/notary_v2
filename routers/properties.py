@@ -38,8 +38,8 @@ def list_properties(request: Request, db: Session = Depends(get_db), q: str = ""
 def create_form(request: Request):
     form = {
         "so_serial": "", "so_vao_so": "", "so_thua_dat": "", "so_to_ban_do": "",
-        "dia_chi": "", "loai_dat": "", "hinh_thuc_su_dung": "", "thoi_han": "",
-        "nguon_goc": "", "ngay_cap": "", "co_quan_cap": ""
+        "dia_chi": "", "dien_tich": "", "loai_so": "", "loai_dat": "", "hinh_thuc_su_dung": "",
+        "thoi_han": "", "nguon_goc": "", "ngay_cap": "", "co_quan_cap": ""
     }
     return templates.TemplateResponse("properties/form.html", {
         "request": request, "obj": None, "errors": [], "field_errors": {}, "form": form
@@ -53,6 +53,7 @@ def inline_create(
     so_thua_dat: Optional[str] = Form(None),
     so_to_ban_do: Optional[str] = Form(None),
     dia_chi: Optional[str] = Form(None),
+    loai_so: Optional[str] = Form(None),
     hinh_thuc_su_dung: Optional[str] = Form(None),
     nguon_goc: Optional[str] = Form(None),
     ngay_cap: Optional[str] = Form(None),
@@ -60,12 +61,14 @@ def inline_create(
     land_rows: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
+    import json as _json
     form = {
         "so_serial": (so_serial or "").strip(),
         "so_vao_so": (so_vao_so or "").strip(),
         "so_thua_dat": (so_thua_dat or "").strip(),
         "so_to_ban_do": (so_to_ban_do or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
+        "loai_so": (loai_so or "").strip(),
         "hinh_thuc_su_dung": (hinh_thuc_su_dung or "").strip(),
         "nguon_goc": (nguon_goc or "").strip(),
         "ngay_cap": (ngay_cap or "").strip(),
@@ -87,21 +90,29 @@ def inline_create(
 
     loai_dat_val = ""
     thoi_han_val = ""
+    dien_tich_total = None
+    land_rows_json_val = None
     if form["land_rows"]:
         try:
-            import json
-            rows = json.loads(form["land_rows"])
+            rows = _json.loads(form["land_rows"])
             parts = []
+            total = 0.0
             for r in rows:
                 loai = str(r.get("loai_dat", "")).strip()
                 dien = str(r.get("dien_tich", "")).strip()
                 thoi = str(r.get("thoi_han", "")).strip()
                 if loai or dien or thoi:
                     parts.append(f"{loai} | {dien}m2 | {thoi}")
+                try:
+                    total += float(dien) if dien else 0
+                except (ValueError, TypeError):
+                    pass
             loai_dat_val = "; ".join(parts)
-            # Lấy thoi_han từ dòng đầu tiên
             if rows:
                 thoi_han_val = str(rows[0].get("thoi_han", "")).strip()
+            if total > 0:
+                dien_tich_total = total
+            land_rows_json_val = form["land_rows"]
         except Exception:
             loai_dat_val = form["land_rows"]
 
@@ -109,6 +120,8 @@ def inline_create(
         so_serial=form["so_serial"], so_vao_so=form["so_vao_so"] or None,
         so_thua_dat=form["so_thua_dat"] or None, so_to_ban_do=form["so_to_ban_do"] or None,
         dia_chi=form["dia_chi"], loai_dat=loai_dat_val or None,
+        dien_tich=dien_tich_total, loai_so=form["loai_so"] or None,
+        land_rows_json=land_rows_json_val,
         hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None,
         thoi_han=thoi_han_val or None,
         nguon_goc=form["nguon_goc"] or None, ngay_cap=parse_date(form["ngay_cap"]),
@@ -123,6 +136,7 @@ def inline_create(
             "so_thua_dat": p.so_thua_dat or "",
             "dia_chi": p.dia_chi or "",
             "ngay_cap": p.ngay_cap.isoformat() if p.ngay_cap else "",
+            "dien_tich": p.dien_tich,
         }
     })
 
@@ -135,6 +149,8 @@ def create(
     so_thua_dat: Optional[str] = Form(None),
     so_to_ban_do: Optional[str] = Form(None),
     dia_chi: Optional[str] = Form(None),
+    dien_tich: Optional[str] = Form(None),
+    loai_so: Optional[str] = Form(None),
     loai_dat: Optional[str] = Form(None),
     hinh_thuc_su_dung: Optional[str] = Form(None),
     thoi_han: Optional[str] = Form(None),
@@ -149,6 +165,8 @@ def create(
         "so_thua_dat": (so_thua_dat or "").strip(),
         "so_to_ban_do": (so_to_ban_do or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
+        "dien_tich": (dien_tich or "").strip(),
+        "loai_so": (loai_so or "").strip(),
         "loai_dat": (loai_dat or "").strip(),
         "hinh_thuc_su_dung": (hinh_thuc_su_dung or "").strip(),
         "thoi_han": (thoi_han or "").strip(),
@@ -175,10 +193,17 @@ def create(
             "field_errors": field_errors, "form": form
         })
 
+    dien_tich_val = None
+    try:
+        dien_tich_val = float(form["dien_tich"]) if form["dien_tich"] else None
+    except (ValueError, TypeError):
+        pass
+
     p = Property(
         so_serial=form["so_serial"], so_vao_so=form["so_vao_so"] or None,
         so_thua_dat=form["so_thua_dat"] or None, so_to_ban_do=form["so_to_ban_do"] or None,
-        dia_chi=form["dia_chi"], loai_dat=form["loai_dat"] or None,
+        dia_chi=form["dia_chi"], dien_tich=dien_tich_val,
+        loai_so=form["loai_so"] or None, loai_dat=form["loai_dat"] or None,
         hinh_thuc_su_dung=form["hinh_thuc_su_dung"] or None, thoi_han=form["thoi_han"] or None,
         nguon_goc=form["nguon_goc"] or None, ngay_cap=parse_date(form["ngay_cap"]),
         co_quan_cap=form["co_quan_cap"] or None
@@ -204,6 +229,8 @@ def edit_form(pid: int, request: Request, db: Session = Depends(get_db)):
         "so_thua_dat": p.so_thua_dat or "",
         "so_to_ban_do": p.so_to_ban_do or "",
         "dia_chi": p.dia_chi or "",
+        "dien_tich": str(p.dien_tich) if p.dien_tich is not None else "",
+        "loai_so": p.loai_so or "",
         "loai_dat": p.loai_dat or "",
         "hinh_thuc_su_dung": p.hinh_thuc_su_dung or "",
         "thoi_han": p.thoi_han or "",
@@ -221,7 +248,8 @@ def edit(
     pid: int, request: Request,
     so_serial: Optional[str] = Form(None), so_vao_so: Optional[str] = Form(None),
     so_thua_dat: Optional[str] = Form(None), so_to_ban_do: Optional[str] = Form(None),
-    dia_chi: Optional[str] = Form(None), loai_dat: Optional[str] = Form(None),
+    dia_chi: Optional[str] = Form(None), dien_tich: Optional[str] = Form(None),
+    loai_so: Optional[str] = Form(None), loai_dat: Optional[str] = Form(None),
     hinh_thuc_su_dung: Optional[str] = Form(None), thoi_han: Optional[str] = Form(None),
     nguon_goc: Optional[str] = Form(None), ngay_cap: Optional[str] = Form(None),
     co_quan_cap: Optional[str] = Form(None),
@@ -235,6 +263,8 @@ def edit(
         "so_thua_dat": (so_thua_dat or "").strip(),
         "so_to_ban_do": (so_to_ban_do or "").strip(),
         "dia_chi": (dia_chi or "").strip(),
+        "dien_tich": (dien_tich or "").strip(),
+        "loai_so": (loai_so or "").strip(),
         "loai_dat": (loai_dat or "").strip(),
         "hinh_thuc_su_dung": (hinh_thuc_su_dung or "").strip(),
         "thoi_han": (thoi_han or "").strip(),
@@ -263,9 +293,16 @@ def edit(
             "field_errors": field_errors, "form": form
         })
 
+    dien_tich_val = None
+    try:
+        dien_tich_val = float(form["dien_tich"]) if form["dien_tich"] else None
+    except (ValueError, TypeError):
+        pass
+
     p.so_serial = form["so_serial"]; p.so_vao_so = form["so_vao_so"] or None
     p.so_thua_dat = form["so_thua_dat"] or None; p.so_to_ban_do = form["so_to_ban_do"] or None
-    p.dia_chi = form["dia_chi"]; p.loai_dat = form["loai_dat"] or None
+    p.dia_chi = form["dia_chi"]; p.dien_tich = dien_tich_val
+    p.loai_so = form["loai_so"] or None; p.loai_dat = form["loai_dat"] or None
     p.hinh_thuc_su_dung = form["hinh_thuc_su_dung"] or None; p.thoi_han = form["thoi_han"] or None
     p.nguon_goc = form["nguon_goc"] or None; p.ngay_cap = parse_date(form["ngay_cap"])
     p.co_quan_cap = form["co_quan_cap"] or None
