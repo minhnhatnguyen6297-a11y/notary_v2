@@ -34,17 +34,17 @@ class Customer(Base):
 
     @property
     def loai_giay_to(self):
-        """Căn cước công dân (trước 01/07/2024) hoặc Căn cước (từ 01/07/2024)."""
+        """Căn cước công dân (trước 01/10/2024) hoặc Căn cước (từ 01/10/2024)."""
         return "Căn cước" if self._moc_cccd_moi else "Căn cước công dân"
 
     @property
     def noi_cap(self):
-        """Bộ Công an (từ 01/07/2024) hoặc Cục CSQLHC về TTXH (trước đó)."""
+        """Bộ Công an (từ 01/10/2024) hoặc Cục CSQLHC về TTXH (trước đó)."""
         return "Bộ Công an" if self._moc_cccd_moi else "Cục cảnh sát quản lý hành chính về trật tự xã hội"
 
     @property
     def loai_dia_chi(self):
-        """'Cư trú tại' (từ 01/07/2024) hoặc 'Thường trú tại' (trước đó)."""
+        """'Cư trú tại' (từ 01/10/2024) hoặc 'Thường trú tại' (trước đó)."""
         return "Cư trú tại" if self._moc_cccd_moi else "Thường trú tại"
 
 

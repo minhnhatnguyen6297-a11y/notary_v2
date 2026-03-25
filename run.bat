@@ -1,45 +1,70 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
+setlocal EnableDelayedExpansion
 
-REM === CONFIG ===
 set "PROJECT_DIR=%~dp0"
-set "VENV_DIR=%PROJECT_DIR%venv"
-set "HOST=127.0.0.1"
+set "VENV=%PROJECT_DIR%venv"
 set "PORT=8000"
-set "MODE=%~1"
+set "HOST=127.0.0.1"
+
+cd /d "%PROJECT_DIR%"
 
 echo.
-echo [RUN] Project: "%PROJECT_DIR%"
-cd /d "%PROJECT_DIR%" || (echo [ERR] Khong vao duoc thu muc du an & exit /b 1)
+echo  Cong chung -- Quan ly Ho so Thua ke
+echo  =====================================
 
-REM 1) Ensure venv exists
-if not exist "%VENV_DIR%\Scripts\python.exe" (
-  echo [ERR] Chua co venv. Hay chay setup.bat truoc.
+:: 1. Kiem tra Python
+python --version >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo [LOI] Khong tim thay Python trong PATH.
+  echo       Cai Python 3.10+ tu python.org va thu lai.
+  echo.
+  pause
   exit /b 1
 )
 
-REM 2) Single instance guard
-set "EXISTING_PID="
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr /r /c:":%PORT% .*LISTENING"') do (
-  set "EXISTING_PID=%%a"
-)
-
-if defined EXISTING_PID (
-  if /I "%MODE%"=="restart" (
-    echo [RUN] Restart mode: kill PID=!EXISTING_PID! on port %PORT%
-    taskkill /F /PID !EXISTING_PID! >nul 2>&1
-  ) else (
-    echo [RUN] Server da chay tai http://%HOST%:%PORT% ^(PID=!EXISTING_PID!^)
-    echo [TIP] Neu can restart: run.bat restart
-    exit /b 0
+:: 2. Tao venv neu chua co
+if not exist "%VENV%\Scripts\python.exe" (
+  echo [SETUP] Tao moi truong ao (venv^)...
+  python -m venv "%VENV%"
+  if errorlevel 1 (
+    echo [LOI] Khong tao duoc venv.
+    pause & exit /b 1
   )
+  echo [SETUP] Cai dat thu vien tu requirements.txt...
+  "%VENV%\Scripts\pip.exe" install -r requirements.txt --quiet
+  if errorlevel 1 (
+    echo [LOI] Cai dat thu vien that bai.
+    pause & exit /b 1
+  )
+  echo [SETUP] Hoan tat.
 )
 
-REM 3) Run uvicorn (no reload = on dinh hon)
+:: 3. Kill ALL processes on port (lap 3 lan de kill ca reloader + worker cua uvicorn)
+echo [RUN] Kiem tra port %PORT%...
+for /L %%i in (1,1,3) do (
+  for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr ":%PORT% "') do (
+    if "%%p" neq "0" (
+      echo [RUN]   - Dong PID %%p /T ...
+      taskkill /F /T /PID %%p >nul 2>&1
+    )
+  )
+  timeout /t 1 /nobreak >nul
+)
+echo [RUN] Port %PORT% san sang.
+
+:: 4. Chay server
 echo.
-echo [RUN] Starting server: http://%HOST%:%PORT%
-"%VENV_DIR%\Scripts\python.exe" -m uvicorn main:app --host %HOST% --port %PORT%
+echo  +------------------------------------------+
+echo  ^|  Server: http://%HOST%:%PORT%               ^|
+echo  ^|  Nhan Ctrl+C de dung server              ^|
+echo  +------------------------------------------+
 echo.
-echo [RUN] Server da dung.
+
+"%VENV%\Scripts\python.exe" -m uvicorn main:app --host %HOST% --port %PORT% --reload
+
+echo.
+echo [INFO] Server da dung.
+pause
 endlocal

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Quản lý mẫu Word{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width:860px">
+  <div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/cases/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="mb-0">Quản lý mẫu văn bản Word</h4>
+  </div>
+
+  {% if ok %}
+  <div class="alert alert-success alert-dismissible fade show py-2">{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+  {% endif %}
+  {% if err %}
+  <div class="alert alert-danger alert-dismissible fade show py-2">{{ err }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>
+  {% endif %}
+
+  <!-- Form tải lên mẫu mới -->
+  <div class="card mb-4">
+    <div class="card-header fw-semibold"><i class="bi bi-upload me-1"></i>Tải lên mẫu mới</div>
+    <div class="card-body">
+      <form method="post" action="/cases/templates/manage/upload" enctype="multipart/form-data">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label">Tên mẫu</label>
+            <input type="text" name="ten_mau" class="form-control" placeholder="Ví dụ: Mẫu phân chia thừa kế" required>
+          </div>
+          <div class="col-md-5">
+            <label class="form-label">File .docx</label>
+            <input type="file" name="file_mau" class="form-control" accept=".docx" required>
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100"><i class="bi bi-upload me-1"></i>Tải lên</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Danh sách mẫu -->
+  <div class="card">
+    <div class="card-header fw-semibold"><i class="bi bi-files me-1"></i>Danh sách mẫu ({{ items|length }})</div>
+    <div class="card-body p-0">
+      {% if items %}
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width:40px">#</th>
+            <th>Tên mẫu</th>
+            <th>File gốc</th>
+            <th style="width:120px">Ngày tải</th>
+            <th style="width:90px">Trạng thái</th>
+            <th style="width:160px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in items %}
+          <tr class="{{ 'table-success' if t.is_active }}">
+            <td class="text-muted">{{ t.id }}</td>
+            <td>
+              <i class="bi bi-file-earmark-word text-primary me-1"></i>
+              <strong>{{ t.ten_mau }}</strong>
+            </td>
+            <td class="text-muted small">{{ t.ten_file_goc }}</td>
+            <td class="text-muted small">{{ t.created_at.strftime('%d/%m/%Y') if t.created_at else '—' }}</td>
+            <td>
+              {% if t.is_active %}
+              <span class="badge bg-success">Mặc định</span>
+              {% else %}
+              <span class="badge bg-secondary">Không dùng</span>
+              {% endif %}
+            </td>
+            <td class="text-end pe-3">
+              {% if not t.is_active %}
+              <form method="post" action="/cases/templates/manage/{{ t.id }}/activate" class="d-inline">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Đặt làm mặc định">
+                  <i class="bi bi-check-circle"></i> Dùng mẫu này
+                </button>
+              </form>
+              {% endif %}
+              <form method="post" action="/cases/templates/manage/{{ t.id }}/delete" class="d-inline"
+                    onsubmit="return confirm('Xóa mẫu «{{ t.ten_mau }}»?')">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Xóa">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="text-center text-muted py-5">
+        <i class="bi bi-folder2-open" style="font-size:2rem"></i>
+        <p class="mt-2 mb-0">Chưa có mẫu nào. Tải lên mẫu đầu tiên bên trên.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

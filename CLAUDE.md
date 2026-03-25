@@ -154,6 +154,23 @@ File ~1750 dòng, phần JS từ dòng ~425 đến cuối:
 
 ---
 
+## Tích hợp OCR (Optical Character Recognition)
+
+Hệ thống có 2 luồng trích xuất dữ liệu thẻ và giấy tờ chạy song song để A/B Testing:
+1. **API Vision (GPT-4o-mini)**: 
+   - Route: `POST /api/ocr/analyze`
+   - Ưu điểm: AI tự hiểu ngữ cảnh và trả về trực tiếp cấu trúc JSON (đúng các trường `ho_ten`, `so_giay_to`...).
+   - Nhược điểm: Tốn phí token, phụ thuộc tốc độ/độ ổn định của mạng quốc tế.
+2. **Local AI (DeepDoc + VietOCR)** *(Tính năng đang phát triển)*:
+   - Route dự kiến: `POST /api/ocr/analyze-local`
+   - Nhận diện: DeepDoc (YOLOv10 ONNX) bóc tách Bố cục (Layout) và Bảng biểu (Table). VietOCR (ONNX) dịch ảnh từng vùng thành chữ tiếng Việt thô (Raw text).
+   - Xử lý Text -> Data: Sử dụng thuật toán Rule-based / Regex kết hợp tọa độ Bounding Boxes để gán chữ vào đúng các keys (`ho_ten`, `ngay_sinh`...) dựa theo Layout chuẩn của CCCD, GCN.
+   - Ưu điểm: Chạy hoàn toàn offline trên CPU/GPU, miễn phí API, giữ cấu trúc Sổ đỏ siêu việt.
+
+**Lưu ý UI**: Kết quả của cả 2 luồng đều đổ về Cùng Một Vùng `Staging Area` (`ocr-staging-area` trên `form.html`) để người dùng dò lại và quyết định trước khi đẩy vào People Pool.
+
+---
+
 ## ⚠️ Bugs đã biết (CHƯA FIX)
 
 | # | Mức độ | File | Dòng | Mô tả |

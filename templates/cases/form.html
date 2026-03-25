@@ -27,6 +27,7 @@
 <input type="hidden" name="nguoi_chet_id" id="case-nguoi-chet" value="{{ f.get('nguoi_chet_id','') }}">
 <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
 <input type="hidden" name="noi_niem_yet" id="case-noi-niem-yet" value="{{ f.get('noi_niem_yet', obj.noi_niem_yet if obj and obj.noi_niem_yet else '') }}">
+<input type="hidden" id="case-id-hidden" value="{{ obj.id if obj else '' }}">
 <style>
   .page-header { margin-bottom: 10px; }
   .card { margin-bottom: 10px !important; }
@@ -101,6 +102,23 @@
   .person-edit-row .row-actions { display: flex; gap: 2px; padding: 2px 3px; align-items: center; }
   .btn-xs { padding: 1px 6px; font-size: 11px; line-height: 1.6; }
 
+  #ocr-staging-area { border: 1px solid #bfdbfe; border-radius: 6px; padding: 4px 4px 2px; background: #eff6ff; }
+  .ocr-staging-header { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #1e40af; padding: 2px 4px 4px; }
+  .ocr-staged-row {
+    display: grid;
+    grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 60px;
+    gap: 1px; margin-bottom: 2px;
+    background: #fff; border: 1px solid #bfdbfe; border-radius: 3px;
+  }
+  .ocr-staged-row .form-control,
+  .ocr-staged-row .form-select {
+    border-radius: 0; border: none; border-right: 1px solid #dbeafe;
+    padding: 3px 6px; font-size: 12px; height: 30px; background: transparent;
+  }
+  .ocr-staged-row .form-control:focus,
+  .ocr-staged-row .form-select:focus { background: #fff; box-shadow: none; }
+  .ocr-staged-row .row-actions { display: flex; gap: 2px; padding: 2px 3px; align-items: center; }
+
   .property-compact .border.rounded { padding: 8px !important; }
   .property-compact .table-sm th,
   .property-compact .table-sm td { padding: 4px; font-size: 12px; }
@@ -108,12 +126,12 @@
   .pool-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; display: flex; flex-direction: column; }
   .pool-head { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid #eee; background: #fafafa; }
   .pool-body { flex-grow: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
-  .person-row { padding: 10px 12px; border-bottom: 1px solid #f1f1f1; background: #fff; border-left: 3px solid transparent; cursor: grab; }
+  .person-row { padding: 5px 10px; border-bottom: 1px solid #f1f1f1; background: #fff; border-left: 3px solid transparent; cursor: grab; }
   .person-row:active { cursor: grabbing; }
   .person-row.dragging { opacity: .5; }
   .person-row:hover { background: #f8fbff; border-left-color: #93c5fd; }
   .person-row .name { font-weight: 700; color: var(--navy); line-height: 1.25; }
-  .person-row .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .person-row .meta { font-size: 11px; color: var(--muted); }
 
   .tree-wrap {
     background-color: #fff;
@@ -187,7 +205,6 @@
     .person-inline-grid { grid-template-columns: 1fr 1fr; }
     .inline-people-row { grid-template-columns: 1fr 1fr; }
     .workbench { grid-template-columns: 1fr; }
-    .pool-body { max-height: 260px; }
   }
 
   /* ── SORTABLE DRAG ── */
@@ -218,7 +235,7 @@
   .tox-notifications-container, .tox-promotion, .tox-statusbar__branding { display: none !important; }
 </style>
 
-<div class="case-layout-wrap" style="height: calc(100vh - 80px); overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 0 8px 10px 8px;">
+<div class="case-layout-wrap" style="display: flex; flex-direction: column; gap: 8px; padding: 0 8px 10px 8px;">
 
   <!-- ══ TẦNG 1: Tài sản + Người tham gia ══ -->
   <div class="d-flex gap-2 flex-shrink-0" style="border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">
@@ -287,6 +304,12 @@
         </div>
         <div class="card-body inline-form" style="padding-top: 6px;">
           <div id="inline-person-error" class="alert alert-danger d-none"></div>
+          <div id="ocr-staging-area" style="display:none; margin-bottom: 8px;">
+            <div class="ocr-staging-header">
+              <i class="bi bi-camera-fill me-1"></i>Kết quả OCR – chờ xử lý
+              <span id="ocr-staging-count" class="badge bg-warning text-dark ms-1">0</span>
+            </div>
+          </div>
           <div id="inline-people-list" class="inline-people-list" style="min-height: 130px; max-height: 220px; overflow-y: auto;">
             <div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm người vào hồ sơ.</div>
           </div>
@@ -297,11 +320,11 @@
   </div><!-- /TẦNG 1 -->
 
   <!-- ══ TẦNG 2: Pool kéo-thả + Sơ đồ ══ -->
-  <div class="d-flex gap-2 flex-grow-1 overflow-hidden" style="min-height: 0;">
+  <div class="d-flex gap-2 flex-grow-1" style="min-height: 65vh;">
 
     <!-- Pool (~22%) -->
     <div style="flex: 0 0 22%; min-width: 0; display: flex; flex-direction: column;">
-      <div class="pool-panel" style="height: 100%;">
+      <div class="pool-panel" style="min-height: 60vh;">
         <div class="pool-head">Danh sách người kéo-thả</div>
         <div class="px-2 py-2 border-bottom bg-light">
           <input type="text" id="pool-search-input" class="form-control form-control-sm" placeholder="Tìm người trong hệ thống..." autocomplete="off">
@@ -315,7 +338,7 @@
 
     <!-- Sơ đồ (~78%) -->
     <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-      <div class="card shadow-sm border-0 d-flex flex-column" style="height: 100%;">
+      <div class="card shadow-sm border-0 d-flex flex-column" style="min-height: 60vh;">
         <div class="card-header d-flex justify-content-between align-items-center bg-white border-bottom pt-3 pb-2">
           <div style="font-weight:700; font-size:14px; color:var(--navy);">
             <i class="bi bi-diagram-3 me-1" style="color:var(--gold)"></i>Sơ đồ thừa kế
@@ -323,6 +346,9 @@
           <div class="d-flex gap-2">
             <button type="button" class="btn btn-sm btn-outline-success fw-bold px-3" id="btn-open-export" data-bs-toggle="modal" data-bs-target="#exportWordModal">
               <i class="bi bi-file-word me-1"></i>Xuất văn bản
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#manageTemplatesModal" title="Quản lý mẫu Word">
+              <i class="bi bi-folder2-open me-1"></i>Mẫu Word
             </button>
             <a href="/cases" class="btn btn-sm btn-light border fw-bold text-muted">Huỷ</a>
             <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="btn-submit-case">
@@ -335,7 +361,7 @@
             <div class="title">Cảnh báo nghiệp vụ</div>
             <ul id="tree-warnings-list"></ul>
           </div>
-          <div class="tree-wrap" style="overflow-y: auto; height: 100%;">
+          <div class="tree-wrap" style="overflow-y: auto; min-height: 55vh;">
             <div class="tree-tier">
               <div class="tier-title">Tầng 1 - Cha mẹ</div>
               <div class="tier-content">
@@ -476,9 +502,6 @@
       <div class="modal-footer py-2 justify-content-between">
         <div style="font-size:12px;color:#64748b;" id="ocr-summary-text"></div>
         <div class="d-flex gap-2">
-          <button class="btn btn-sm btn-success" id="ocr-btn-add-all" onclick="ocrAddAllToPool()" style="display:none;">
-            <i class="bi bi-person-plus me-1"></i>Thêm tất cả vào pool
-          </button>
           <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Đóng</button>
         </div>
       </div>
@@ -572,6 +595,163 @@ function refreshPoolAfterImport() {
   const modal = bootstrap.Modal.getInstance(document.getElementById('importExcelModal'));
   if (modal) modal.hide();
 }
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     Modal Quản lý mẫu Word
+════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="manageTemplatesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header" style="background:linear-gradient(135deg,var(--navy),#1a3a6b);color:#fff;">
+        <h5 class="modal-title"><i class="bi bi-folder2-open me-2"></i>Quản lý mẫu văn bản Word</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Thông báo -->
+        <div id="tpl-msg" class="d-none mb-3"></div>
+
+        <!-- Form tải lên -->
+        <div class="card mb-3">
+          <div class="card-header py-2 fw-semibold" style="font-size:13px;"><i class="bi bi-upload me-1"></i>Tải lên mẫu mới</div>
+          <div class="card-body py-3">
+            <div class="row g-2 align-items-end">
+              <div class="col-md-4">
+                <label class="form-label mb-1" style="font-size:12px;">Tên mẫu</label>
+                <input type="text" id="tpl-ten-mau" class="form-control form-control-sm" placeholder="Ví dụ: Mẫu phân chia thừa kế">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label mb-1" style="font-size:12px;">File .docx</label>
+                <input type="file" id="tpl-file" class="form-control form-control-sm" accept=".docx">
+              </div>
+              <div class="col-md-3">
+                <button type="button" class="btn btn-primary btn-sm w-100" id="tpl-btn-upload">
+                  <i class="bi bi-upload me-1"></i>Tải lên
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Danh sách mẫu -->
+        <div id="tpl-list-wrap">
+          <div class="text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm"></div> Đang tải...
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const modal = document.getElementById('manageTemplatesModal');
+
+  async function loadTplList() {
+    document.getElementById('tpl-list-wrap').innerHTML =
+      '<div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div> Đang tải...</div>';
+    try {
+      const data = await fetch('/cases/templates/list-json').then(r => r.json());
+      const items = (data.templates || []).filter(t => !t.builtin);
+      if (!items.length) {
+        document.getElementById('tpl-list-wrap').innerHTML =
+          '<p class="text-muted text-center py-3 mb-0">Chưa có mẫu nào được tải lên.</p>';
+        return;
+      }
+      let html = '<table class="table table-sm table-hover mb-0"><thead class="table-light"><tr>' +
+        '<th>Tên mẫu</th><th>File gốc</th><th style="width:100px">Trạng thái</th><th style="width:130px"></th></tr></thead><tbody>';
+      items.forEach(t => {
+        const badge = t.is_active
+          ? '<span class="badge bg-success">Mặc định</span>'
+          : '<span class="badge bg-secondary text-white">Không dùng</span>';
+        const activateBtn = !t.is_active
+          ? `<button class="btn btn-xs btn-outline-success tpl-activate" data-id="${t.id}" style="font-size:11px;padding:1px 6px;">Dùng mẫu này</button> `
+          : '';
+        html += `<tr>
+          <td><i class="bi bi-file-word text-success me-1"></i><strong style="font-size:13px;">${t.ten_mau}</strong></td>
+          <td class="text-muted" style="font-size:11px;">${t.ten_file_goc || ''}</td>
+          <td>${badge}</td>
+          <td class="text-end">${activateBtn}<button class="btn btn-xs btn-outline-danger tpl-delete" data-id="${t.id}" data-name="${t.ten_mau}" style="font-size:11px;padding:1px 6px;"><i class="bi bi-trash"></i></button></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('tpl-list-wrap').innerHTML = html;
+
+      document.querySelectorAll('.tpl-activate').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const res = await fetch(`/cases/templates/api/${btn.dataset.id}/activate`, {method:'POST'}).then(r=>r.json());
+          if (res.ok) { showTplMsg('success', 'Đã đặt mẫu mặc định.'); loadTplList(); }
+          else showTplMsg('danger', res.err || 'Lỗi');
+        });
+      });
+
+      document.querySelectorAll('.tpl-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Xóa mẫu «${btn.dataset.name}»?`)) return;
+          btn.disabled = true;
+          const res = await fetch(`/cases/templates/api/${btn.dataset.id}/delete`, {method:'POST'}).then(r=>r.json());
+          if (res.ok) { showTplMsg('success', 'Đã xóa mẫu.'); loadTplList(); }
+          else showTplMsg('danger', res.err || 'Lỗi');
+        });
+      });
+    } catch(e) {
+      document.getElementById('tpl-list-wrap').innerHTML =
+        `<div class="alert alert-danger small">Lỗi tải danh sách: ${e.message}</div>`;
+    }
+  }
+
+  function showTplMsg(type, text) {
+    const el = document.getElementById('tpl-msg');
+    el.className = `alert alert-${type} py-2 mb-3`;
+    el.textContent = text;
+    el.classList.remove('d-none');
+    setTimeout(() => el.classList.add('d-none'), 4000);
+  }
+
+  modal.addEventListener('show.bs.modal', () => {
+    document.getElementById('tpl-ten-mau').value = '';
+    document.getElementById('tpl-file').value = '';
+    document.getElementById('tpl-msg').classList.add('d-none');
+    loadTplList();
+  });
+
+  document.getElementById('tpl-btn-upload').addEventListener('click', async () => {
+    const ten = document.getElementById('tpl-ten-mau').value.trim();
+    const file = document.getElementById('tpl-file').files[0];
+    if (!ten) { showTplMsg('warning', 'Vui lòng nhập tên mẫu.'); return; }
+    if (!file) { showTplMsg('warning', 'Vui lòng chọn file .docx.'); return; }
+    if (!file.name.toLowerCase().endsWith('.docx')) { showTplMsg('danger', 'Chỉ hỗ trợ file .docx'); return; }
+
+    const btn = document.getElementById('tpl-btn-upload');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải...';
+
+    const fd = new FormData();
+    fd.append('ten_mau', ten);
+    fd.append('file_mau', file);
+    try {
+      const res = await fetch('/cases/templates/api/upload', {method:'POST', body: fd}).then(r=>r.json());
+      if (res.ok) {
+        showTplMsg('success', `Đã tải lên mẫu «${res.ten_mau}».`);
+        document.getElementById('tpl-ten-mau').value = '';
+        document.getElementById('tpl-file').value = '';
+        loadTplList();
+      } else {
+        showTplMsg('danger', res.err || 'Lỗi tải lên');
+      }
+    } catch(e) {
+      showTplMsg('danger', 'Lỗi kết nối: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-upload me-1"></i>Tải lên';
+    }
+  });
+})();
 </script>
 
 <!-- Modal Xuất văn bản -->
@@ -1134,8 +1314,7 @@ function refreshPoolAfterImport() {
     row.dataset.death = data.death || '';
     row.innerHTML = `
       <div class="name">${data.name || ''}</div>
-      <div class="meta">Sinh: ${data.birth || '—'}</div>
-      <div class="meta">Chết: ${data.death || '—'}</div>
+      <div class="meta">Sinh: ${data.birth || '—'} • Chết: ${data.death || '—'}</div>
     `;
     pool.prepend(row);
   }
@@ -1641,6 +1820,7 @@ function refreshPoolAfterImport() {
   setOwnerFromSelect();
   updateGrandZones();
   placeExistingParticipants();
+  loadStagingFromStorage();
   updateGrandZones();
   recalcShares();
 
@@ -1720,7 +1900,7 @@ function refreshPoolAfterImport() {
         poolRow.dataset.id = c.id; poolRow.dataset.name = c.ho_ten;
         poolRow.dataset.doc = c.so_giay_to||''; poolRow.dataset.gender = c.gioi_tinh||'';
         poolRow.dataset.birth = c.ngay_sinh||''; poolRow.dataset.death = c.ngay_chet||'';
-        poolRow.innerHTML = `<div class="name">${c.ho_ten}</div><div class="meta">Sinh: ${c.ngay_sinh||'—'}</div><div class="meta">Chết: ${c.ngay_chet||'—'}</div>`;
+        poolRow.innerHTML = `<div class="name">${c.ho_ten}</div><div class="meta">Sinh: ${c.ngay_sinh||'—'} • Chết: ${c.ngay_chet||'—'}</div>`;
         pool.prepend(poolRow);
         poolRow.style.background = '#d1fae5';
         setTimeout(() => { poolRow.style.background = ''; }, 800);
@@ -2023,6 +2203,7 @@ function refreshPoolAfterImport() {
       sent.add(key);
       addParticipant(card, role);
     });
+    localStorage.removeItem(_stagingKey());
     ev.target.submit();
   });
 // Load React app
@@ -2186,7 +2367,7 @@ const OCR = (() => {
 
       // Tìm họ tên: phần toàn chữ, ≥ 6 ký tự
       const namePart = parts.find(p => /^[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼỀẾỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỴỶỸ\s]+$/i.test(p) && p.length >= 4 && !/^\d/.test(p));
-      if (namePart) p.ho_ten = namePart.toUpperCase();
+      if (namePart) p.ho_ten = namePart; // Giữ nguyên dấu từ QR (UTF-8)
 
       // Ngày sinh: ddmmyyyy (8 chữ số) hoặc dd/mm/yyyy
       const dates = parts.filter(p => /^\d{8}$/.test(p) || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(p));
@@ -2254,20 +2435,37 @@ const OCR = (() => {
     // Chỉ re-render những item chưa có DOM
     imageQueue.forEach(item => {
       if (container.querySelector(`[data-id="${item.id}"]`)) {
-        // Cập nhật status nếu đổi
-        const statusEl = container.querySelector(`[data-id="${item.id}"] .ocr-item-status`);
+        const itemEl = container.querySelector(`[data-id="${item.id}"]`);
+        // Cập nhật status
+        const statusEl = itemEl.querySelector('.ocr-item-status');
         if (statusEl) statusEl.innerHTML = statusHtml(item);
+        // Cập nhật border màu đỏ nếu lỗi
+        if (item.status === 'error') {
+          itemEl.style.borderColor = '#fca5a5';
+          itemEl.style.background  = '#fff5f5';
+        }
+        // Cập nhật img src khi dataUrl vừa được load
+        const imgEl = itemEl.querySelector('img');
+        if (imgEl && item.dataUrl && !imgEl.dataset.loaded) {
+          imgEl.src            = item.dataUrl;
+          imgEl.style.cursor   = 'zoom-in';
+          imgEl.title          = 'Nhấn để xem ảnh';
+          imgEl.dataset.loaded = '1';
+          imgEl.onclick        = () => window.ocrPreviewImg(item.id);
+        }
         return;
       }
       const el = document.createElement('div');
       el.dataset.id = item.id;
-      el.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:7px 8px;';
+      const isErr = item.status === 'error';
+      el.style.cssText = `display:flex;align-items:center;gap:8px;background:${isErr?'#fff5f5':'#fff'};border:1px solid ${isErr?'#fca5a5':'#e5e7eb'};border-radius:6px;padding:6px 8px;`;
       el.innerHTML = `
-        <img src="${item.dataUrl || ''}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0;background:#f1f5f9;">
+        <img src="${item.dataUrl || ''}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0;background:#f1f5f9;${item.dataUrl?'cursor:zoom-in;':''}"
+             onclick="${item.dataUrl?`ocrPreviewImg('${item.id}')`:''}" title="${item.dataUrl?'Nhấn để xem ảnh':''}">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>
-          <div class="ocr-item-status" style="font-size:10px;">${statusHtml(item)}</div>
-          ${item.sizeKB ? `<div style="font-size:9px;color:#94a3b8;">${item.sizeKB}KB sau resize</div>` : ''}
+          <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>
+          <div class="ocr-item-status" style="font-size:11px;">${statusHtml(item)}</div>
+          ${item.sizeKB ? `<div style="font-size:9px;color:#94a3b8;">${item.sizeKB}KB</div>` : ''}
         </div>
         <button onclick="ocrRemoveItem('${item.id}')" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:2px 4px;" title="Xoá">✕</button>
       `;
@@ -2286,6 +2484,107 @@ const OCR = (() => {
     if (s === 'ai_back')    return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
     if (s === 'error')      return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
     return s;
+  }
+
+  // ── Preview ảnh to khi click thumbnail ────────────────────────────────
+  window.ocrPreviewImg = function(id) {
+    const item = imageQueue.find(i => i.id === id);
+    if (!item?.dataUrl) return;
+    let overlay = document.getElementById('ocr-preview-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'ocr-preview-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;';
+      overlay.onclick = () => overlay.style.display = 'none';
+      const img = document.createElement('img');
+      img.id = 'ocr-preview-img';
+      img.style.cssText = 'max-width:88vw;max-height:82vh;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.6);';
+      const label = document.createElement('div');
+      label.id = 'ocr-preview-label';
+      label.style.cssText = 'color:#fff;font-size:13px;margin-top:10px;opacity:.8;';
+      overlay.appendChild(img);
+      overlay.appendChild(label);
+      document.body.appendChild(overlay);
+    }
+    document.getElementById('ocr-preview-img').src = item.dataUrl;
+    document.getElementById('ocr-preview-label').textContent = item.name + (item.status === 'error' ? ' — ' + (item._errorMsg || 'Lỗi') : '');
+    overlay.style.display = 'flex';
+  };
+
+  // ── Bổ sung mặt còn thiếu vào card đã có ─────────────────────────────
+  window.ocrSupplementCard = async function(idx, neededSide) {
+    const persons = ocrResults.filter(r => r.type === 'person');
+    const existing = persons[idx];
+    if (!existing) return;
+
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = async () => {
+      const file = inp.files[0];
+      if (!file) return;
+      const card    = document.querySelector(`.ocr-person-card[data-idx="${idx}"]`);
+      const suppBtn = card?.querySelector('.ocr-suppl-btn');
+      if (suppBtn) { suppBtn.disabled = true; suppBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+
+      try {
+        const {dataUrl} = await resizeImage(file, 1000);
+        const qId = Date.now() + '_s';
+        imageQueue.push({id: qId, file, name: file.name, dataUrl, status: 'processing', sizeKB: 0});
+        renderQueue();
+
+        const formData = new FormData();
+        const blob = await fetch(dataUrl).then(r => r.blob());
+        formData.append('files', blob, file.name);
+        const resp = await fetch('/api/ocr/analyze', {method:'POST', body: formData});
+        if (!resp.ok) throw new Error('Server lỗi ' + resp.status);
+        const data = await resp.json();
+
+        const existingCCCD = existing.data.so_giay_to;
+        const match = (data.persons || []).find(p => !existingCCCD || p.so_giay_to === existingCCCD)
+                   || (data.persons || [])[0];
+
+        if (neededSide === 'back' && match?.ngay_cap) {
+          existing.data.ngay_cap = match.ngay_cap;
+          existing.data._source  = 'cccd+back';
+          const el = card?.querySelector('[data-key="ngay_cap"]');
+          if (el) el.value = match.ngay_cap;
+          updateCardBadge(card, 'cccd+back');
+          showToast('✅ Đã bổ sung mặt sau — ngày cấp: ' + match.ngay_cap, 'success');
+        } else if (neededSide === 'front' && match?.ho_ten) {
+          const name = hasDiacritics(match.ho_ten) ? toTitleCase(match.ho_ten) : match.ho_ten;
+          existing.data.ho_ten  = name;
+          existing.data.dia_chi = match.dia_chi || existing.data.dia_chi;
+          existing.data._source = 'cccd+back';
+          const elName = card?.querySelector('[data-key="ho_ten"]');
+          const elAddr = card?.querySelector('[data-key="dia_chi"]');
+          if (elName) elName.value = name;
+          if (elAddr && match.dia_chi) elAddr.value = match.dia_chi;
+          updateCardBadge(card, 'cccd+back');
+          showToast('✅ Đã bổ sung mặt trước — ' + name, 'success');
+        } else {
+          showToast('Không nhận diện được ảnh bổ sung', 'warning');
+          if (suppBtn) { suppBtn.disabled = false; suppBtn.innerHTML = '<i class="bi bi-camera"></i> Bổ sung'; }
+        }
+        const qi = imageQueue.find(i => i.id === qId);
+        if (qi) { qi.status = 'ai'; renderQueue(); }
+      } catch(e) {
+        showToast('Lỗi: ' + e.message, 'danger');
+        if (suppBtn) { suppBtn.disabled = false; suppBtn.innerHTML = '<i class="bi bi-camera"></i> Bổ sung'; }
+      }
+    };
+    inp.click();
+  };
+
+  function updateCardBadge(card, _source) {
+    if (!card) return;
+    const badge   = card.querySelector('.ocr-src-badge');
+    const suppBtn = card.querySelector('.ocr-suppl-btn');
+    const note    = card.querySelector('.ocr-suppl-note');
+    if (_source === 'cccd+back') {
+      if (badge) { badge.style.background='#d1fae5'; badge.style.color='#065f46'; badge.textContent='2 mặt ✓'; }
+      suppBtn?.remove();
+      note?.remove();
+    }
   }
 
   window.ocrRemoveItem = function(id) {
@@ -2407,6 +2706,7 @@ const OCR = (() => {
     }
 
     renderResults();
+    autoStageOcrResults();  // Tự động đưa vào staging + pool
 
     btn.disabled = false;
     document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-magic me-1"></i>Trích xuất';
@@ -2435,8 +2735,9 @@ const OCR = (() => {
     let html = '';
 
     if (persons.length) {
-      html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:10px;">
+      html += `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:8px;">
         <i class="bi bi-people me-1"></i>Người (${persons.length})
+        <span style="font-size:10px;font-weight:400;text-transform:none;color:#94a3b8;margin-left:8px;">Tên lấy từ CCCD — viết hoa, không dấu. Chỉnh trực tiếp nếu cần.</span>
       </div>`;
       persons.forEach((r, i) => {
         const d = r.data || {};
@@ -2465,11 +2766,6 @@ const OCR = (() => {
 
     list.innerHTML = html;
 
-    // Hiện nút "Thêm tất cả"
-    if (persons.length) {
-      document.getElementById('ocr-btn-add-all').style.display = '';
-    }
-
     // Summary
     const qrCount = ocrResults.filter(r => r.source === 'QR').length;
     const aiCount = ocrResults.filter(r => r.source === 'AI').length;
@@ -2477,38 +2773,63 @@ const OCR = (() => {
       `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
   }
 
+  // ── Helpers tên tiếng Việt ─────────────────────────────────────────────
+  function toTitleCase(str) {
+    return (str||'').replace(/\S+/g, w => w.charAt(0) + w.slice(1).toLowerCase());
+  }
+  function hasDiacritics(str) {
+    return /[àáâãèéêìíòóôõùúăđĩũơưạảấầẩẫậắằẳẵặẹẻẽềếệỉịọỏốồổỗộớờởỡợụủứừửữựỳýỵỷỹ]/i.test(str||'');
+  }
+
   function personCard(d, idx, source) {
-    const srcBadge = source === 'QR'
-      ? `<span style="background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;">QR ✓</span>`
-      : `<span style="background:#dbeafe;color:#1e40af;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700;">AI</span>`;
-    const matchBadge = d._source?.includes('+back')
-      ? `<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:8px;">2 mặt ✓</span>` : '';
+    // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
+    const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
+
+    // Badge + note + supplement button theo nguồn
+    let srcBadge, suppNote = '', suppBtn = '';
+    const _src = d._source || '';
+    const qrTag = d._qr ? ' <span style="font-size:9px;opacity:.75;font-weight:600;">QR✓</span>' : '';
+    if (source === 'QR') {
+      srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">QR ✓</span>`;
+      suppNote = `<span class="ocr-suppl-note" style="font-size:10px;color:#64748b;flex-shrink:0;">thiếu ảnh mặt</span>`;
+      suppBtn  = `<button class="btn btn-sm btn-outline-secondary ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung ảnh mặt trước CCCD"><i class="bi bi-camera"></i></button>`;
+    } else if (_src.includes('+back')) {
+      srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓${qrTag}</span>`;
+    } else if (_src.includes('thiếu mặt sau')) {
+      srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt sau</span>`;
+      suppBtn  = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'back')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt sau CCCD (lấy ngày cấp)"><i class="bi bi-camera"></i> Bổ sung</button>`;
+    } else if (_src === 'cccd_back only') {
+      srcBadge = `<span class="ocr-src-badge" style="background:#ffedd5;color:#9a3412;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt trước</span>`;
+      suppBtn  = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt trước CCCD (lấy tên + địa chỉ)"><i class="bi bi-camera"></i> Bổ sung</button>`;
+    } else {
+      srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">AI</span>`;
+    }
+
+    const inp = (key, val, ph, flex='flex:1;min-width:80px;') =>
+      `<input type="text" class="form-control form-control-sm ocr-input" data-idx="${idx}" data-key="${key}"
+              value="${(val||'').replace(/"/g,'&quot;')}" placeholder="${ph}"
+              style="font-size:13px;${flex}" oninput="ocrUpdateField(${idx},'${key}',this.value)">`;
+    const genderSel = `<select class="form-select form-select-sm ocr-input" data-idx="${idx}" data-key="gioi_tinh"
+            style="font-size:13px;flex:0 0 90px;" onchange="ocrUpdateField(${idx},'gioi_tinh',this.value)">
+        <option value="">Giới tính</option>
+        <option value="Nam" ${d.gioi_tinh==='Nam'?'selected':''}>Nam</option>
+        <option value="Nữ" ${d.gioi_tinh==='Nữ'?'selected':''}>Nữ</option>
+      </select>`;
 
     return `
     <div class="ocr-person-card" data-idx="${idx}"
-         style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fff;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div style="font-weight:700;font-size:14px;color:#1e3a5f;">
-          <i class="bi bi-person me-1" style="color:#2563eb;"></i>
-          <span class="ocr-field-name">${d.ho_ten || '(chưa đọc được tên)'}</span>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;">${srcBadge}${matchBadge}</div>
+         style="border:1px solid #e2e8f0;border-radius:7px;padding:8px 10px;margin-bottom:6px;background:#fff;">
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+        <i class="bi bi-person" style="color:#2563eb;font-size:16px;flex-shrink:0;"></i>
+        ${inp('ho_ten', displayName, 'Họ tên', 'flex:2;min-width:110px;')}
+        ${genderSel}
+        ${inp('ngay_sinh', d.ngay_sinh, 'Ngày sinh')}
+        ${inp('so_giay_to', d.so_giay_to, 'Số CCCD/CMND', 'flex:1.4;min-width:100px;')}
+        ${inp('ngay_cap', d.ngay_cap, 'Ngày cấp', 'flex:1;min-width:80px;')}
+        ${srcBadge}${suppNote}${suppBtn}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
-        ${ocrField('Họ tên', 'ho_ten', d.ho_ten, idx)}
-        ${ocrField('Giới tính', 'gioi_tinh', d.gioi_tinh, idx, true)}
-        ${ocrField('Ngày sinh', 'ngay_sinh', d.ngay_sinh, idx)}
-        ${ocrField('Số CCCD/CMND', 'so_giay_to', d.so_giay_to, idx)}
-        ${ocrField('Ngày cấp', 'ngay_cap', d.ngay_cap, idx)}
-        ${ocrField('Ngày mất', 'ngay_chet', d.ngay_chet || '', idx)}
-      </div>
-      <div style="margin-bottom:10px;">
-        ${ocrField('Địa chỉ', 'dia_chi', d.dia_chi, idx, false, true)}
-      </div>
-      <div style="display:flex;gap-8px;justify-content:flex-end;">
-        <button class="btn btn-sm btn-success" onclick="ocrAddPersonToPool(${idx})" style="font-size:12px;">
-          <i class="bi bi-person-plus me-1"></i>Thêm vào pool
-        </button>
+      <div style="margin-top:5px;">
+        ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
       </div>
     </div>`;
   }
@@ -2573,55 +2894,161 @@ const OCR = (() => {
     if (ocrResults[idx]?.data) ocrResults[idx].data[key] = val;
   };
 
-  // ── Thêm người vào pool ────────────────────────────────────────────────
-  window.ocrAddPersonToPool = async function(idx) {
-    const r = ocrResults.filter(x => x.type === 'person')[idx];
-    if (!r) return;
-
-    // Đọc giá trị hiện tại từ input fields trong card
-    const card = document.querySelector(`.ocr-person-card[data-idx="${idx}"]`);
-    if (card) {
-      card.querySelectorAll('.ocr-input').forEach(el => {
-        if (r.data) r.data[el.dataset.key] = el.value;
-      });
+  // ── Auto-stage sau khi OCR xong ──────────────────────────────────────
+  async function autoStageOcrResults() {
+    const persons = ocrResults.filter(r => r.type === 'person' && !r._staged);
+    for (const r of persons) {
+      r._staged = true;
+      const d = r.data || {};
+      // Đọc giá trị hiện tại từ modal card (user có thể đã chỉnh)
+      const idx = ocrResults.indexOf(r);
+      const card = document.querySelector(`.ocr-person-card[data-idx="${idx}"]`);
+      if (card) {
+        card.querySelectorAll('.ocr-input').forEach(el => { d[el.dataset.key] = el.value; });
+      }
+      if (!d.ho_ten) continue;  // Bỏ qua nếu không có tên
+      try {
+        const body = new URLSearchParams({
+          ho_ten: d.ho_ten||'', gioi_tinh: d.gioi_tinh||'',
+          ngay_sinh: d.ngay_sinh||'', so_giay_to: d.so_giay_to||'',
+          ngay_cap: d.ngay_cap||'', dia_chi: d.dia_chi||'',
+        });
+        const resp = await fetch('/customers/inline-create', {method:'POST', body});
+        const json = await resp.json();
+        if (json.ok) {
+          r._customerId = json.customer.id;
+          addToStagingLinked(json.customer);
+          saveStagingToStorage(json.customer.id);
+          // Đánh dấu modal card đã được stage
+          if (card) { card.style.borderColor='#10b981'; card.style.background='#f0fdf4'; }
+        }
+      } catch(e) { console.warn('Stage failed:', e); }
     }
+  }
 
-    const d = r.data || {};
-    const btn = card?.querySelector('.btn-success');
-    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
+  // ── Staging linked với pool ────────────────────────────────────────────
+  function addToStagingLinked(c) {
+    if (document.querySelector(`#ocr-staging-area [data-cid="${c.id}"]`)) return; // đã có
+    _addStagingCard(c);
+    if (!document.querySelector(`#people-pool [data-id="${c.id}"]`)) {
+      addPersonRowToPool(c);
+    }
+  }
 
-    const payload = new URLSearchParams({
-      ho_ten:     d.ho_ten    || '',
-      gioi_tinh:  d.gioi_tinh || '',
-      ngay_sinh:  d.ngay_sinh || '',
-      ngay_chet:  d.ngay_chet || '',
-      so_giay_to: d.so_giay_to|| '',
-      ngay_cap:   d.ngay_cap  || '',
-      dia_chi:    d.dia_chi   || '',
+  function _fmtDate(val) {
+    if (!val) return '';
+    const m = String(val).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(val);
+  }
+
+  function _addStagingCard(c) {
+    const area = document.getElementById('ocr-staging-area');
+    if (!area) return;
+    area.style.display = '';
+
+    const row = document.createElement('div');
+    row.className = 'ocr-staged-row';
+    row.dataset.cid = c.id;
+
+    const escVal = v => (v||'').toString().replace(/"/g, '&quot;');
+    row.innerHTML = `
+      <input class="form-control" data-key="ho_ten" value="${escVal(c.ho_ten)}" placeholder="Họ tên">
+      <select class="form-select" data-key="gioi_tinh">
+        <option value="">Gt</option>
+        <option value="Nam" ${c.gioi_tinh==='Nam'?'selected':''}>Nam</option>
+        <option value="Nữ" ${c.gioi_tinh==='Nữ'?'selected':''}>Nữ</option>
+      </select>
+      <input class="form-control" data-key="ngay_sinh" value="${escVal(_fmtDate(c.ngay_sinh))}" placeholder="Ngày sinh">
+      <input class="form-control" data-key="ngay_chet" value="${escVal(_fmtDate(c.ngay_chet))}" placeholder="Ngày chết">
+      <input class="form-control" data-key="so_giay_to" value="${escVal(c.so_giay_to)}" placeholder="CCCD/CMND">
+      <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(c.ngay_cap))}"  placeholder="Ngày cấp">
+      <input class="form-control" data-key="dia_chi" value="${escVal(c.dia_chi)}" placeholder="Địa chỉ thường trú">
+      <div class="row-actions">
+        <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
+        <button type="button" class="btn btn-xs btn-outline-danger staged-remove-btn" title="Xóa khỏi danh sách">✕</button>
+      </div>`;
+
+    // Auto-save debounce
+    let saveTimer;
+    row.querySelectorAll('input,select').forEach(el => {
+      el.addEventListener('input', () => {
+        const status = row.querySelector('.staged-save-status');
+        status.textContent = '…';
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => _saveStagingRow(row, c.id, status), 800);
+      });
     });
 
+    row.querySelector('.staged-remove-btn').addEventListener('click', () => {
+      row.remove();
+      removeStagingFromStorage(c.id);
+      document.querySelector(`#people-pool [data-id="${c.id}"]`)?.remove();
+      _updateStagingCount();
+    });
+
+    area.insertBefore(row, area.firstChild);
+    _updateStagingCount();
+  }
+
+  async function _saveStagingRow(row, cid, statusEl) {
+    const body = new URLSearchParams();
+    row.querySelectorAll('[data-key]').forEach(el => body.set(el.dataset.key, el.value));
     try {
-      const resp = await fetch('/customers/inline-create', { method: 'POST', body: payload });
-      const data = await resp.json();
-      if (!data.ok) {
-        const msg = Object.keys(data.errors || {}).join(', ');
-        showToast(`Lỗi thêm người: ${msg}`, 'danger');
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>Thêm vào pool'; }
-        return;
+      const resp = await fetch(`/customers/${cid}/quick-update`, {method:'POST', body});
+      const json = await resp.json();
+      if (json.ok) {
+        if (statusEl) { statusEl.textContent = '✓'; setTimeout(() => statusEl.textContent='', 2000); }
+        // Sync pool card
+        const poolCard = document.querySelector(`#people-pool [data-id="${cid}"]`);
+        if (poolCard) {
+          const newName = row.querySelector('[data-key="ho_ten"]').value;
+          poolCard.dataset.name   = newName;
+          poolCard.dataset.birth  = row.querySelector('[data-key="ngay_sinh"]').value;
+          poolCard.dataset.doc    = row.querySelector('[data-key="so_giay_to"]').value;
+          poolCard.dataset.gender = row.querySelector('[data-key="gioi_tinh"]').value;
+          const nameEl = poolCard.querySelector('.name');
+          if (nameEl) nameEl.textContent = newName;
+        }
+      } else {
+        if (statusEl) statusEl.textContent = '!';
       }
-      const c = data.customer;
-      addPersonRowToPool(c);
-      // Đánh dấu đã thêm
-      if (card) {
-        card.style.borderColor = '#10b981';
-        card.style.background  = '#f0fdf4';
-        if (btn) btn.innerHTML = '<i class="bi bi-check me-1"></i>Đã thêm';
-      }
-      showToast(`✅ Đã thêm: ${c.ho_ten}`, 'success');
-    } catch(e) {
-      showToast('Lỗi kết nối: ' + e.message, 'danger');
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus me-1"></i>Thêm vào pool'; }
-    }
+    } catch(e) { if (statusEl) statusEl.textContent = '!'; }
+  }
+
+  // ── localStorage staging persistence ──────────────────────────────────
+  const _stagingKey = () => `ocr_staging_${document.getElementById('case-id-hidden')?.value||'new'}`;
+  function saveStagingToStorage(cid) {
+    const ids = JSON.parse(localStorage.getItem(_stagingKey())||'[]');
+    if (!ids.includes(cid)) { ids.push(cid); localStorage.setItem(_stagingKey(), JSON.stringify(ids)); }
+  }
+  function removeStagingFromStorage(cid) {
+    const ids = JSON.parse(localStorage.getItem(_stagingKey())||'[]').filter(x=>x!=cid);
+    localStorage.setItem(_stagingKey(), JSON.stringify(ids));
+  }
+  function loadStagingFromStorage() {
+    const ids = JSON.parse(localStorage.getItem(_stagingKey())||'[]');
+    ids.forEach(cid => {
+      const c = (window.allCustomersData||[]).find(x => x.id == cid);
+      if (c) addToStagingLinked(c);
+    });
+  }
+
+  // ── Thêm người thủ công vào pool (từ inline-create button) ─────────────
+  // Giữ lại để tương thích với flow thêm người thủ công (nút Thêm trong card)
+  window.ocrAddPersonToPool = async function(idx) {
+    const r = ocrResults.filter(x => x.type === 'person')[idx];
+    if (!r || r._staged) return;
+    r._staged = true;
+    const d = r.data || {};
+    const card = document.querySelector(`.ocr-person-card[data-idx="${idx}"]`);
+    if (card) card.querySelectorAll('.ocr-input').forEach(el => { d[el.dataset.key] = el.value; });
+    if (!d.ho_ten) return;
+    const body = new URLSearchParams({ho_ten:d.ho_ten||'',gioi_tinh:d.gioi_tinh||'',ngay_sinh:d.ngay_sinh||'',so_giay_to:d.so_giay_to||'',ngay_cap:d.ngay_cap||'',dia_chi:d.dia_chi||''});
+    try {
+      const resp = await fetch('/customers/inline-create', {method:'POST', body});
+      const json = await resp.json();
+      if (json.ok) { r._customerId=json.customer.id; addToStagingLinked(json.customer); saveStagingToStorage(json.customer.id); }
+    } catch(e) {}
   };
 
   function addPersonRowToPool(c) {
@@ -2663,14 +3090,6 @@ const OCR = (() => {
     if (list) list.prepend(item);
   }
 
-  // ── Thêm tất cả người cùng lúc ─────────────────────────────────────────
-  window.ocrAddAllToPool = async function() {
-    const persons = ocrResults.filter(r => r.type === 'person');
-    for (let i = 0; i < persons.length; i++) {
-      await ocrAddPersonToPool(i);
-    }
-  };
-
   // ── Điền vào form tài sản ──────────────────────────────────────────────
   window.ocrFillProperty = function(idx) {
     const r = ocrResults.filter(x => x.type === 'property')[idx];
@@ -2707,6 +3126,78 @@ const OCR = (() => {
       badge.textContent = 'Không kiểm tra được';
     }
   });
+
+  // ── Khi đóng modal: đẩy người chưa thêm ra staging area ──
+  document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal', () => {
+    ocrResults.filter(r => r.type === 'person').forEach(r => {
+      if (!r._added && r.data) window.addToOcrStaging(r.data);
+    });
+    ocrResults = []; imageQueue = [];
+    renderQueue(); renderResults();
+  });
+
+  // ── OCR Staging Area ──
+  function _escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  window.addToOcrStaging = function(data) {
+    const area = document.getElementById('ocr-staging-area');
+    if (!area) return;
+    const g = data.gioi_tinh || '';
+    const row = document.createElement('div');
+    row.className = 'ocr-staged-row';
+    row.innerHTML = `
+      <input type="text" class="form-control" value="${_escHtml(data.ho_ten)}" data-key="ho_ten" placeholder="Họ và tên">
+      <select class="form-select" data-key="gioi_tinh">
+        <option value="">—</option>
+        <option value="Nam"${g==='Nam'?' selected':''}>Nam</option>
+        <option value="Nữ"${g==='Nữ'?' selected':''}>Nữ</option>
+      </select>
+      <input type="text" class="form-control" value="${_escHtml(data.ngay_sinh)}" data-key="ngay_sinh" placeholder="dd/mm/yyyy">
+      <input type="text" class="form-control" value="${_escHtml(data.ngay_chet)}" data-key="ngay_chet" placeholder="Ngày chết">
+      <input type="text" class="form-control" value="${_escHtml(data.so_giay_to)}" data-key="so_giay_to" placeholder="CCCD">
+      <input type="text" class="form-control" value="${_escHtml(data.ngay_cap)}" data-key="ngay_cap" placeholder="Ngày cấp">
+      <input type="text" class="form-control" value="${_escHtml(data.dia_chi)}" data-key="dia_chi" placeholder="Địa chỉ">
+      <div class="row-actions">
+        <button type="button" class="btn btn-xs btn-primary" title="Thêm vào pool">⊕</button>
+        <button type="button" class="btn btn-xs btn-outline-danger" title="Xoá khỏi danh sách">✕</button>
+      </div>
+    `;
+
+    row.querySelector('.btn-primary').addEventListener('click', async () => {
+      const d = {};
+      row.querySelectorAll('[data-key]').forEach(el => { d[el.dataset.key] = el.value; });
+      const btn = row.querySelector('.btn-primary');
+      btn.disabled = true; btn.textContent = '…';
+      const payload = new URLSearchParams({
+        ho_ten: d.ho_ten||'', gioi_tinh: d.gioi_tinh||'',
+        ngay_sinh: d.ngay_sinh||'', ngay_chet: d.ngay_chet||'',
+        so_giay_to: d.so_giay_to||'', ngay_cap: d.ngay_cap||'', dia_chi: d.dia_chi||''
+      });
+      const res = await fetch('/customers/inline-create', { method: 'POST', body: payload });
+      const json = await res.json();
+      if (!json.ok) { btn.disabled = false; btn.textContent = '⊕'; row.style.borderColor = '#f87171'; return; }
+      addPersonRowToPool(json.customer);
+      row.remove();
+      _updateStagingCount();
+    });
+
+    row.querySelector('.btn-outline-danger').addEventListener('click', () => {
+      row.remove(); _updateStagingCount();
+    });
+
+    area.appendChild(row);
+    area.style.display = '';
+    _updateStagingCount();
+  };
+
+  function _updateStagingCount() {
+    const area = document.getElementById('ocr-staging-area');
+    if (!area) return;
+    const n = area.querySelectorAll('.ocr-staged-row').length;
+    const badge = document.getElementById('ocr-staging-count');
+    if (badge) badge.textContent = n;
+    if (n === 0) area.style.display = 'none';
+  }
 
 })(); // end OCR module
 </script>

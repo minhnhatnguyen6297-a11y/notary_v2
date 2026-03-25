@@ -175,7 +175,7 @@ def create(
                 )
                 db.add(p)
             db.commit()
-        return RedirectResponse(f"/cases/{c.id}/preview", status_code=302)
+        return RedirectResponse(f"/cases/{c.id}/edit", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi tạo hồ sơ: {e}")
@@ -301,7 +301,7 @@ def edit(
                 )
                 db.add(p)
             db.commit()
-        return RedirectResponse(f"/cases/{cid}/preview", status_code=302)
+        return RedirectResponse(f"/cases/{cid}/edit", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi cập nhật hồ sơ: {e}")
@@ -458,6 +458,78 @@ def delete_word_template(tid: int, db: Session = Depends(get_db)):
             db.commit()
 
     return RedirectResponse("/cases/templates/manage?ok=Da+xoa+mau", status_code=302)
+
+
+# ── JSON API cho modal Quản lý mẫu (không rời trang) ──────────────────────────
+
+@router.post("/templates/api/upload")
+async def api_upload_template(
+    ten_mau: str = Form(...),
+    file_mau: UploadFile = File(...),
+    dat_mac_dinh: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    ten_mau = (ten_mau or "").strip()
+    if not ten_mau:
+        return JSONResponse({"ok": False, "err": "Vui lòng nhập tên mẫu"}, status_code=400)
+    if not file_mau or not file_mau.filename:
+        return JSONResponse({"ok": False, "err": "Vui lòng chọn file"}, status_code=400)
+    if not file_mau.filename.lower().endswith(".docx"):
+        return JSONResponse({"ok": False, "err": "Chỉ hỗ trợ file .docx"}, status_code=400)
+
+    WORD_TEMPLATE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    saved_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}.docx"
+    saved_path = WORD_TEMPLATE_UPLOAD_DIR / saved_name
+    content = await file_mau.read()
+    saved_path.write_bytes(content)
+
+    set_active = str(dat_mac_dinh).lower() in ("1", "true", "on", "yes")
+    if set_active:
+        db.query(WordTemplate).update({WordTemplate.is_active: False})
+
+    item = WordTemplate(
+        ten_mau=ten_mau,
+        ten_file_goc=file_mau.filename,
+        duong_dan_file=str(saved_path),
+        is_active=set_active,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return JSONResponse({"ok": True, "id": item.id, "ten_mau": item.ten_mau, "is_active": item.is_active})
+
+
+@router.post("/templates/api/{tid}/activate")
+def api_activate_template(tid: int, db: Session = Depends(get_db)):
+    item = db.query(WordTemplate).filter(WordTemplate.id == tid).first()
+    if not item:
+        return JSONResponse({"ok": False, "err": "Không tìm thấy mẫu"}, status_code=404)
+    db.query(WordTemplate).update({WordTemplate.is_active: False})
+    item.is_active = True
+    db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/templates/api/{tid}/delete")
+def api_delete_template(tid: int, db: Session = Depends(get_db)):
+    item = db.query(WordTemplate).filter(WordTemplate.id == tid).first()
+    if not item:
+        return JSONResponse({"ok": False, "err": "Không tìm thấy mẫu"}, status_code=404)
+    was_active = bool(item.is_active)
+    file_path = Path(item.duong_dan_file or "")
+    db.delete(item)
+    db.commit()
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+    if was_active:
+        latest = db.query(WordTemplate).order_by(WordTemplate.id.desc()).first()
+        if latest:
+            latest.is_active = True
+            db.commit()
+    return JSONResponse({"ok": True})
 
 
 def _fmt_date(d: Optional[date]) -> str:
@@ -672,8 +744,6 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
         m[f"[Nơi cấp CC {i}]"] = _safe_text(c.noi_cap if c else "")
         m[f"[Thường trú {i}]"] = _safe_text(c.loai_dia_chi if c else "")
         m[f"[Năm chết {i}]"] = _safe_text(_fmt_date(c.ngay_chet) if c else "")
-
-    m["[Năm chết]"] = m.get("[Năm chết 1]", "")
 
     # Mapping từng loại đất theo số thứ tự: [Loại đất N], [Diện tích N], [Thời hạn N]
     for i, row in enumerate(land_rows[:10], start=1):

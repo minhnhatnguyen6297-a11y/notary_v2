@@ -103,7 +103,7 @@ def to_customer_json(c: Customer) -> Dict[str, Any]:
 def validate_customer_form(form: Dict[str, str], db: Session, current_id: Optional[int] = None, duplicate_as_error: bool = True):
     field_errors: Dict[str, str] = {}
 
-    required = ["ho_ten", "gioi_tinh", "ngay_sinh", "so_giay_to", "ngay_cap", "dia_chi"]
+    required = ["ho_ten"]
     for key in required:
         if not (form.get(key) or "").strip():
             field_errors[key] = "Bat buoc"
@@ -255,7 +255,7 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         "dia_chi": find_col(["dia_chi", "dia chi", "address"]),
     }
 
-    missing = [f for f in ["ho_ten", "gioi_tinh", "ngay_sinh", "so_giay_to", "ngay_cap", "dia_chi"] if col[f] is None]
+    missing = [f for f in ["ho_ten"] if col[f] is None]
     if missing:
         return templates.TemplateResponse("customers/upload_result.html", {
             "request": request,
@@ -385,11 +385,21 @@ def inline_create(
         return JSONResponse({"ok": False, "errors": {"ho_ten": "Bat buoc"}}, status_code=400)
 
     so_giay_to_val = (so_giay_to or "").strip() or None
-    # If CCCD already exists, load that customer instead of failing
+    # Upsert: nếu CCCD đã tồn tại → cập nhật với dữ liệu mới rồi trả về
     if so_giay_to_val:
         existing = db.query(Customer).filter(Customer.so_giay_to == so_giay_to_val).first()
         if existing:
-            return JSONResponse({"ok": True, "customer": to_customer_json(existing)})
+            if name: existing.ho_ten = name
+            gt = normalize_gender(gioi_tinh or "")
+            if gt: existing.gioi_tinh = gt
+            ns = parse_date(ngay_sinh or "", allow_year_only=True)
+            if ns: existing.ngay_sinh = ns
+            nc = parse_date(ngay_cap or "", allow_year_only=True)
+            if nc: existing.ngay_cap = nc
+            dc = (dia_chi or "").strip()
+            if dc: existing.dia_chi = dc
+            db.commit(); db.refresh(existing)
+            return JSONResponse({"ok": True, "customer": to_customer_json(existing), "updated": True})
 
     c = Customer(
         ho_ten=name,
@@ -411,6 +421,36 @@ def inline_create(
         return JSONResponse({"ok": False, "errors": {"so_giay_to": "Trùng"}}, status_code=400)
     db.refresh(c)
     return JSONResponse({"ok": True, "customer": to_customer_json(c)})
+
+
+@router.post("/{cid}/quick-update")
+def quick_update(
+    cid: int,
+    ho_ten: Optional[str] = Form(None), gioi_tinh: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None), so_giay_to: Optional[str] = Form(None),
+    ngay_cap: Optional[str] = Form(None), dia_chi: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    c = db.get(Customer, cid)
+    if not c:
+        raise HTTPException(status_code=404, detail="Not found")
+    if ho_ten and ho_ten.strip():    c.ho_ten    = ho_ten.strip()
+    gt = normalize_gender(gioi_tinh or "")
+    if gt:                           c.gioi_tinh = gt
+    ns = parse_date(ngay_sinh or "", allow_year_only=True)
+    if ns:                           c.ngay_sinh = ns
+    so = (so_giay_to or "").strip()
+    if so:                           c.so_giay_to = so
+    nc = parse_date(ngay_cap or "", allow_year_only=True)
+    if nc:                           c.ngay_cap  = nc
+    dc = (dia_chi or "").strip()
+    if dc:                           c.dia_chi   = dc
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": "so_giay_to trùng"}, status_code=400)
+    return JSONResponse({"ok": True})
 
 
 @router.post("/create")
