@@ -1,60 +1,74 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableDelayedExpansion
 chcp 65001 >nul
 
-REM === CONFIG ===
-set "PROJECT_DIR=%~dp0"
-set "VENV_DIR=%PROJECT_DIR%venv"
-set "PY=py -3.13"
-
-echo.
-echo ==============================
-echo       NOTARY_V2 SETUP
-echo ==============================
+echo ========================================================
+echo        TOOL CAI DAT HE THONG CONG CHUNG HO SO
+echo ========================================================
 echo.
 
-cd /d "%PROJECT_DIR%" || (
-  echo [ERR] Khong vao duoc thu muc du an
-  pause
-  exit /b 1
-)
-
-REM 1) Tao venv neu chua co
-if not exist "%VENV_DIR%\Scripts\python.exe" (
-  echo [SETUP] Dang tao virtual environment...
-  %PY% -m venv "%VENV_DIR%" || (
-    echo [ERR] Tao venv that bai
+:: 1. Kiem tra Python
+python --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo [ERROR] Khong tim thay Python! Vui long cai dat Python 3.10 tro len.
+    echo Hay the duong dan Python vao System PATH khi cai dat.
     pause
     exit /b 1
-  )
-) else (
-  echo [SETUP] Virtual environment da ton tai.
 )
 
-REM 2) Nang cap pip
-echo [SETUP] Nang cap pip...
-"%VENV_DIR%\Scripts\python.exe" -m pip install -U pip
+for /f "tokens=2" %%v in ('python --version') do set PY_VER=%%v
+echo [OK] Da tim thay Python phien ban %PY_VER%
 
-REM 3) Cai thu vien (pin phien ban on dinh)
-echo [SETUP] Dang cai thu vien...
-"%VENV_DIR%\Scripts\python.exe" -m pip install ^
-  SQLAlchemy==2.0.47 ^
-  fastapi==0.133.1 ^
-  uvicorn[standard]==0.41.0 ^
-  jinja2==3.1.6 ^
-  aiosqlite==0.22.1 ^
-  openpyxl==3.1.5 ^
-  python-multipart
-
-REM 4) In version de kiem tra
+:: 2. Khoi tao Virtual Environment
 echo.
-echo [SETUP] Kiem tra phien ban:
-"%VENV_DIR%\Scripts\python.exe" -c "import sqlalchemy,fastapi,uvicorn,jinja2,aiosqlite,openpyxl; print('SQLAlchemy',sqlalchemy.__version__); print('FastAPI',fastapi.__version__); print('Uvicorn',uvicorn.__version__); print('Jinja2',jinja2.__version__); print('aiosqlite',aiosqlite.__version__); print('openpyxl',openpyxl.__version__)"
+if exist "venv\Scripts\python.exe" goto :VenvK
+echo [*] Dang tao moi truong ao python 'venv'...
+python -m venv venv
+if !errorlevel! neq 0 (
+    echo [ERROR] Tao venv that bai.
+    pause
+    exit /b 1
+)
+echo [OK] Tao xong.
+goto :SkipVenv
 
+:VenvK
+echo [OK] Moi truong ao 'venv' da ton tai.
+
+:SkipVenv
+:: 3. Kich hoat va nang cap pip
 echo.
-echo ==============================
-echo      SETUP HOAN TAT
-echo ==============================
+echo [*] Dang nang cap pip...
+call venv\Scripts\activate.bat
+python -m pip install --upgrade pip >nul 2>&1
+
+:: 4. Cai dat thu vien requirements.txt
+echo.
+echo [*] Dang cai dat cac thu vien can thiet tu requirements.txt...
+pip install -r requirements.txt
+if !errorlevel! neq 0 (
+    echo [ERROR] Cai dat thu vien that bai. Vui long kiem tra ket noi mang.
+    pause
+    exit /b 1
+)
+echo [OK] Cai dat thu vien thanh cong.
+
+:: 5. Khoi tao file bien moi truong .env
+echo.
+if not exist ".env" (
+    echo [*] Phat hien chua co file .env, dang sao chep tu .env.example...
+    copy .env.example .env >nul
+    echo [!] Da tao file .env. VUI LONG MO FILE NAY DE DIEN OPENAI_API_KEY!
+) else (
+    echo [OK] File .env da xay dung.
+)
+
+:: Hoan tat
+echo.
+echo ========================================================
+echo    CAI DAT THANH CONG! TREN MAY MOI SE KHONG CON LOI
+echo ========================================================
+echo De khoi dong may chu Web, ban hay nhay dup vao file:
+echo "run.bat"
 echo.
 pause
-endlocal

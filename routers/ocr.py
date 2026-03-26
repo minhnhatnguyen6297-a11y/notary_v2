@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
 
-router = APIRouter(prefix="/api/ocr", tags=["OCR"])
+router = APIRouter(tags=["OCR"])
 
 # ─── Config — đọc động từ file .env để không cần restart khi đổi key ──────────
 _ENV_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
@@ -29,14 +29,15 @@ def _read_env() -> dict:
     from dotenv import dotenv_values
     return dotenv_values(_ENV_PATH)
 
-def _get_api_key() -> str:
-    key = os.getenv("OPENAI_API_KEY", "")
+def _get_api_key(model: str) -> str:
+    key_name = "GEMINI_API_KEY" if "gemini" in model.lower() else "OPENAI_API_KEY"
+    key = os.getenv(key_name, "")
     if not key:
-        key = _read_env().get("OPENAI_API_KEY", "")
+        key = _read_env().get(key_name, "")
     return key
 
 def _get_model() -> str:
-    return os.getenv("OCR_MODEL", "") or _read_env().get("OCR_MODEL", "gpt-4o-mini")
+    return os.getenv("OCR_MODEL", "") or _read_env().get("OCR_MODEL", "gemini-1.5-flash")
 
 MAX_IMAGE_PX = 1000
 JPEG_QUALITY = 82
@@ -172,42 +173,66 @@ async def call_vision_batch(images_b64: list[str]) -> list[dict]:
     Gửi n ảnh trong 1 lần gọi. Prompt chỉ tốn 1 lần.
     Không pad/trim kết quả — ảnh 2 mặt có thể trả >n objects.
     """
-    api_key = _get_api_key()
+    model = _get_model()
+    is_gemini = "gemini" in model.lower()
+    api_key = _get_api_key(model)
     if not api_key:
-        raise HTTPException(status_code=500, detail="Server chưa cấu hình OPENAI_API_KEY")
-
-    content = [{"type": "text", "text": SYSTEM_PROMPT}]
-    for b64 in images_b64:
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/jpeg;base64,{b64}",
-                "detail": "high"
-            }
-        })
+        raise HTTPException(status_code=500, detail=f"Server chưa cấu hình khóa API cho model {model}")
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _get_model(),
-                    "max_tokens": 500 * len(images_b64),   # ~500 tokens mỗi ảnh
-                    "temperature": 0,
-                    "messages": [{"role": "user", "content": content}]
-                },
-            )
+            if is_gemini:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                parts = [{"text": SYSTEM_PROMPT}]
+                for b64 in images_b64:
+                    parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+                
+                resp = await client.post(url, json={
+                    "contents": [{"parts": parts}],
+                    "generationConfig": {"temperature": 0.0}
+                })
+            else:
+                content = [{"type": "text", "text": SYSTEM_PROMPT}]
+                for b64 in images_b64:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64}",
+                            "detail": "high"
+                        }
+                    })
+                
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": 500 * len(images_b64),
+                        "temperature": 0,
+                        "messages": [{"role": "user", "content": content}]
+                    },
+                )
     except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"Không thể kết nối tới OpenAI: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Không thể kết nối tới API: {str(e)}")
 
     if not resp.is_success:
-        raise HTTPException(status_code=502, detail=f"OpenAI lỗi: {resp.text[:300]}")
+        raise HTTPException(status_code=502, detail=f"API lỗi ({model}): {resp.text[:300]}")
 
-    raw = resp.json()["choices"][0]["message"]["content"]
+    resp_json = resp.json()
+    if is_gemini:
+        try:
+            raw = resp_json["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raw = ""
+    else:
+        try:
+            raw = resp_json["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            raw = ""
+
     parsed = parse_json_safe(raw)
 
     # Không pad/trim — ảnh 2 mặt có thể trả nhiều hơn số ảnh gửi lên
@@ -471,8 +496,9 @@ async def analyze_images(files: List[UploadFile] = File(...)):
 
 @router.get("/config")
 async def ocr_config():
+    model = _get_model()
     return {
-        "configured": bool(_get_api_key()),
-        "model":      _get_model(),
+        "configured": bool(_get_api_key(model)),
+        "model":      model,
         "max_image_px": MAX_IMAGE_PX,
     }

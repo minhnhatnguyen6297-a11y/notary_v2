@@ -1,4 +1,6 @@
 import os
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'), override=True)
 
@@ -8,14 +10,27 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 
 from database import engine, Base, migrate_customers_nullable
-from routers import customers, properties, cases, participants, ocr
+from routers import customers, properties, cases, participants, ocr, ocr_local
 
 # Migrate schema trước khi create_all (chuyển customers sang nullable)
 migrate_customers_nullable()
 # Tạo tất cả bảng trong database khi khởi động
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Hệ thống Quản lý Hồ sơ Công chứng", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app):
+    """Khởi tạo các model nặng khi startup."""
+    import warnings
+    warnings.filterwarnings("ignore")
+    try:
+        from routers.ocr_local import warmup_local_ocr
+        warmup_local_ocr()
+        print("[startup] Local OCR warmup OK")
+    except Exception as e:
+        print(f"[startup] Local OCR warmup skipped: {e}")
+    yield  # server runs here
+
+app = FastAPI(title="Hệ thống Quản lý Hồ sơ Công chứng", version="1.0.0", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -25,8 +40,8 @@ app.include_router(customers.router,    prefix="/customers",    tags=["Khách h�
 app.include_router(properties.router,   prefix="/properties",   tags=["Tài sản"])
 app.include_router(cases.router,        prefix="/cases",        tags=["Hồ sơ thừa kế"])
 app.include_router(participants.router, prefix="/participants",  tags=["Người tham gia"])
-app.include_router(ocr.router,                                   tags=["OCR"])
-
+app.include_router(ocr.router,          prefix="/api/ocr",       tags=["OCR"])
+app.include_router(ocr_local.router,    prefix="/api/ocr",       tags=["OCR_Local"])
 
 @app.get("/")
 async def home(request: Request):

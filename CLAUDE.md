@@ -2,6 +2,7 @@
 
 > Đọc file này trước khi làm bất kỳ thứ gì trong project.
 > Cập nhật khi có thay đổi kiến trúc hoặc fix bug xong.
+| 6 | ðŸŸ¡ MED | `celery_app.py` | n/a | Worker báº£o `Received unregistered task 'process_ocr_job'` â†’ job treo (âœ… FIXED 26/03/2026: thÃªm `autodiscover_tasks(["tasks"])`, cáº§n restart worker) |
 
 ---
 
@@ -25,6 +26,11 @@ Hệ thống quản lý hồ sơ **thừa kế đất đai** cho văn phòng cô
 | Drag-drop | SortableJS (CDN) |
 
 **Không có:** migrations, .env, build tool, test suite.
+
+## 🎯 Triết lý & Tiêu chí Dự án (Project Philosophy)
+1. **Gọn nhẹ & Dễ cài đặt**: Ưu tiên tối đa cho việc cài đặt "1 click" đối với người mới (nhân viên văn phòng, công chứng viên). Hệ thống phải chạy mượt mà ngay lập tức trên các cấu hình máy tính trạm khác nhau (Windows cũ/mới) thông qua `setup.bat`.
+2. **Hạn chế xung đột môi trường**: Tránh 100% việc nhúng các mô hình AI/Deep Learning nặng nề (như PyTorch, YOLO, PaddleOCR) chạy trực tiếp tại Local nếu gây ra lỗi C++ hoặc DLL.
+3. **Ưu tiên API Cloud AI**: Sẵn sàng dùng dịch vụ Online (như OpenAI API) cho các tác vụ nặng (OCR, parsing) để đổi lấy sự nhẹ nhàng, không lỗi vặt, thay vì "cố đấm ăn xôi" bắt máy cá nhân chịu tải.
 
 ---
 
@@ -157,17 +163,25 @@ File ~1750 dòng, phần JS từ dòng ~425 đến cuối:
 ## Tích hợp OCR (Optical Character Recognition)
 
 Hệ thống có 2 luồng trích xuất dữ liệu thẻ và giấy tờ chạy song song để A/B Testing:
-1. **API Vision (GPT-4o-mini)**: 
+1. **Cloud OCR (OpenAI / Gemini 2.0 Flash) - Khuyên dùng**: 
    - Route: `POST /api/ocr/analyze`
-   - Ưu điểm: AI tự hiểu ngữ cảnh và trả về trực tiếp cấu trúc JSON (đúng các trường `ho_ten`, `so_giay_to`...).
-   - Nhược điểm: Tốn phí token, phụ thuộc tốc độ/độ ổn định của mạng quốc tế.
-2. **Local AI (DeepDoc + VietOCR)** *(Tính năng đang phát triển)*:
-   - Route dự kiến: `POST /api/ocr/analyze-local`
-   - Nhận diện: DeepDoc (YOLOv10 ONNX) bóc tách Bố cục (Layout) và Bảng biểu (Table). VietOCR (ONNX) dịch ảnh từng vùng thành chữ tiếng Việt thô (Raw text).
-   - Xử lý Text -> Data: Sử dụng thuật toán Rule-based / Regex kết hợp tọa độ Bounding Boxes để gán chữ vào đúng các keys (`ho_ten`, `ngay_sinh`...) dựa theo Layout chuẩn của CCCD, GCN.
-   - Ưu điểm: Chạy hoàn toàn offline trên CPU/GPU, miễn phí API, giữ cấu trúc Sổ đỏ siêu việt.
+   - Model: `gpt-4o-mini` hoặc `gemini-2.0-flash` (tự động fallback).
+   - Ưu điểm: Hiểu ngữ cảnh, trích xuất JSON chính xác cao, không tốn RAM server.
+   - Cấu hình: Key trong `.env`, model mặc định `gemini-2.0-flash`.
+2. **Local OCR (YOLO + EasyOCR + VietOCR) - Chạy Offline**:
+   - Route: `POST /api/ocr/analyze-local` (code trong `ocr_local.py`).
+   - Pipeline: tiền xử lý ảnh → **YOLO** cắt ảnh + nhận diện loại giấy tờ/mặt → **Quét QR** (nếu rõ) → **EasyOCR** detect text box → **VietOCR** nhận dạng text → regex lọc trường.
+   - Ưu điểm: 100% miễn phí, chạy CPU, có thêm phân loại giấy tờ/mặt và ưu tiên QR.
+   - Nhược điểm: nặng RAM/CPU; cần weights YOLO + VietOCR. Đã cài pre-load tại `main.py` (lifespan) để tránh crash.
 
 **Lưu ý UI**: Kết quả của cả 2 luồng đều đổ về Cùng Một Vùng `Staging Area` (`ocr-staging-area` trên `form.html`) để người dùng dò lại và quyết định trước khi đẩy vào People Pool.
+
+---
+
+## Môi trường & Hệ thống
+
+- Để cài đặt nhanh repo này trên máy tính Windows mới, chạy file: **`setup.bat`**
+- File này tự động tạo `venv`, cài thư viện `requirements.txt` (loại bỏ các lib quá nặng) và tạo `.env` từ `.env.example`.
 
 ---
 
@@ -226,3 +240,23 @@ Mở: http://localhost:8000
 3. Nếu sửa `cases.py` → check encoding chuỗi tiếng Việt (đặc biệt `_hang_for_role`)
 4. Không xóa `participants.py` chưa — detail.html vẫn dùng
 5. Sau khi fix bug → cập nhật bảng Bugs ở trên (đánh dấu ✅ FIXED + ngày)
+
+---
+
+## 🛠 Nhật ký tiến độ Local OCR (Update 26/03/2026)
+
+### ✅ Đã hoàn thành (Done)
+- [x] Fix lỗi 404 `/api/ocr/config` (xóa duplicate prefix trong `ocr.py`).
+- [x] Fix lỗi Jinja2 syntax error trong `form.html` (thiếu `}}`).
+- [x] Hiện nút "Local OCR" bị ẩn/disabled trong giao diện.
+- [x] Đồng bộ trạng thái Enable/Disable của nút AI và Local theo queue ảnh.
+- [x] Thu nhỏ ảnh trước khi gửi lên Cloud OCR để tiết kiệm token và tránh limit size.
+- [x] Triển khai pipeline Local OCR mới: tiền xử lý → **YOLO** cắt/nhận diện → **QR** → **EasyOCR** detect → **VietOCR** nhận dạng → regex lọc trường.
+- [x] Tối ưu Startup: warmup Local OCR (EasyOCR/VietOCR/YOLO) ở `main.py` để giảm crash/lỗi lần gọi đầu.
+- [x] Cập nhật `install_local_ocr.bat` + `LOCAL_AI_INSTALL_GUIDE.md` theo pipeline mới.
+
+### 🚧 Đang làm dở (Doing / Pending)
+- [ ] Kiểm tra độ chính xác pipeline mới trên ảnh CCCD thật (nhiều góc chụp).
+- [ ] Tinh chỉnh Regex trong `ocr_local.py` để bóc tách địa chỉ/họ tên chính xác hơn.
+- [ ] Xử lý trường hợp Server bị "Connection Reset" khi uvicorn tự reload trong lúc đang tải model.
+- [ ] Thêm thanh loading ProgressBar cho Local OCR vì nó chạy trên CPU nên sẽ chậm hơn Cloud (~5-10s/ảnh).

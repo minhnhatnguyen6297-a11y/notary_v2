@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime
+import uuid
+from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -128,4 +129,29 @@ class WordTemplate(Base):
     ten_file_goc = Column(String(255), nullable=False)
     duong_dan_file = Column(String(500), nullable=False)
     is_active = Column(Boolean, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class OCRJob(Base):
+    """Tram kiem soat tien do OCR."""
+    __tablename__ = "ocr_jobs"
+
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    status = Column(String(20), nullable=False, default="queued")
+    temp_file_path = Column(Text, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class ExtractedDocument(Base):
+    """Kho luu tru du lieu da boc tach sau khi user xac nhan."""
+    __tablename__ = "extracted_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True)
+    document_type = Column(String(50), nullable=False)
+    raw_text = Column(Text, nullable=True)
+    parsed_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

@@ -9,3 +9,4 @@ zxing-cpp
 Pillow
 httpx
 python-dotenv
+celery[sqlalchemy]==5.3.6
