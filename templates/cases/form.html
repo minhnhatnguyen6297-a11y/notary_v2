@@ -1145,7 +1145,7 @@ endif %}
                 </button>
               </div>
               <button class="btn btn-sm btn-outline-primary flex-grow-1" id="ocr-btn-extract-local"
-                onclick="ocrExtractLocal()" title="Dùng DBNet + VietOCR chạy offline trên máy chủ">
+                onclick="ocrExtractLocal()" title="Dung RapidOCR chay offline tren may chu">
                 <span id="ocr-btn-text-local"><i class="bi bi-cpu me-1"></i>Local OCR (Miễn phí)</span>
               </button>
             </div>
@@ -1158,7 +1158,7 @@ endif %}
             </div>
 
             <div style="font-size:10px;color:#94a3b8;border-top:1px solid #e5e7eb;padding-top:8px;">
-              💡 CCCD có QR → miễn phí. Ảnh khác → AI (~$0.0005/ảnh)
+              💡 CCCD có QR → miễn phí. Không có QR: Local OCR hoặc AI OCR tùy nút bạn chọn.
             </div>
           </div>
 
@@ -3089,50 +3089,121 @@ endif %}
         const raw = String(qrText || '').trim();
         if (!raw) return null;
 
-        const p = { ho_ten: '', so_giay_to: '', ngay_sinh: '', gioi_tinh: '', dia_chi: '', ngay_cap: '' };
+        const p = {
+          ho_ten: '',
+          so_giay_to: '',
+          ngay_sinh: '',
+          gioi_tinh: '',
+          dia_chi: '',
+          ngay_cap: '',
+          source_type: 'QR',
+          side: 'unknown',
+        };
+        const parts = raw.split(/[\|\r\n;]+/).map(s => s.trim()).filter(Boolean);
+        if (!parts.length) return null;
 
-        // Format phổ biến: pipe-separated
-        // "036090027472|TRAN VAN SAU|17071990|Nam|dia_chi|02072021|..."
-        const parts = raw.split('|').map(s => s.trim()).filter(Boolean);
-        if (parts.length >= 3) {
-          // Tìm số CCCD 12 chữ số
-          const cccdPart = parts.find(p => /^\d{12}$/.test(p));
-          if (cccdPart) p.so_giay_to = cccdPart;
+        const fold = (s) => String(s || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/Đ/g, 'D')
+          .toLowerCase();
+        const isNameLike = (s) => {
+          const t = String(s || '').trim();
+          if (!t || /\d/.test(t)) return false;
+          const words = t.split(/\s+/);
+          if (words.length < 2 || words.length > 6) return false;
+          const fs = fold(t);
+          return !/(bo cong an|ministry|public security|cong hoa|socialist|can cuoc|citizen|identity|noi thuong tru|noi cu tru|date of|place of|quoc tich|nationality)/.test(fs);
+        };
+        const isAddressLike = (s) => {
+          const t = String(s || '').trim();
+          const fs = fold(t);
+          return t.length >= 10 && (t.includes(',') || /\b(thon|to dan pho|xa|phuong|huyen|quan|tinh|thanh pho|tp)\b/.test(fs));
+        };
+        const yearOf = (d) => Number((d || '').split('/')[2] || 0);
+        const collectDates = (s) => {
+          const compact = String(s || '').replace(/\s+/g, '');
+          const found = [];
+          const pushDate = (v) => {
+            const d = normalizeDate(v);
+            if (d && !found.includes(d)) found.push(d);
+          };
+          (compact.match(/\d{1,2}[\/-]\d{1,2}[\/-]\d{4}/g) || []).forEach(pushDate);
+          (compact.match(/\d{8}/g) || []).forEach(pushDate);
+          if (/^\d{16}$/.test(compact)) {
+            pushDate(compact.slice(0, 8));
+            pushDate(compact.slice(8, 16));
+          }
+          return found;
+        };
 
-          // Tìm họ tên: phần toàn chữ, ≥ 6 ký tự
-          const namePart = parts.find(p => /^[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚĂĐĨŨƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼỀẾỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲÝỴỶỸ\s]+$/i.test(p) && p.length >= 4 && !/^\d/.test(p));
-          if (namePart) p.ho_ten = namePart; // Giữ nguyên dấu từ QR (UTF-8)
-
-          // Ngày sinh: ddmmyyyy (8 chữ số) hoặc dd/mm/yyyy
-          const dates = parts.filter(p => /^\d{8}$/.test(p) || /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/.test(p));
-          if (dates[0]) p.ngay_sinh = normalizeDate(dates[0]);
-          if (dates[1]) p.ngay_cap = normalizeDate(dates[1]);
-
-          // Giới tính
-          const genderPart = parts.find(p => /^(Nam|Nữ|Nu|Male|Female)$/i.test(p));
-          if (genderPart) p.gioi_tinh = /^(Nam|Male)$/i.test(genderPart) ? 'Nam' : 'Nữ';
-
-          // Địa chỉ: phần dài nhất có dấu phẩy hoặc từ khoá địa lý
-          const addrPart = parts
-            .filter(p => p.length > 10 && (p.includes(',') || /(phường|xã|huyện|tỉnh|quận|thành phố)/i.test(p)))
-            .sort((a, b) => b.length - a.length)[0];
-          if (addrPart) p.dia_chi = addrPart;
-        } else {
-          // Fallback: tìm 12 số CCCD
+        // CCCD
+        for (const part of parts) {
+          const m = String(part).match(/(^|[^\d])(\d{12})(?!\d)/);
+          if (m) {
+            p.so_giay_to = m[2];
+            break;
+          }
+        }
+        if (!p.so_giay_to) {
           const m = raw.match(/\b(\d{12})\b/);
           if (m) p.so_giay_to = m[1];
         }
 
-        // Nếu không có thông tin cần thiết → bỏ
-        if (!p.so_giay_to && !p.ho_ten) return null;
+        // Name + gender + address
+        let cccdIdx = parts.findIndex(x => (x || '').includes(p.so_giay_to));
+        if (cccdIdx < 0) cccdIdx = 0;
+        const preferredName = parts.slice(cccdIdx + 1, cccdIdx + 3).find(isNameLike);
+        p.ho_ten = preferredName || parts.find(isNameLike) || '';
+
+        for (const part of parts) {
+          const fs = fold(part);
+          if (!p.gioi_tinh && /\b(nam|male)\b/.test(fs)) p.gioi_tinh = 'Nam';
+          if (!p.gioi_tinh && /\b(nu|nữ|female)\b/.test(fs)) p.gioi_tinh = 'Nữ';
+          if (!p.dia_chi && /noi thuong tru|noi cu tru|place of residence/.test(fs)) {
+            const seg = part.split(':');
+            p.dia_chi = (seg.length > 1 ? seg.slice(1).join(':') : '').trim();
+          }
+        }
+        if (!p.dia_chi) {
+          const addr = parts.filter(isAddressLike).sort((a, b) => b.length - a.length)[0];
+          if (addr) p.dia_chi = addr;
+        }
+
+        // Dates
+        let allDates = [];
+        parts.forEach(part => { allDates = allDates.concat(collectDates(part)); });
+        allDates = Array.from(new Set(allDates));
+
+        if (!p.ngay_sinh) {
+          const birthCandidates = allDates.filter(d => yearOf(d) >= 1900 && yearOf(d) <= new Date().getFullYear());
+          if (birthCandidates.length) p.ngay_sinh = birthCandidates.sort((a, b) => yearOf(a) - yearOf(b))[0];
+        }
+        const issueCandidates = allDates.filter(d => d !== p.ngay_sinh && yearOf(d) >= 2000 && yearOf(d) <= new Date().getFullYear() + 1);
+        if (issueCandidates.length) p.ngay_cap = issueCandidates.sort((a, b) => yearOf(a) - yearOf(b))[0];
+
+        if (!p.so_giay_to) return null;
         return p;
       }
 
       function normalizeDate(s) {
         if (!s) return '';
         const t = String(s).replace(/\s/g, '');
-        // ddmmyyyy
-        if (/^\d{8}$/.test(t)) return `${t.slice(0, 2)}/${t.slice(2, 4)}/${t.slice(4, 8)}`;
+        if (/^\d{8}$/.test(t)) {
+          const dd = Number(t.slice(0, 2));
+          const mm = Number(t.slice(2, 4));
+          const yyyy = Number(t.slice(4, 8));
+          if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12 && yyyy >= 1900 && yyyy <= 2100) {
+            return `${t.slice(0, 2)}/${t.slice(2, 4)}/${t.slice(4, 8)}`;
+          }
+          const y2 = Number(t.slice(0, 4));
+          const m2 = Number(t.slice(4, 6));
+          const d2 = Number(t.slice(6, 8));
+          if (y2 >= 1900 && y2 <= 2100 && m2 >= 1 && m2 <= 12 && d2 >= 1 && d2 <= 31) {
+            return `${t.slice(6, 8)}/${t.slice(4, 6)}/${t.slice(0, 4)}`;
+          }
+        }
         // dd/mm/yyyy or dd-mm-yyyy
         const m = t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
         if (m) return `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}/${m[3]}`;
@@ -3217,6 +3288,8 @@ endif %}
         if (s === 'queued') return '<span style="color:#0f172a;">⏳ Đang xếp hàng</span>';
         if (s === 'qr') return '<span style="color:#059669;">✅ QR (miễn phí)</span>';
         if (s === 'processing') return '<span style="color:#d97706;">⚙️ Đang trích xuất...</span>';
+        if (s === 'ocr') return '<span style="color:#2563eb;">🧾 OCR</span>';
+        if (s === 'ocr_back') return '<span style="color:#7c3aed;">🧾 OCR • mặt sau đã ghép</span>';
         if (s === 'ai') return '<span style="color:#2563eb;">🤖 AI OCR</span>';
         if (s === 'ai_back') return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
         if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
@@ -3352,10 +3425,153 @@ endif %}
         if (st) st.textContent = '';
       };
 
+      function resetOcrWorkingResults() {
+        ocrResults = [];
+        document.getElementById('ocr-results-empty').style.display = 'flex';
+        document.getElementById('ocr-results-list').style.display = 'none';
+        document.getElementById('ocr-results-list').innerHTML = '';
+        document.getElementById('ocr-summary-text').textContent = '';
+      }
+
+      function normalizeDocKey(v) {
+        return String(v || '').replace(/\D/g, '');
+      }
+
+      function getInlineRowDocKey(row) {
+        const cells = row?.querySelectorAll?.('.inline-cell') || [];
+        return normalizeDocKey(cells[4]?.textContent || '');
+      }
+
+      function isDocInInlinePeople(doc) {
+        const key = normalizeDocKey(doc);
+        if (!key) return false;
+        const rows = document.querySelectorAll('#inline-people-list .inline-people-row');
+        for (const row of rows) {
+          if (getInlineRowDocKey(row) === key) return true;
+        }
+        return false;
+      }
+
+      function isDocInTreeCards(doc) {
+        const key = normalizeDocKey(doc);
+        if (!key) return false;
+        const cards = document.querySelectorAll('.person-card[data-doc]');
+        for (const card of cards) {
+          if (normalizeDocKey(card.dataset.doc) === key) return true;
+        }
+        return false;
+      }
+
+      function isDocAlreadyInCase(doc) {
+        const key = normalizeDocKey(doc);
+        if (!key) return false;
+        return isDocInInlinePeople(key) || isDocInTreeCards(key);
+      }
+
+      function isDocAlreadyInStaging(doc) {
+        const key = normalizeDocKey(doc);
+        if (!key) return false;
+        const inputs = document.querySelectorAll('#ocr-staging-area .ocr-staged-row [data-key="so_giay_to"]');
+        for (const inp of inputs) {
+          if (normalizeDocKey(inp.value) === key) return true;
+        }
+        return false;
+      }
+
+      function looksSuspiciousName(name) {
+        const s = String(name || '').trim();
+        if (!s) return true;
+        if (/\d/.test(s)) return true;
+        return /CONG HOA|SOCIALIST|MINISTRY|CAN CUOC|CITIZEN|IDENTITY|DAC DIEM|NGON TRO|PLACE OF|DATE OF|BO CONG AN|QUAN LY/i.test(s);
+      }
+
+      function mergePersonData(base, extra) {
+        const out = { ...(base || {}) };
+        const inc = extra || {};
+        const keys = ['so_giay_to', 'ho_ten', 'ngay_sinh', 'gioi_tinh', 'dia_chi', 'ngay_cap', 'ngay_het_han', '_raw_text'];
+        for (const key of keys) {
+          const cur = out[key] || '';
+          const nxt = inc[key] || '';
+          if (!cur && nxt) { out[key] = nxt; continue; }
+          if (!nxt) continue;
+          if (key === 'ho_ten') {
+            if (looksSuspiciousName(cur) && !looksSuspiciousName(nxt)) out[key] = nxt;
+            else if (!cur && nxt) out[key] = nxt;
+            continue;
+          }
+          if (key === 'dia_chi' || key === '_raw_text') {
+            if (String(nxt).length > String(cur).length) out[key] = nxt;
+            continue;
+          }
+        }
+        return out;
+      }
+
+      function mergeOcrResultsInPlace() {
+        const merged = [];
+        const personByDoc = new Map();
+        const sourceRank = (src) => {
+          const s = String(src || '').toUpperCase();
+          if (s === 'QR') return 3;
+          if (s === 'OCR') return 2;
+          if (s === 'AI') return 1;
+          return 0;
+        };
+        for (const r of ocrResults) {
+          if (r.type !== 'person') {
+            merged.push(r);
+            continue;
+          }
+          const doc = String(r.data?.so_giay_to || '').replace(/\D/g, '');
+          if (!doc) {
+            merged.push(r);
+            continue;
+          }
+          if (!personByDoc.has(doc)) {
+            const first = { ...r, data: { ...(r.data || {}) } };
+            personByDoc.set(doc, first);
+            merged.push(first);
+            continue;
+          }
+          const target = personByDoc.get(doc);
+          target.data = mergePersonData(target.data || {}, r.data || {});
+          const targetSide = String(target.side || target.data?.side || '').toLowerCase();
+          const incomingSide = String(r.side || r.data?.side || '').toLowerCase();
+          const incomingSrc = String(r.source_type || r.source || '').toUpperCase();
+
+          // Luat merge ten/field: QR > front > back.
+          if (incomingSrc === 'QR') {
+            ['ho_ten', 'ngay_sinh', 'gioi_tinh', 'dia_chi', 'ngay_cap'].forEach(k => {
+              if ((r.data?.[k] || '').trim()) target.data[k] = r.data[k];
+            });
+          } else if (targetSide === 'back' && incomingSide === 'front') {
+            ['ho_ten', 'ngay_sinh', 'dia_chi'].forEach(k => {
+              if ((r.data?.[k] || '').trim()) target.data[k] = r.data[k];
+            });
+            if (!(target.data.gioi_tinh || '').trim() && (r.data?.gioi_tinh || '').trim()) {
+              target.data.gioi_tinh = r.data.gioi_tinh;
+            }
+          } else if (targetSide === 'front' && incomingSide === 'back') {
+            if (!(target.data.ngay_cap || '').trim() && (r.data?.ngay_cap || '').trim()) {
+              target.data.ngay_cap = r.data.ngay_cap;
+            }
+          }
+          if (sourceRank(r.source) > sourceRank(target.source)) target.source = r.source;
+          if (sourceRank(r.source_type) > sourceRank(target.source_type)) target.source_type = r.source_type;
+          if ((!target.side || target.side === 'unknown') && r.side) target.side = r.side;
+          if ((!target.data.side || target.data.side === 'unknown') && r.data?.side) target.data.side = r.data.side;
+          if (!target.filename && r.filename) target.filename = r.filename;
+          if (!target.document_type && r.document_type) target.document_type = r.document_type;
+          target.field_sources = { ...(target.field_sources || {}), ...(r.field_sources || {}) };
+        }
+        ocrResults = merged;
+      }
+
       // ── Trích xuất tất cả ──────────────────────────────────────────────────
       window.ocrExtractAll = async function () {
         const pending = imageQueue.filter(i => i.status === 'pending');
         if (!pending.length) return;
+        resetOcrWorkingResults();
 
         const btn = document.getElementById('ocr-btn-extract');
         btn.disabled = true;
@@ -3446,6 +3662,7 @@ endif %}
           ocrResults.push(item._result);
         }
 
+        mergeOcrResultsInPlace();
         renderResults();
         autoStageOcrResults();  // Tự động đưa vào staging + pool
 
@@ -3453,16 +3670,17 @@ endif %}
         document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR (GPT)';
       };
 
-      // ── Trích xuất Local DBNet + VietOCR ────────────────────────────────────
+      // ── Trích xuất Local RapidOCR ────────────────────────────────────
       window.ocrExtractLocal = async function () {
         const pending = imageQueue.filter(i => i.status === 'pending');
         if (!pending.length) return;
+        resetOcrWorkingResults();
 
         const btn = document.getElementById('ocr-btn-extract-local');
         btn.disabled = true;
         document.getElementById('ocr-btn-text-local').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang phân tích...';
 
-        const needsAI = [];
+        const needsOcr = [];
         for (const item of pending) {
           item.status = 'processing';
           renderQueue();
@@ -3472,12 +3690,12 @@ endif %}
             const person = parseQRToPerson(qrText);
             if (person) {
               item.status = 'qr';
-              item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
+              item._result = { type: 'person', data: person, source: 'QR', source_type: 'QR', side: person.side || 'unknown', filename: item.name };
               renderQueue();
               continue;
             }
           }
-          needsAI.push(item);
+          needsOcr.push(item);
         }
 
         async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -3490,7 +3708,7 @@ endif %}
           if (!total) return setLocalStatus('');
           const queued = items.filter(i => i.status === 'queued').length;
           const processing = items.filter(i => i.status === 'processing').length;
-          const done = items.filter(i => i.status === 'ai').length;
+          const done = items.filter(i => i.status === 'ocr' || i.status === 'qr').length;
           const now = Date.now();
           const longQueued = items.some(i => i.status === 'queued' && i._queuedAt && (now - i._queuedAt) > 45000);
           if (processing > 0) return setLocalStatus(`Đang phân tích ảnh (${done}/${total})`);
@@ -3502,8 +3720,7 @@ endif %}
 
         async function submitLocalJob(item, qrText) {
           const formData = new FormData();
-          const res = await fetch(item.dataUrl);
-          const blob = await res.blob();
+          const blob = item.file || await (await fetch(item.dataUrl)).blob();
           formData.append('file', blob, item.name);
           if (qrText) formData.append('qr_text', qrText);
           const resp = await fetch('/api/ocr/local/submit', { method: 'POST', body: formData });
@@ -3513,7 +3730,7 @@ endif %}
           item._queuedAt = Date.now();
           item.status = 'queued';
           renderQueue();
-          updateLocalStatus(needsAI);
+          updateLocalStatus(needsOcr);
         }
 
         async function pollLocalJob(item) {
@@ -3527,57 +3744,72 @@ endif %}
               const persons = rjson.persons || [];
               if (persons.length) {
                 const r = persons[0];
-                item.status = 'ai';
+                const sourceType = String(r.source_type || (r._qr ? 'QR' : 'OCR')).toUpperCase() === 'QR' ? 'QR' : 'OCR';
+                const side = r.side || 'unknown';
+                item.status = sourceType === 'QR' ? 'qr' : 'ocr';
                 const docType = rjson.doc_type || 'UNKNOWN';
-                item._result = { type: 'person', data: r.data || r.data, source: 'Local AI', filename: item.name, document_type: docType };
+                const personData = { ...(r.data || {}) };
+                personData.source_type = sourceType;
+                personData.side = side;
+                if (r.field_sources) personData.field_sources = r.field_sources;
+                item._result = {
+                  type: 'person',
+                  data: personData,
+                  source: sourceType,
+                  source_type: sourceType,
+                  side,
+                  filename: item.name,
+                  document_type: docType
+                };
                 ocrResults.push(item._result);
               } else {
                 item.status = 'error';
                 item._errorMsg = 'Không nhận diện được nội dung';
               }
               renderQueue();
-              updateLocalStatus(needsAI);
+              updateLocalStatus(needsOcr);
               return;
             }
             if (data.status === 'failed') {
               item.status = 'error';
               item._errorMsg = data.error_message || 'Không nhận diện được nội dung';
               renderQueue();
-              updateLocalStatus(needsAI);
+              updateLocalStatus(needsOcr);
               return;
             }
             item.status = data.status === 'processing' ? 'processing' : 'queued';
             renderQueue();
-            updateLocalStatus(needsAI);
+            updateLocalStatus(needsOcr);
             if (item.status === 'queued' && item._queuedAt && (Date.now() - item._queuedAt) > 45000 && !item._warnedQueued) {
               item._warnedQueued = true;
-              showToast('OCR đang xếp hàng quá lâu. Hãy kiểm tra worker (run_worker.bat).', 'warning');
+              showToast('OCR đang xếp hàng quá lâu. Hãy kiểm tra cửa sổ worker do run.bat mở ra.', 'warning');
             }
             await sleep(2000);
           }
           item.status = 'error';
           item._errorMsg = 'Quá thời gian chờ OCR';
           renderQueue();
-          updateLocalStatus(needsAI);
+          updateLocalStatus(needsOcr);
         }
 
         try {
           const jobs = [];
-          for (const item of needsAI) {
+          for (const item of needsOcr) {
             await submitLocalJob(item, item._qrText);
             jobs.push(pollLocalJob(item));
           }
           await Promise.all(jobs);
         } catch (e) {
-          for (const item of needsAI) { item.status = 'error'; item._errorMsg = e.message; renderQueue(); }
-          updateLocalStatus(needsAI);
+          for (const item of needsOcr) { item.status = 'error'; item._errorMsg = e.message; renderQueue(); }
+          updateLocalStatus(needsOcr);
           showToast('Lỗi OCR Local: ' + e.message, 'danger');
         }
 
         for (const item of pending.filter(i => i.status === 'qr' && i._result)) ocrResults.push(item._result);
+        mergeOcrResultsInPlace();
         renderResults();
         autoStageOcrResults();
-        updateLocalStatus(needsAI);
+        updateLocalStatus(needsOcr);
 
         btn.disabled = false;
         document.getElementById('ocr-btn-text-local').innerHTML = '<i class="bi bi-cpu me-1"></i>Local OCR (Miễn phí)';
@@ -3608,11 +3840,11 @@ endif %}
         if (persons.length) {
           html += `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:8px;">
         <i class="bi bi-people me-1"></i>Người (${persons.length})
-        <span style="font-size:10px;font-weight:400;text-transform:none;color:#94a3b8;margin-left:8px;">Tên lấy từ CCCD — viết hoa, không dấu. Chỉnh trực tiếp nếu cần.</span>
+        <span style="font-size:10px;font-weight:400;text-transform:none;color:#94a3b8;margin-left:8px;">Tên ưu tiên QR/mặt trước. Chỉnh trực tiếp nếu cần.</span>
       </div>`;
           persons.forEach((r, i) => {
             const d = r.data || {};
-            html += personCard(d, i, r.source);
+            html += personCard(d, i, r);
           });
         }
 
@@ -3638,10 +3870,16 @@ endif %}
         list.innerHTML = html;
 
         // Summary
-        const qrCount = ocrResults.filter(r => r.source === 'QR').length;
-        const aiCount = ocrResults.filter(r => r.source === 'AI').length;
-        document.getElementById('ocr-summary-text').textContent =
-          `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
+        const qrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'QR').length;
+        const ocrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'OCR').length;
+        const aiCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'AI').length;
+        if (aiCount > 0 && ocrCount === 0) {
+          document.getElementById('ocr-summary-text').textContent =
+            `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
+        } else {
+          document.getElementById('ocr-summary-text').textContent =
+            `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${ocrCount} từ OCR`;
+        }
       }
 
       // ── Helpers tên tiếng Việt ─────────────────────────────────────────────
@@ -3652,20 +3890,22 @@ endif %}
         return /[àáâãèéêìíòóôõùúăđĩũơưạảấầẩẫậắằẳẵặẹẻẽềếệỉịọỏốồổỗộớờởỡợụủứừửữựỳýỵỷỹ]/i.test(str || '');
       }
 
-      function personCard(d, idx, source) {
+      function personCard(d, idx, result) {
         // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
 
         // Badge + note + supplement button theo nguồn
         let srcBadge, suppNote = '', suppBtn = '';
         const _src = d._source || '';
-        const qrTag = d._qr ? ' <span style="font-size:9px;opacity:.75;font-weight:600;">QR✓</span>' : '';
-        if (source === 'QR') {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">QR ✓</span>`;
-          suppNote = `<span class="ocr-suppl-note" style="font-size:10px;color:#64748b;flex-shrink:0;">thiếu ảnh mặt</span>`;
-          suppBtn = `<button class="btn btn-sm btn-outline-secondary ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung ảnh mặt trước CCCD"><i class="bi bi-camera"></i></button>`;
+        const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
+        const side = String(result?.side || d.side || '').toLowerCase();
+        const sideLabel = side === 'front' ? 'mặt trước' : side === 'back' ? 'mặt sau' : 'không rõ mặt';
+        if (sourceType === 'QR') {
+          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">QR • ${sideLabel}</span>`;
+        } else if (sourceType === 'OCR') {
+          srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">OCR • ${sideLabel}</span>`;
         } else if (_src.includes('+back')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓${qrTag}</span>`;
+          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓</span>`;
         } else if (_src.includes('thiếu mặt sau')) {
           srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt sau</span>`;
           suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'back')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt sau CCCD (lấy ngày cấp)"><i class="bi bi-camera"></i> Bổ sung</button>`;
@@ -3778,6 +4018,15 @@ endif %}
             card.querySelectorAll('.ocr-input').forEach(el => { d[el.dataset.key] = el.value; });
           }
           if (!d.ho_ten) continue;  // Bỏ qua nếu không có tên
+          const docKey = normalizeDocKey(d.so_giay_to);
+          if (docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) {
+            r._added = true;
+            if (card) {
+              card.style.borderColor = '#94a3b8';
+              card.style.background = '#f8fafc';
+            }
+            continue;
+          }
           try {
             const body = new URLSearchParams({
               ho_ten: d.ho_ten || '', gioi_tinh: d.gioi_tinh || '',
@@ -3842,6 +4091,8 @@ endif %}
       // ── Staging linked với pool ────────────────────────────────────────────
       function addToStagingLinked(c) {
         if (document.querySelector(`#ocr-staging-area [data-cid="${c.id}"]`)) return; // đã có
+        const docKey = normalizeDocKey(c.so_giay_to);
+        if (docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) return;
         _addStagingCard(c);
         if (!document.querySelector(`#people-pool [data-id="${c.id}"]`)) {
           addPersonRowToPool(c);
@@ -3899,7 +4150,9 @@ endif %}
           _updateStagingCount();
         });
 
-        area.insertBefore(row, area.firstChild);
+        const header = area.querySelector('.ocr-staging-header');
+        if (header) area.insertBefore(row, header.nextSibling);
+        else area.insertBefore(row, area.firstChild);
         _updateStagingCount();
       }
 
@@ -3940,10 +4193,14 @@ endif %}
       }
       function loadStagingFromStorage() {
         const ids = JSON.parse(localStorage.getItem(_stagingKey()) || '[]');
+        const kept = [];
         ids.forEach(cid => {
           const c = (window.allCustomersData || []).find(x => x.id == cid);
-          if (c) addToStagingLinked(c);
+          if (!c) return;
+          addToStagingLinked(c);
+          if (document.querySelector(`#ocr-staging-area [data-cid="${c.id}"]`)) kept.push(c.id);
         });
+        localStorage.setItem(_stagingKey(), JSON.stringify(Array.from(new Set(kept))));
       }
       window.loadStagingFromStorage = loadStagingFromStorage;
 
@@ -3968,6 +4225,12 @@ endif %}
       function addPersonRowToPool(c) {
         const pool = document.getElementById('people-pool');
         if (!pool || document.querySelector(`.person-row[data-id="${c.id}"]`)) return;
+        const docKey = normalizeDocKey(c.so_giay_to);
+        if (docKey) {
+          const existedInPool = Array.from(document.querySelectorAll('#people-pool .person-row'))
+            .some(r => normalizeDocKey(r.dataset.doc) === docKey);
+          if (existedInPool) return;
+        }
         const row = document.createElement('div');
         row.className = 'person-row';
         row.draggable = true;
@@ -4001,7 +4264,12 @@ endif %}
       <div class="inline-cell">${c.so_giay_to || ''}</div>
       <div class="inline-cell">${c.ngay_cap || ''}</div>
       <div class="inline-cell">${c.dia_chi || ''}</div>`;
-        if (list) list.prepend(item);
+        if (list) {
+          const existedInInline = docKey
+            ? Array.from(list.querySelectorAll('.inline-people-row')).some(r => getInlineRowDocKey(r) === docKey)
+            : false;
+          if (!existedInInline) list.prepend(item);
+        }
       }
 
       // ── Điền vào form tài sản ──────────────────────────────────────────────
@@ -4044,7 +4312,10 @@ endif %}
       // ── Khi đóng modal: đẩy người chưa thêm ra staging area ──
       document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal', () => {
         ocrResults.filter(r => r.type === 'person').forEach(r => {
-          if (!r._added && r.data) window.addToOcrStaging(r.data);
+          if (!r._staged && !r._added && r.data) {
+            const added = window.addToOcrStaging(r.data);
+            if (added) r._added = true;
+          }
         });
         ocrResults = []; imageQueue = [];
         const st = document.getElementById('ocr-local-status');
@@ -4059,7 +4330,9 @@ endif %}
 
       window.addToOcrStaging = function (data) {
         const area = document.getElementById('ocr-staging-area');
-        if (!area) return;
+        if (!area) return false;
+        const docKey = normalizeDocKey(data?.so_giay_to);
+        if (docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) return false;
         const g = data.gioi_tinh || '';
         const row = document.createElement('div');
         row.className = 'ocr-staged-row';
@@ -4106,6 +4379,7 @@ endif %}
         area.appendChild(row);
         area.style.display = '';
         _updateStagingCount();
+        return true;
       };
 
       function _updateStagingCount() {

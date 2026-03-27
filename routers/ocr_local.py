@@ -1,11 +1,10 @@
 """
-Local OCR (YOLO + EasyOCR + VietOCR):
+Local OCR (YOLO + RapidOCR):
 1) Tien xu ly anh (Python/OpenCV)
 2) YOLO cat anh + nhan dien loai giay to (mat truoc/mat sau)
 3) Quet QR neu ro (uu tien QR). Neu QR khong ro -> tiep tuc OCR
-4) EasyOCR detect text box
-5) VietOCR nhan dang text
-6) Regex loc truong thong tin can thiet
+4) RapidOCR detect + nhan dang text
+5) Regex loc truong thong tin can thiet
 """
 
 from __future__ import annotations
@@ -17,14 +16,23 @@ import uuid
 import os
 import re
 import traceback
+import unicodedata
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-import cv2
-import numpy as np
-from PIL import Image
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Body
+
+_LOCAL_OCR_IMPORT_ERROR = None
+try:
+    import cv2
+    import numpy as np
+    from PIL import Image
+except ImportError as e:
+    cv2 = None
+    np = None
+    Image = None
+    _LOCAL_OCR_IMPORT_ERROR = str(e)
 
 from .ocr import try_decode_qr, parse_cccd_qr
 from database import SessionLocal
@@ -38,12 +46,6 @@ YOLO_WEIGHTS = os.getenv("LOCAL_OCR_YOLO_WEIGHTS", "").strip()
 YOLO_CONF = float(os.getenv("LOCAL_OCR_YOLO_CONF", "0.25"))
 YOLO_IMG_SIZE = int(os.getenv("LOCAL_OCR_YOLO_IMG_SIZE", "960"))
 YOLO_REQUIRE = os.getenv("LOCAL_OCR_REQUIRE_YOLO", "").strip() == "1"
-
-VIETOCR_WEIGHTS = os.getenv("LOCAL_OCR_VIETOCR_WEIGHTS", "").strip()
-VIETOCR_DEVICE = os.getenv("LOCAL_OCR_VIETOCR_DEVICE", "cpu").strip()
-
-EASYOCR_LANGS = os.getenv("LOCAL_OCR_EASYOCR_LANGS", "vi,en")
-EASYOCR_QUANTIZE = os.getenv("LOCAL_OCR_EASYOCR_QUANTIZE", "1").strip() != "0"
 
 MIN_BOX_SCORE = float(os.getenv("LOCAL_OCR_MIN_BOX_SCORE", "0.3"))
 TEXT_LLM_MODEL = os.getenv("OCR_TEXT_LLM_MODEL", "gpt-4o-mini")
@@ -69,14 +71,28 @@ def _torch_disabled() -> bool:
 
 # ---------------------- Lazy-loaded models ----------------------
 _yolo_model = None
-_easyocr_reader = None
-_vietocr_predictor = None
+_rapidocr_engine = None
+
+
+def _ensure_local_ocr_dependencies() -> None:
+    if _LOCAL_OCR_IMPORT_ERROR:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Local OCR chua duoc cai dat day du. "
+                "Hay chay install_local_ocr.bat. "
+                f"Chi tiet: {_LOCAL_OCR_IMPORT_ERROR}"
+            ),
+        )
 
 
 def _get_yolo_model():
+    _ensure_local_ocr_dependencies()
     global _yolo_model
     if _yolo_model is not None:
         return _yolo_model
+    if _torch_disabled():
+        return None
     if not YOLO_WEIGHTS:
         return None
     if not os.path.exists(YOLO_WEIGHTS):
@@ -97,69 +113,32 @@ def _get_yolo_model():
     return _yolo_model
 
 
-def _get_easyocr_reader():
-    global _easyocr_reader
-    if _easyocr_reader is not None:
-        return _easyocr_reader
-    if _torch_disabled():
-        raise HTTPException(
-            status_code=500,
-            detail="Torch bi tat (LOCAL_OCR_DISABLE_TORCH=1).",
-        )
+def _get_rapidocr_engine():
+    _ensure_local_ocr_dependencies()
+    global _rapidocr_engine
+    if _rapidocr_engine is not None:
+        return _rapidocr_engine
     try:
-        import easyocr
-        langs = [s.strip() for s in EASYOCR_LANGS.split(",") if s.strip()]
-        _easyocr_reader = easyocr.Reader(
-            langs or ["vi", "en"],
-            gpu=False,
-            verbose=False,
-            quantize=EASYOCR_QUANTIZE,
-        )
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except ImportError:
+            from rapidocr import RapidOCR
+        _rapidocr_engine = RapidOCR()
     except ImportError:
         raise HTTPException(
             status_code=500,
-            detail="Chua cai EasyOCR. Hay chay: pip install easyocr",
+            detail="Chua cai RapidOCR. Hay chay install_local_ocr.bat",
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Khong the khoi dong EasyOCR: {e}")
-    return _easyocr_reader
-
-
-def _get_vietocr_predictor():
-    global _vietocr_predictor
-    if _vietocr_predictor is not None:
-        return _vietocr_predictor
-    if _torch_disabled():
-        raise HTTPException(
-            status_code=500,
-            detail="Torch bi tat (LOCAL_OCR_DISABLE_TORCH=1).",
-        )
-    try:
-        from vietocr.tool.predictor import Predictor
-        from vietocr.tool.config import Cfg
-        cfg = Cfg.load_config_from_name("vgg_transformer")
-        cfg["device"] = VIETOCR_DEVICE or "cpu"
-        if VIETOCR_WEIGHTS:
-            cfg["weights"] = VIETOCR_WEIGHTS
-        _vietocr_predictor = Predictor(cfg)
-    except ImportError:
-        raise HTTPException(
-            status_code=500,
-            detail="Chua cai VietOCR. Hay chay: pip install vietocr",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Khong the khoi dong VietOCR: {e}")
-    return _vietocr_predictor
+        raise HTTPException(status_code=500, detail=f"Khong the khoi dong RapidOCR: {e}")
+    return _rapidocr_engine
 
 
 def warmup_local_ocr():
     """Warmup for startup (optional)."""
     try:
-        _get_easyocr_reader()
-    except Exception:
-        pass
-    try:
-        _get_vietocr_predictor()
+        _ensure_local_ocr_dependencies()
+        _get_rapidocr_engine()
     except Exception:
         pass
     try:
@@ -206,6 +185,50 @@ async def _llm_parse_text(raw_text: str, doc_type: str) -> dict | None:
         return None
 
 
+def _count_vietnamese_diacritics(text: str) -> int:
+    return len(re.findall(r"[àáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ]", (text or "").lower()))
+
+
+def _has_vietnamese_diacritics(text: str) -> bool:
+    return _count_vietnamese_diacritics(text) > 0
+
+
+async def _llm_restore_name_diacritics(name_text: str, raw_text: str = "") -> str | None:
+    api_key = _get_openai_key()
+    if not api_key or not (name_text or "").strip():
+        return None
+    prompt = (
+        "Khoi phuc dau tieng Viet cho HO TEN duoi day. "
+        "Chi tra ve duy nhat 1 dong ho ten da co dau, khong giai thich.\n\n"
+        f"HO_TEN_KHONG_DAU: {name_text}\n"
+        f"NGU_CANH_OCR:\n{raw_text[:1200]}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": TEXT_LLM_MODEL,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 120,
+                },
+            )
+        if not resp.is_success:
+            return None
+        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.MULTILINE).strip()
+        if ":" in content and re.search(r"ho\s*ten|full\s*name", _ascii_fold(content), re.IGNORECASE):
+            content = re.sub(r"^[^:]{0,80}:\s*", "", content).strip()
+        content = re.sub(r"\s+", " ", content).strip(" .,:;")
+        if not content or re.search(r"\d", content):
+            return None
+        return content.upper()
+    except Exception:
+        return None
+
+
 # ---------------------- Helpers ----------------------
 @dataclass
 class DocCrop:
@@ -220,6 +243,9 @@ def _preprocess(img_bgr: np.ndarray) -> np.ndarray:
     img = img_bgr.copy()
     # Denoise + enhance contrast gently
     img = cv2.bilateralFilter(img, 5, 40, 40)
+    # Sharpen to improve tiny QR/MRZ edges.
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+    img = cv2.filter2D(img, -1, kernel)
     return img
 
 
@@ -266,46 +292,119 @@ def _map_doc_type(label: str) -> str:
     return "unknown"
 
 
-def _easyocr_detect_boxes(img_bgr: np.ndarray) -> List[Tuple[np.ndarray, float]]:
-    """Return list of (box, score). box: 4 points."""
-    reader = _get_easyocr_reader()
-    boxes = []
-    try:
-        results = reader.readtext(img_bgr, detail=1)
-        for (box, _text, score) in results:
-            if score >= MIN_BOX_SCORE:
-                boxes.append((np.array(box, dtype=np.float32), float(score)))
-    except Exception:
-        pass
-    return boxes
-
-
-def _crop_from_box(img_bgr: np.ndarray, box: np.ndarray) -> Image.Image:
-    xs = box[:, 0]
-    ys = box[:, 1]
-    x1, x2 = int(max(xs.min(), 0)), int(min(xs.max(), img_bgr.shape[1] - 1))
-    y1, y2 = int(max(ys.min(), 0)), int(min(ys.max(), img_bgr.shape[0] - 1))
-    crop = img_bgr[y1:y2, x1:x2]
-    if crop.size == 0:
+def _normalize_box_points(box) -> np.ndarray | None:
+    if box is None:
         return None
-    crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(crop_rgb)
+    arr = np.array(box, dtype=np.float32)
+    if arr.size == 4 and arr.ndim == 1:
+        x1, y1, x2, y2 = arr.tolist()
+        arr = np.array(
+            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+            dtype=np.float32,
+        )
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        return None
+    if arr.shape[0] == 2:
+        (x1, y1), (x2, y2) = arr.tolist()
+        arr = np.array(
+            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+            dtype=np.float32,
+        )
+    return arr
 
 
-def _vietocr_recognize(img_bgr: np.ndarray) -> List[dict]:
-    predictor = _get_vietocr_predictor()
-    boxes = _easyocr_detect_boxes(img_bgr)
+def _looks_like_box_list(value) -> bool:
+    if not isinstance(value, (list, tuple)) or not value:
+        return False
+    try:
+        return _normalize_box_points(value[0]) is not None
+    except Exception:
+        return False
+
+
+def _rapidocr_entries(raw_result) -> List[Tuple[np.ndarray, str, float]]:
+    if raw_result is None:
+        return []
+
+    if hasattr(raw_result, "boxes") and hasattr(raw_result, "txts"):
+        boxes = getattr(raw_result, "boxes", []) or []
+        txts = getattr(raw_result, "txts", []) or []
+        scores = getattr(raw_result, "scores", []) or []
+        entries = []
+        for idx, box in enumerate(boxes):
+            text = txts[idx] if idx < len(txts) else ""
+            score = scores[idx] if idx < len(scores) else 1.0
+            entries.append((box, text, score))
+        return [
+            (_normalize_box_points(box), str(text).strip(), float(score or 0.0))
+            for box, text, score in entries
+            if _normalize_box_points(box) is not None
+        ]
+
+    if isinstance(raw_result, tuple) and raw_result:
+        if hasattr(raw_result[0], "boxes") and hasattr(raw_result[0], "txts"):
+            return _rapidocr_entries(raw_result[0])
+
+        if isinstance(raw_result[0], list):
+            return _rapidocr_entries(raw_result[0])
+
+        if len(raw_result) >= 3 and _looks_like_box_list(raw_result[0]):
+            boxes, txts, scores = raw_result[:3]
+            entries = []
+            for idx, box in enumerate(boxes):
+                text = txts[idx] if idx < len(txts) else ""
+                score = scores[idx] if idx < len(scores) else 1.0
+                norm_box = _normalize_box_points(box)
+                if norm_box is not None:
+                    entries.append((norm_box, str(text).strip(), float(score or 0.0)))
+            return entries
+
+        if len(raw_result) >= 2 and _looks_like_box_list(raw_result[0]):
+            boxes, rec_res = raw_result[:2]
+            entries = []
+            for idx, box in enumerate(boxes):
+                rec_item = rec_res[idx] if idx < len(rec_res) else None
+                text = ""
+                score = 1.0
+                if isinstance(rec_item, (list, tuple)):
+                    text = rec_item[0] if rec_item else ""
+                    score = rec_item[1] if len(rec_item) > 1 else 1.0
+                elif isinstance(rec_item, dict):
+                    text = rec_item.get("text") or rec_item.get("txt") or ""
+                    score = rec_item.get("score") or 1.0
+                elif rec_item is not None:
+                    text = str(rec_item)
+                norm_box = _normalize_box_points(box)
+                if norm_box is not None:
+                    entries.append((norm_box, str(text).strip(), float(score or 0.0)))
+            return entries
+
+    if isinstance(raw_result, list):
+        entries = []
+        for item in raw_result:
+            if isinstance(item, dict):
+                box = item.get("box") or item.get("bbox") or item.get("points")
+                text = item.get("text") or item.get("txt") or ""
+                score = item.get("score") or item.get("confidence") or 1.0
+            elif isinstance(item, (list, tuple)) and len(item) >= 3:
+                box, text, score = item[:3]
+            else:
+                continue
+            norm_box = _normalize_box_points(box)
+            if norm_box is not None:
+                entries.append((norm_box, str(text).strip(), float(score or 0.0)))
+        return entries
+
+    return []
+
+
+def _rapidocr_recognize(img_bgr: np.ndarray) -> List[dict]:
+    engine = _get_rapidocr_engine()
+    raw_result = engine(img_bgr)
     results = []
-    for box, score in boxes:
-        crop_img = _crop_from_box(img_bgr, box)
-        if crop_img is None:
-            continue
-        try:
-            text = predictor.predict(crop_img)
-        except Exception:
-            text = ""
-        if text:
-            results.append({"text": text.strip(), "box": box, "score": score})
+    for box, text, score in _rapidocr_entries(raw_result):
+        if text and score >= MIN_BOX_SCORE:
+            results.append({"text": text, "box": box, "score": score})
     return results
 
 
@@ -346,6 +445,29 @@ def _group_lines(boxes: List[dict]) -> List[str]:
     return [ln for ln in lines if ln]
 
 
+def _ascii_fold(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.replace("đ", "d").replace("Đ", "D")
+
+
+def _norm_ocr_text(text: str) -> str:
+    text = _ascii_fold(text).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _infer_doc_type(lines: List[str]) -> str:
+    full = " ".join(lines)
+    compact = re.sub(r"\s", "", full).upper()
+    full_lower = full.lower()
+    if "IDVNM" in compact or re.search(r"\bngon\s+tro\b|\bdau\s+ngon\b|date\s+of\s+issue|date\s+of\s+expiry|ngay,\s*thang,\s*nam\s*cap", full_lower):
+        return "cccd_back"
+    if re.search(r"c[aă]n\s*c[uư][oơ]c|citizen\s*identity\s*card|identity\s*card|h[oọ]\s*v[aà]\s*t[eê]n|full\s*name", full_lower):
+        return "cccd_front"
+    return "unknown"
+
+
 def _normalize_date(s: str) -> str:
     s = s.strip()
     s = s.replace("-", "/")
@@ -369,6 +491,13 @@ def _find_date_after_label(lines: List[str], label_pattern: str) -> str:
 
 
 def _extract_cccd(lines: List[str]) -> str:
+    mrz = _extract_mrz(lines)
+    if mrz.get("so_giay_to"):
+        return mrz["so_giay_to"]
+    for ln in lines:
+        if re.search(r"personal\s+identification|s[oố]\s*/?\s*no|s[oố]\s+định\s+danh", ln, re.IGNORECASE):
+            if m := re.search(r"\b(\d{12})\b", ln):
+                return m.group(1)
     full = " ".join(lines)
     if m := re.search(r"\b(\d{12})\b", full):
         return m.group(1)
@@ -379,43 +508,124 @@ def _extract_cccd(lines: List[str]) -> str:
     return ""
 
 
+def _clean_name_candidate(text: str) -> str:
+    text = re.sub(r"[<|]", " ", text or "")
+    text = re.sub(r"\s+", " ", text).strip(" .:-")
+    return text.upper()
+
+
 def _extract_name(lines: List[str]) -> str:
+    label_pat = r"(h[oọ]\s*(v[aà]\s*)?t[eê]n|full\s*name)"
     for i, ln in enumerate(lines):
-        if re.search(r"h[oọ]\s*v[aà]\s*t[eê]n", ln, re.IGNORECASE):
+        m = re.search(label_pat, ln, re.IGNORECASE)
+        if m:
+            tail = ln[m.end():]
+            tail = re.split(r"ng[aà]y\s*sinh|date\s*of\s*birth|gioi\s*tinh|sex|qu[oố]c\s*t[ịi]ch|nationality|qu[eê]\s*qu[aá]n|place\s*of\s*origin|n[oơ]i\s*th", tail, maxsplit=1, flags=re.IGNORECASE)[0]
+            candidate = _clean_name_candidate(tail)
+            if candidate and len(candidate.split()) >= 2 and not re.search(r"\d", candidate):
+                return candidate
             if i + 1 < len(lines):
-                return lines[i + 1].strip().upper()
+                candidate = _clean_name_candidate(lines[i + 1])
+                if candidate and len(candidate.split()) >= 2 and not re.search(r"\d", candidate):
+                    return candidate
     # Heuristic: longest line without digits
     best = ""
+    blacklist = re.compile(
+        r"cong\s*hoa|socialist|independence|freedom|hanh\s*phuc|can\s*c[uư][oơ]c|citizen|identity|"
+        r"bo\s*cong\s*an|ministry|noi\s*(thuong\s*tru|cu\s*tru)|place\s*of\s*(residence|origin)|"
+        r"ngon\s*tro|dac\s*diem|personal\s*identification|date\s*of\s*(issue|expiry|birth)|"
+        r"quoc\s*tich|nationality|que\s*quan",
+        re.IGNORECASE,
+    )
     for ln in lines:
         if re.search(r"\d", ln):
             continue
-        if len(ln) > len(best) and len(ln.split()) >= 2:
-            best = ln
-    return best.upper()
+        candidate = _clean_name_candidate(ln)
+        if blacklist.search(candidate):
+            continue
+        word_count = len(candidate.split())
+        if 2 <= word_count <= 5 and len(candidate) > len(best):
+            best = candidate
+    return best
 
 
 def _extract_gender(lines: List[str]) -> str:
-    full = " ".join(lines).lower()
-    if "nữ" in full or "nu" in full:
-        return "Nữ"
-    if "nam" in full:
-        return "Nam"
+    for ln in lines:
+        if re.search(r"gi[oớ]i\s*t[ií]nh|sex", ln, re.IGNORECASE):
+            lower = ln.lower()
+            if re.search(r"\bnu\w*\b|\bn[uữ]\b|female", lower):
+                return "Nữ"
+            if re.search(r"\bnam\b|male", lower):
+                return "Nam"
     return ""
 
 
 def _extract_address(lines: List[str]) -> str:
-    stop_pat = re.compile(r"(quoc\s*tich|quốc\s*tịch|gioi\s*tinh|giới\s*tính|ngay\s*sinh|ngày\s*sinh|ngay\s*cap|ngày\s*cấp|co\s*gia\s*tri|có\s*giá\s*trị)", re.IGNORECASE)
+    stop_pat = re.compile(r"(quoc\s*tich|quốc\s*tịch|gioi\s*tinh|giới\s*tính|ngay\s*sinh|ngày\s*sinh|ngay\s*cap|ngày\s*cấp|co\s*gia\s*tri|có\s*giá\s*trị|date\s*of\s*expiry|expiry)", re.IGNORECASE)
     for i, ln in enumerate(lines):
-        if re.search(r"n[oơ]i\s*(th[uư]ờ?ng\s*trú|c[uư]\s*trú)", ln, re.IGNORECASE):
+        if re.search(r"n[oơ]i\s*(th[uư]ờ?ng\s*trú|c[uư]\s*trú)|place\s*of\s*residence", ln, re.IGNORECASE):
             parts = []
-            if ":" in ln:
-                parts.append(ln.split(":", 1)[1].strip())
+            m = re.search(r"(n[oơ]i\s*(th[uư]ờ?ng\s*trú|c[uư]\s*trú)|place\s*of\s*residence)\s*:?\s*(.+)$", ln, re.IGNORECASE)
+            if m:
+                parts.append(m.group(3).strip(" .,:;"))
             for j in range(i + 1, len(lines)):
                 if stop_pat.search(lines[j]):
                     break
                 parts.append(lines[j])
-            return ", ".join([p for p in parts if p])
+            return ", ".join([p.strip(" .,:;") for p in parts if p and p.strip(" .,:;")])
     return ""
+
+
+def _extract_mrz(lines: List[str]) -> dict:
+    compact_lines = [re.sub(r"\s+", "", (ln or "").upper()) for ln in lines if ln]
+    joined = " ".join(compact_lines)
+    line1 = next((ln for ln in compact_lines if "IDVNM" in ln and "<<" in ln), "")
+    line2 = next((ln for ln in compact_lines if re.search(r"\d{6}\d[MF<]\d{6}\dVNM", ln)), "")
+    name_line = next((ln for ln in compact_lines if "<<" in ln and "IDVNM" not in ln and re.search(r"[A-Z]{2,}", ln)), "")
+
+    def _fmt_yyMMdd(raw: str, prefer_future: bool = False) -> str:
+        if not re.fullmatch(r"\d{6}", raw or ""):
+            return ""
+        yy = int(raw[:2])
+        mm = raw[2:4]
+        dd = raw[4:6]
+        if prefer_future:
+            year = 2000 + yy if yy < 70 else 1900 + yy
+        else:
+            current_yy = datetime.now().year % 100
+            year = 1900 + yy if yy > current_yy else 2000 + yy
+        return f"{dd}/{mm}/{year:04d}"
+
+    cccd = ""
+    if line1:
+        m = re.search(r"(\d{12})<<\d", line1)
+        if m:
+            cccd = m.group(1)
+        else:
+            matches = re.findall(r"\d{12}", line1)
+            if matches:
+                cccd = matches[-1]
+
+    name = ""
+    if name_line:
+        name = _clean_name_candidate(name_line.replace("<<", " ").replace("<", " "))
+
+    dob = ""
+    expiry = ""
+    gender = ""
+    if line2 and len(line2) >= 15:
+        dob = _fmt_yyMMdd(line2[0:6], prefer_future=False)
+        gender = "Nam" if line2[7] == "M" else ("Nữ" if line2[7] == "F" else "")
+        expiry = _fmt_yyMMdd(line2[8:14], prefer_future=True)
+
+    return {
+        "mrz_line1": line1 or joined,
+        "so_giay_to": cccd,
+        "ho_ten": name,
+        "ngay_sinh": dob,
+        "gioi_tinh": gender,
+        "ngay_het_han": expiry,
+    }
 
 
 def _parse_cccd(lines: List[str], qr_data: Optional[dict], doc_type: str) -> dict:
@@ -437,6 +647,8 @@ def _parse_cccd(lines: List[str], qr_data: Optional[dict], doc_type: str) -> dic
         data["dia_chi"] = qr_data.get("dia_chi", "")
         data["ngay_het_han"] = qr_data.get("ngay_het_han", "")
 
+    mrz = _extract_mrz(lines)
+
     if not data["so_giay_to"]:
         data["so_giay_to"] = _extract_cccd(lines)
     if not data["ho_ten"]:
@@ -448,14 +660,370 @@ def _parse_cccd(lines: List[str], qr_data: Optional[dict], doc_type: str) -> dic
     if not data["dia_chi"]:
         data["dia_chi"] = _extract_address(lines)
 
+    if mrz.get("so_giay_to") and (doc_type == "cccd_back" or not data["so_giay_to"]):
+        data["so_giay_to"] = mrz["so_giay_to"]
+    if mrz.get("ho_ten") and (doc_type == "cccd_back" or not data["ho_ten"]):
+        data["ho_ten"] = mrz["ho_ten"]
+    if mrz.get("ngay_sinh") and (doc_type == "cccd_back" or not data["ngay_sinh"]):
+        data["ngay_sinh"] = mrz["ngay_sinh"]
+    if mrz.get("gioi_tinh") and (doc_type == "cccd_back" or not data["gioi_tinh"]):
+        data["gioi_tinh"] = mrz["gioi_tinh"]
+
     data["ngay_cap"] = _find_date_after_label(lines, r"ngay\s*cap|ngày\s*cấp") or data["ngay_cap"]
     data["ngay_het_han"] = _find_date_after_label(lines, r"(co\s*gia\s*tri\s*den|có\s*giá\s*trị\s*đến|ngay\s*het\s*han|ngày\s*hết\s*hạn)") or data["ngay_het_han"]
 
-    # Fallback: if doc_type = back and no ngay_cap, use 2nd date
-    if doc_type == "cccd_back" and not data["ngay_cap"]:
+    if mrz.get("ngay_het_han") and not data["ngay_het_han"]:
+        data["ngay_het_han"] = mrz["ngay_het_han"]
+
+    # Fallback cho mặt sau: ảnh thường có 2 ngày issue/expiry
+    if doc_type == "cccd_back":
         dates = re.findall(r"\d{2}/\d{2}/\d{4}", " ".join(lines).replace("-", "/"))
-        if len(dates) >= 2:
-            data["ngay_cap"] = dates[1]
+        if not data["ngay_cap"] and len(dates) >= 1:
+            data["ngay_cap"] = dates[0]
+        if not data["ngay_het_han"] and len(dates) >= 2:
+            data["ngay_het_han"] = dates[1]
+
+    return data
+
+
+# Override parser helpers with ASCII-folded variants to handle OCR noise on Windows.
+def _ascii_fold(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text or "")
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return text.replace("đ", "d").replace("Đ", "D")
+
+
+def _norm_ocr_text(text: str) -> str:
+    text = _ascii_fold(text).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _infer_doc_type(lines: List[str]) -> str:
+    full = " ".join(lines)
+    compact = re.sub(r"\s", "", _ascii_fold(full)).upper()
+    full_norm = _norm_ocr_text(full)
+    if "IDVNM" in compact:
+        return "cccd_back"
+    if any(token in full_norm for token in [
+        "ngon tro",
+        "dau ngon",
+        "date of issue",
+        "date of expiry",
+        "ngay thang nam cap",
+    ]):
+        return "cccd_back"
+    if any(token in full_norm for token in [
+        "can cuoc",
+        "citizen identity card",
+        "identity card",
+        "ho va ten",
+        "full name",
+    ]):
+        return "cccd_front"
+    return "unknown"
+
+
+def _find_date_after_label(lines: List[str], label_pattern: str) -> str:
+    for i, ln in enumerate(lines):
+        if re.search(label_pattern, _ascii_fold(ln), re.IGNORECASE):
+            d = _normalize_date(ln)
+            if d:
+                return d
+            for j in range(i + 1, min(i + 3, len(lines))):
+                d = _normalize_date(lines[j])
+                if d:
+                    return d
+    return ""
+
+
+def _clean_name_candidate(text: str) -> str:
+    text = (text or "").replace("'", "")
+    text = re.sub(r"(?i)\b(họ\s*(và\s*)?tên|ho\s*va\s*ten|ho\s*ten|full\s*name)\b", " ", text)
+    text = re.sub(r"[<|/]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" .:-")
+    return text.upper()
+
+
+def _is_likely_name(candidate: str) -> bool:
+    if not candidate or re.search(r"\d", candidate):
+        return False
+    words = candidate.split()
+    if not (2 <= len(words) <= 6):
+        return False
+    folded = _ascii_fold(candidate)
+    if re.search(
+        r"\b(CONG HOA|SOCIALIST|MINISTRY|PUBLIC SECURITY|CAN CUOC|CITIZEN|IDENTITY|"
+        r"FULL NAME|HO VA TEN|PLACE OF|DATE OF|NGON TRO|DAC DIEM|QUOC TICH|QUE QUAN)\b",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _extract_name(lines: List[str]) -> str:
+    label_pat = r"(ho\s*va\s*ten|ho\s*ten|full\s*name)"
+    stop_pat = r"(\d{2}/\d{2}/\d{4}|ngay\s*sinh|date\s*of\s*birth|dateofbirth|gioi\s*tinh|sex|quoc\s*tich|nationality|que\s*quan|place\s*of\s*origin|noi\s*thuong\s*tru|noi\s*cu\s*tru|place\s*of\s*residence|co\s*gia\s*tri|date\s*of\s*expiry)"
+    for i, ln in enumerate(lines):
+        folded = _ascii_fold(ln)
+        m = re.search(label_pat, folded, re.IGNORECASE)
+        if m:
+            tail = re.split(r":", ln, maxsplit=1)
+            tail = tail[1] if len(tail) == 2 else ln[m.end():]
+            tail = re.split(stop_pat, tail, maxsplit=1, flags=re.IGNORECASE)[0]
+            candidate = _clean_name_candidate(tail)
+            if _is_likely_name(candidate):
+                return candidate
+            for j in range(i + 1, min(i + 3, len(lines))):
+                candidate = _clean_name_candidate(re.split(stop_pat, lines[j], maxsplit=1, flags=re.IGNORECASE)[0])
+                if _is_likely_name(candidate):
+                    return candidate
+
+    best = ""
+    blacklist = re.compile(
+        r"cong\s*hoa|socialist|independence|freedom|hanh\s*phuc|can\s*cuoc|citizen|identity|"
+        r"bo\s*cong\s*an|ministry|noi\s*(thuong\s*tru|cu\s*tru)|place\s*of\s*(residence|origin)|"
+        r"ngon\s*tro|dac\s*diem|personal\s*identification|date\s*of\s*(issue|expiry|birth)|"
+        r"quoc\s*tich|nationality|que\s*quan|full\s*name|ho\s*va\s*ten",
+        re.IGNORECASE,
+    )
+    for ln in lines:
+        if re.search(r"\d", ln):
+            continue
+        candidate = _clean_name_candidate(ln)
+        if blacklist.search(_ascii_fold(candidate)):
+            continue
+        if _is_likely_name(candidate) and len(candidate) > len(best):
+            best = candidate
+    return best
+
+
+def _extract_gender(lines: List[str]) -> str:
+    for ln in lines:
+        folded = _ascii_fold(ln).lower()
+        if re.search(r"gioi\s*tinh|sex", folded, re.IGNORECASE):
+            if re.search(r"\bnu\w*\b|female", folded):
+                return "Nữ"
+            if re.search(r"\bnam\b|male", folded):
+                return "Nam"
+    return ""
+
+
+def _extract_address_block(lines: List[str], label_pattern: str, from_bottom: bool = False) -> str:
+    stop_pat = re.compile(
+        r"(quoc\s*tich|gioi\s*tinh|ngay\s*sinh|ngay\s*cap|co\s*gia|date\s*of|expiry|que\s*quan|place\s*of\s*origin|^\d{4}/\d{2}/\d{2})",
+        re.IGNORECASE,
+    )
+    indexes = list(range(len(lines)))
+    if from_bottom:
+        indexes.reverse()
+    for i in indexes:
+        ln = lines[i]
+        folded = _ascii_fold(ln)
+        if re.search(label_pattern, folded, re.IGNORECASE):
+            parts = []
+            m = re.search(label_pattern + r"\s*:?\s*(.+)$", folded, re.IGNORECASE)
+            if m:
+                inline_tail = m.group(1).strip(" .,:;")
+                if inline_tail and not re.search(label_pattern, inline_tail, re.IGNORECASE):
+                    parts.append(inline_tail)
+            for j in range(i + 1, len(lines)):
+                next_folded = _ascii_fold(lines[j])
+                if stop_pat.search(next_folded):
+                    break
+                parts.append(lines[j].strip(" .,:;"))
+            cleaned = []
+            for p in parts:
+                v = p.strip(" .,:;")
+                if not v:
+                    continue
+                if re.fullmatch(r"(noi\s*(thuong\s*tru|cu\s*tru)|place\s*of\s*residence)", _ascii_fold(v), re.IGNORECASE):
+                    continue
+                cleaned.append(v)
+            if cleaned:
+                return ", ".join(cleaned)
+    return ""
+
+
+def _extract_address(lines: List[str], doc_type: str) -> str:
+    """
+    Luat co dinh:
+    - CCCD cu: dia chi o duoi cung mat truoc => "Noi thuong tru".
+    - CCCD moi: dia chi o tren cung mat sau => "Noi cu tru".
+    Khong xac dinh duoc block thi de trong.
+    """
+    if doc_type == "cccd_front":
+        return _extract_address_block(lines, r"(noi\s*thuong\s*tru|place\s*of\s*residence)", from_bottom=True)
+    if doc_type == "cccd_back":
+        return _extract_address_block(lines, r"(noi\s*cu\s*tru|place\s*of\s*residence)", from_bottom=False)
+    # unknown: chi nhan neu tim thay duy nhat 1 block ro rang
+    front_addr = _extract_address_block(lines, r"(noi\s*thuong\s*tru|place\s*of\s*residence)", from_bottom=True)
+    back_addr = _extract_address_block(lines, r"(noi\s*cu\s*tru|place\s*of\s*residence)", from_bottom=False)
+    if front_addr and not back_addr:
+        return front_addr
+    if back_addr and not front_addr:
+        return back_addr
+    return ""
+
+
+def _extract_mrz(lines: List[str]) -> dict:
+    compact_lines = [re.sub(r"\s+", "", _ascii_fold(ln or "").upper()) for ln in lines if ln]
+    joined = " ".join(compact_lines)
+    mrz_start = next((idx for idx, ln in enumerate(compact_lines) if "IDVNM" in ln and "<<" in ln), -1)
+    line1 = compact_lines[mrz_start] if mrz_start >= 0 else next((ln for ln in compact_lines if "IDVNM" in ln and "<<" in ln), "")
+
+    def _fmt_yyMMdd(raw: str, prefer_future: bool = False) -> str:
+        if not re.fullmatch(r"\d{6}", raw or ""):
+            return ""
+        yy = int(raw[:2])
+        mm = raw[2:4]
+        dd = raw[4:6]
+        if prefer_future:
+            year = 2000 + yy if yy < 70 else 1900 + yy
+        else:
+            current_yy = datetime.now().year % 100
+            year = 1900 + yy if yy > current_yy else 2000 + yy
+        return f"{dd}/{mm}/{year:04d}"
+
+    line2_match = re.search(r"(\d{6})\d([MF<])(\d{6})\dVNM", joined)
+    name_line = next(
+        (ln for ln in compact_lines if "<<" in ln and "IDVNM" not in ln and ln.count("<") >= 4 and re.search(r"[A-Z]{2,}", ln)),
+        "",
+    )
+
+    cccd = ""
+    if line1:
+        m = re.search(r"(\d{12})<<\d", line1)
+        if m:
+            cccd = m.group(1)
+        else:
+            matches = re.findall(r"\d{12}", line1)
+            if matches:
+                cccd = matches[-1]
+
+    dob = _fmt_yyMMdd(line2_match.group(1), prefer_future=False) if line2_match else ""
+    gender = "Nam" if line2_match and line2_match.group(2) == "M" else ("Nữ" if line2_match and line2_match.group(2) == "F" else "")
+    expiry = _fmt_yyMMdd(line2_match.group(3), prefer_future=True) if line2_match else ""
+    name = _clean_name_candidate(name_line.replace("<<", " ").replace("<", " ")) if name_line else ""
+    if name and not _is_likely_name(name):
+        name = ""
+
+    return {
+        "mrz_line1": line1 or joined,
+        "so_giay_to": cccd,
+        "ho_ten": name,
+        "ngay_sinh": dob,
+        "gioi_tinh": gender,
+        "ngay_het_han": expiry,
+    }
+
+
+def _extract_cccd(lines: List[str]) -> str:
+    mrz = _extract_mrz(lines)
+    if mrz.get("so_giay_to"):
+        return mrz["so_giay_to"]
+    for ln in lines:
+        if re.search(r"personal\s+identification|s[o0]\s*/?\s*no|so\s+dinh\s+danh", _ascii_fold(ln), re.IGNORECASE):
+            if m := re.search(r"\b(\d{12})\b", ln):
+                return m.group(1)
+    full = " ".join(lines)
+    if m := re.search(r"\b(\d{12})\b", full):
+        return m.group(1)
+    digits = re.sub(r"\D", "", full)
+    if len(digits) >= 12:
+        return digits[:12]
+    return ""
+
+
+def _is_valid_qr_data(qr_data: Optional[dict]) -> bool:
+    if not qr_data:
+        return False
+    cccd = re.sub(r"\D", "", str(qr_data.get("so_giay_to") or ""))
+    if len(cccd) != 12:
+        return False
+    signals = 0
+    for key in ("ho_ten", "ngay_sinh", "gioi_tinh"):
+        if (qr_data.get(key) or "").strip():
+            signals += 1
+    return signals >= 2
+
+
+def _infer_side(doc_type: str) -> str:
+    if doc_type == "cccd_front":
+        return "front"
+    if doc_type == "cccd_back":
+        return "back"
+    return "unknown"
+
+
+def _build_qr_person_data(qr_data: dict) -> dict:
+    return {
+        "so_giay_to": qr_data.get("so_giay_to", ""),
+        "ho_ten": (qr_data.get("ho_ten", "") or "").strip(),
+        "ngay_sinh": qr_data.get("ngay_sinh", ""),
+        "gioi_tinh": qr_data.get("gioi_tinh", ""),
+        "dia_chi": qr_data.get("dia_chi", ""),
+        "ngay_cap": qr_data.get("ngay_cap", ""),
+        "ngay_het_han": qr_data.get("ngay_het_han", ""),
+    }
+
+
+def _parse_cccd(lines: List[str], qr_data: Optional[dict], doc_type: str) -> dict:
+    data = {
+        "so_giay_to": "",
+        "ho_ten": "",
+        "ngay_sinh": "",
+        "gioi_tinh": "",
+        "dia_chi": "",
+        "ngay_cap": "",
+        "ngay_het_han": "",
+    }
+
+    if qr_data:
+        data["so_giay_to"] = qr_data.get("so_giay_to", "")
+        data["ho_ten"] = qr_data.get("ho_ten", "")
+        data["ngay_sinh"] = qr_data.get("ngay_sinh", "")
+        data["gioi_tinh"] = qr_data.get("gioi_tinh", "")
+        data["dia_chi"] = qr_data.get("dia_chi", "")
+        data["ngay_het_han"] = qr_data.get("ngay_het_han", "")
+
+    mrz = _extract_mrz(lines)
+
+    if not data["so_giay_to"]:
+        data["so_giay_to"] = _extract_cccd(lines)
+    if not data["ho_ten"]:
+        data["ho_ten"] = _extract_name(lines)
+    if not data["ngay_sinh"]:
+        data["ngay_sinh"] = _find_date_after_label(lines, r"ngay\s*sinh|date\s*of\s*birth")
+    if not data["gioi_tinh"]:
+        data["gioi_tinh"] = _extract_gender(lines)
+    if not data["dia_chi"]:
+        data["dia_chi"] = _extract_address(lines, doc_type)
+
+    if mrz.get("so_giay_to") and (doc_type == "cccd_back" or not data["so_giay_to"]):
+        data["so_giay_to"] = mrz["so_giay_to"]
+    # Ten uu tien QR/mat truoc; MRZ chi fallback khi thieu hoan toan.
+    if mrz.get("ho_ten") and not data["ho_ten"]:
+        data["ho_ten"] = mrz["ho_ten"]
+    if mrz.get("ngay_sinh") and (doc_type == "cccd_back" or not data["ngay_sinh"]):
+        data["ngay_sinh"] = mrz["ngay_sinh"]
+    if mrz.get("gioi_tinh") and (doc_type == "cccd_back" or not data["gioi_tinh"]):
+        data["gioi_tinh"] = mrz["gioi_tinh"]
+
+    data["ngay_cap"] = _find_date_after_label(lines, r"ngay\s*cap|ngay\s*thang.*cap|date\s*of\s*issue") or data["ngay_cap"]
+    data["ngay_het_han"] = _find_date_after_label(lines, r"co\s*gia\s*tri|ngay\s*het\s*han|date\s*of\s*expiry|expiry") or data["ngay_het_han"]
+
+    if mrz.get("ngay_het_han") and not data["ngay_het_han"]:
+        data["ngay_het_han"] = mrz["ngay_het_han"]
+
+    if doc_type == "cccd_back":
+        dates = re.findall(r"\d{2}/\d{2}/\d{4}", " ".join(lines).replace("-", "/"))
+        if not data["ngay_cap"] and len(dates) >= 1:
+            data["ngay_cap"] = dates[0]
+        if not data["ngay_het_han"] and len(dates) >= 2:
+            data["ngay_het_han"] = dates[1]
+
     return data
 
 
@@ -463,70 +1031,114 @@ def _build_raw_text(lines: List[str]) -> str:
     return "\n".join([ln for ln in lines if ln])
 
 
+def _try_qr_data_from_crop(crop: DocCrop, seeded_qr_text: str | None = None) -> tuple[dict | None, str]:
+    qr_text = (seeded_qr_text or "").strip()
+    qr_data = parse_cccd_qr(qr_text) if qr_text else None
+    if _is_valid_qr_data(qr_data):
+        return qr_data, qr_text
+
+    try:
+        pil_img = Image.fromarray(cv2.cvtColor(crop.img, cv2.COLOR_BGR2RGB))
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG")
+        detected = try_decode_qr(buf.getvalue()) or ""
+        parsed = parse_cccd_qr(detected) if detected else None
+        if _is_valid_qr_data(parsed):
+            return parsed, detected
+    except Exception:
+        pass
+    return None, ""
+
+
+def _build_field_sources(source_type: str, data: dict) -> dict:
+    tag = "qr" if source_type == "QR" else "ocr"
+    out = {}
+    for key in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap"):
+        if (data.get(key) or "").strip():
+            out[key] = tag
+    return out
+
+
+def _analyze_crop(crop: DocCrop, seeded_qr_text: str | None = None, allow_llm: bool = False) -> dict:
+    qr_data, qr_text = _try_qr_data_from_crop(crop, seeded_qr_text)
+    doc_type_from_model = crop.doc_type if crop.doc_type != "unknown" else "unknown"
+
+    # QR gate: neu QR hop le thi dung OCR text cho anh nay.
+    if _is_valid_qr_data(qr_data):
+        data = _build_qr_person_data(qr_data or {})
+        data.pop("ngay_het_han", None)
+        return {
+            "data": data,
+            "doc_type": doc_type_from_model,
+            "confidence": crop.confidence,
+            "raw_text": "",
+            "_lines": [],
+            "_qr": True,
+            "qr_text": qr_text,
+            "source_type": "QR",
+            "side": _infer_side(doc_type_from_model),
+            "field_sources": _build_field_sources("QR", data),
+        }
+
+    ocr_boxes = _rapidocr_recognize(crop.img)
+    lines = _group_lines(ocr_boxes)
+    raw_text = _build_raw_text(lines)
+    inferred_doc_type = crop.doc_type if crop.doc_type != "unknown" else _infer_doc_type(lines)
+    data = _parse_cccd(lines, None, inferred_doc_type)
+    data.pop("ngay_het_han", None)
+
+    if allow_llm and _needs_llm_fallback(data) and raw_text:
+        loop_data = None
+        try:
+            loop_data = asyncio.run(_llm_parse_text(raw_text, inferred_doc_type))
+        except Exception:
+            loop_data = None
+        if isinstance(loop_data, dict):
+            data.update({k: v for k, v in loop_data.items() if v and k in data})
+
+    if allow_llm and (data.get("ho_ten") or "").strip() and _count_vietnamese_diacritics(data.get("ho_ten", "")) < 2:
+        restored = None
+        try:
+            restored = asyncio.run(_llm_restore_name_diacritics(data.get("ho_ten", ""), raw_text))
+        except Exception:
+            restored = None
+        if restored:
+            data["ho_ten"] = restored
+
+    return {
+        "data": data,
+        "doc_type": inferred_doc_type,
+        "confidence": crop.confidence,
+        "raw_text": raw_text,
+        "_lines": lines,
+        "_qr": False,
+        "qr_text": "",
+        "source_type": "OCR",
+        "side": _infer_side(inferred_doc_type),
+        "field_sources": _build_field_sources("OCR", data),
+    }
+
+
 def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
+    _ensure_local_ocr_dependencies()
     img_np = np.frombuffer(file_bytes, np.uint8)
     img_bgr = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
     if img_bgr is None:
         raise ValueError("Khong doc duoc anh")
 
-    # Safe mode: avoid torch-based OCR to prevent hard crash on unsupported CPU.
-    if _torch_disabled():
-        if qr_text:
-            parsed = parse_cccd_qr(qr_text)
-            return {
-                "persons": [{
-                    "type": "person",
-                    "data": parsed or {},
-                    "_source": "QR only (safe mode)",
-                    "_qr": True,
-                    "_debug_lines": [],
-                }],
-                "properties": [],
-                "marriages": [],
-                "errors": [],
-                "summary": {
-                    "total_images": 1,
-                    "local_engine": "QR only (safe mode)",
-                },
-            }
-        raise RuntimeError(
-            "Torch/EasyOCR/VietOCR da bi tat. "
-            "May khong ho tro tap lenh CPU (AVX) hoac torch crash. "
-            "Hay cai torch phu hop hoac tat LOCAL_OCR_DISABLE_TORCH."
-        )
-
     img_bgr = _preprocess(img_bgr)
     crops = _detect_documents(img_bgr)
 
     candidates = []
+    seeded_qr = qr_text
     for crop in crops:
-        qr_data = parse_cccd_qr(qr_text) if qr_text else None
-        if not qr_data:
-            try:
-                pil_img = Image.fromarray(cv2.cvtColor(crop.img, cv2.COLOR_BGR2RGB))
-                buf = io.BytesIO()
-                pil_img.save(buf, format="PNG")
-                qr_detected = try_decode_qr(buf.getvalue())
-                qr_data = parse_cccd_qr(qr_detected) if qr_detected else None
-            except Exception:
-                qr_data = None
-
-        ocr_boxes = _vietocr_recognize(crop.img)
-        lines = _group_lines(ocr_boxes)
-        raw_text = _build_raw_text(lines)
-        data = _parse_cccd(lines, qr_data, crop.doc_type)
-
-        candidates.append({
-            "data": data,
-            "doc_type": crop.doc_type,
-            "confidence": crop.confidence,
-            "raw_text": raw_text,
-            "_qr": bool(qr_data),
-        })
+        analyzed = _analyze_crop(crop, seeded_qr_text=seeded_qr, allow_llm=True)
+        candidates.append(analyzed)
+        seeded_qr = None
 
     best = None
     for c in candidates:
-        score = _score_person(c["data"]) + (3 if c["_qr"] else 0)
+        score = _score_person(c["data"]) + (5 if c.get("source_type") == "QR" else 0)
         if best is None or score > best["score"]:
             best = {**c, "score": score}
 
@@ -536,21 +1148,14 @@ def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
     data = best["data"]
     raw_text = best["raw_text"]
 
-    # Text-only LLM fallback nếu thiếu dữ liệu quan trọng
-    if _needs_llm_fallback(data) and raw_text:
-        loop_data = None
-        try:
-            loop_data = asyncio.run(_llm_parse_text(raw_text, best["doc_type"]))
-        except Exception:
-            loop_data = None
-        if isinstance(loop_data, dict):
-            data.update({k: v for k, v in loop_data.items() if v and k in data})
-
     return {
         "persons": [{
             "type": "person",
             "data": {**data, "_raw_text": raw_text},
-            "_source": f"Local OCR ({best['doc_type']})",
+            "_source": f"{best.get('source_type', 'OCR')} ({best.get('side', 'unknown')})",
+            "source_type": best.get("source_type", "OCR"),
+            "side": best.get("side", "unknown"),
+            "field_sources": best.get("field_sources", {}),
         }],
         "properties": [],
         "marriages": [],
@@ -564,22 +1169,28 @@ def _score_person(data: dict) -> int:
     return sum(1 for k in keys if (data.get(k) or "").strip())
 
 
+def _local_engine_name() -> str:
+    if _torch_disabled() or not YOLO_WEIGHTS:
+        return "RapidOCR"
+    return "YOLO + RapidOCR"
+
+
 # ---------------------- Endpoint ----------------------
 @router.post("/analyze-local")
 async def analyze_images_local(files: List[UploadFile] = File(...)):
     """
-    OCR offline with pipeline: preprocess -> YOLO -> QR -> EasyOCR -> VietOCR -> regex.
+    OCR offline with pipeline: preprocess -> YOLO -> QR -> RapidOCR -> regex.
     Return same format as /api/ocr/analyze for frontend compatibility.
     """
     if not files:
         raise HTTPException(status_code=400, detail="Chua co anh nao duoc gui len")
+    _ensure_local_ocr_dependencies()
 
     persons = []
     errors = []
 
     # Ensure required models
-    _get_easyocr_reader()
-    _get_vietocr_predictor()
+    _get_rapidocr_engine()
 
     for f in files:
         try:
@@ -595,34 +1206,12 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
 
             candidates = []
             for crop in crops:
-                # QR scan
-                qr_text = None
-                try:
-                    pil_img = Image.fromarray(cv2.cvtColor(crop.img, cv2.COLOR_BGR2RGB))
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="PNG")
-                    qr_text = try_decode_qr(buf.getvalue())
-                except Exception:
-                    qr_text = None
-                qr_data = parse_cccd_qr(qr_text) if qr_text else None
-
-                # OCR lines
-                ocr_boxes = _vietocr_recognize(crop.img)
-                lines = _group_lines(ocr_boxes)
-                data = _parse_cccd(lines, qr_data, crop.doc_type)
-
-                candidates.append({
-                    "data": data,
-                    "doc_type": crop.doc_type,
-                    "confidence": crop.confidence,
-                    "_lines": lines,
-                    "_qr": bool(qr_data),
-                })
+                candidates.append(_analyze_crop(crop, allow_llm=False))
 
             # pick best candidate
             best = None
             for c in candidates:
-                score = _score_person(c["data"]) + (3 if c["_qr"] else 0)
+                score = _score_person(c["data"]) + (5 if c.get("source_type") == "QR" else 0)
                 if best is None or score > best["score"]:
                     best = {**c, "score": score}
             if best:
@@ -630,9 +1219,12 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
                 persons.append({
                     "type": "person",
                     "data": data,
-                    "_source": f"Local OCR ({best['doc_type']})",
+                    "_source": f"{best.get('source_type', 'OCR')} ({best.get('side', 'unknown')})",
                     "filename": f.filename,
-                    "_qr": best["_qr"],
+                    "_qr": best.get("_qr", False),
+                    "source_type": best.get("source_type", "OCR"),
+                    "side": best.get("side", "unknown"),
+                    "field_sources": best.get("field_sources", {}),
                     "_debug_lines": best["_lines"],
                 })
             else:
@@ -649,7 +1241,7 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
         "errors": errors,
         "summary": {
             "total_images": len(files),
-            "local_engine": "YOLO + EasyOCR + VietOCR",
+            "local_engine": _local_engine_name(),
         },
     }
 
@@ -658,6 +1250,7 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
 async def submit_local_job(file: UploadFile = File(...), qr_text: str | None = Form(None)):
     if not file:
         raise HTTPException(status_code=400, detail="Chua co file")
+    _ensure_local_ocr_dependencies()
 
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "ocr")
     os.makedirs(temp_dir, exist_ok=True)

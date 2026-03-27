@@ -10,7 +10,8 @@ Pipeline:
   6. Trả về persons[], properties[], marriages[]
 """
 
-import base64, io, json, os, re
+import base64, io, json, os, re, unicodedata
+from datetime import datetime
 from typing import List
 
 import httpx
@@ -18,6 +19,12 @@ import zxingcpp
 from dotenv import load_dotenv
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image
+try:
+    import cv2
+    import numpy as np
+except Exception:
+    cv2 = None
+    np = None
 
 router = APIRouter(tags=["OCR"])
 
@@ -43,64 +50,330 @@ MAX_IMAGE_PX = 1000
 JPEG_QUALITY = 82
 
 # ─── QR decode — trước AI, miễn phí, chính xác 100% ─────────────────────────
-def try_decode_qr(file_bytes: bytes) -> str | None:
-    """Thử giải mã QR code từ ảnh. Trả về text hoặc None."""
+def _zxing_decode_qr(image_obj) -> str | None:
     try:
-        img = Image.open(io.BytesIO(file_bytes))
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        results = zxingcpp.read_barcodes(img)
+        results = zxingcpp.read_barcodes(image_obj)
         for r in results:
             if r.format in (zxingcpp.BarcodeFormat.QRCode, zxingcpp.BarcodeFormat.MicroQRCode):
-                return r.text
+                txt = (r.text or "").strip()
+                if txt:
+                    return txt
+    except Exception:
+        return None
+    return None
+
+
+def _cv_to_pil_gray(gray_img):
+    if cv2 is None or np is None:
+        return None
+    try:
+        if gray_img.ndim == 2:
+            return Image.fromarray(gray_img)
+        rgb = cv2.cvtColor(gray_img, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(rgb)
+    except Exception:
+        return None
+
+
+def _rotate_gray(gray_img, angle: int):
+    if angle == 0:
+        return gray_img
+    if cv2 is None:
+        return gray_img
+    if angle == 90:
+        return cv2.rotate(gray_img, cv2.ROTATE_90_CLOCKWISE)
+    if angle == 180:
+        return cv2.rotate(gray_img, cv2.ROTATE_180)
+    if angle == 270:
+        return cv2.rotate(gray_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return gray_img
+
+
+def _qr_variants(file_bytes: bytes):
+    variants = []
+    try:
+        pil_img = Image.open(io.BytesIO(file_bytes))
+        if pil_img.mode not in ("RGB", "L"):
+            pil_img = pil_img.convert("RGB")
+        variants.append(pil_img)
+    except Exception:
+        pass
+
+    if cv2 is None or np is None:
+        return variants
+
+    try:
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            return variants
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        sharpen = cv2.filter2D(clahe, -1, np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32))
+        otsu = cv2.threshold(sharpen, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        adaptive = cv2.adaptiveThreshold(
+            sharpen,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            7,
+        )
+        base_variants = [gray, clahe, sharpen, otsu, adaptive]
+        for base in base_variants:
+            for angle in (0, 90, 180, 270):
+                rotated = _rotate_gray(base, angle)
+                scale_variants = [rotated]
+                h, w = rotated.shape[:2]
+                for scale in (1.6, 2.0):
+                    nw = int(w * scale)
+                    nh = int(h * scale)
+                    if nw > 2600 or nh > 2600:
+                        continue
+                    scale_variants.append(cv2.resize(rotated, (nw, nh), interpolation=cv2.INTER_CUBIC))
+                for var in scale_variants:
+                    pil_var = _cv_to_pil_gray(var)
+                    if pil_var is not None:
+                        variants.append(pil_var)
+    except Exception:
+        pass
+    return variants
+
+
+def try_decode_qr(file_bytes: bytes) -> str | None:
+    """Thử giải mã QR code đa bước (grayscale/CLAHE/sharpen/threshold/rotate)."""
+    for candidate in _qr_variants(file_bytes):
+        decoded = _zxing_decode_qr(candidate)
+        if decoded:
+            return decoded
+
+    if cv2 is None or np is None:
+        return None
+    try:
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        detector = cv2.QRCodeDetector()
+        for angle in (0, 90, 180, 270):
+            rotated = _rotate_gray(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), angle)
+            decoded, _, _ = detector.detectAndDecode(rotated)
+            if decoded:
+                return decoded.strip()
     except Exception:
         pass
     return None
 
 
 def parse_cccd_qr(text: str) -> dict | None:
-    """
-    Parse QR CCCD (pipe-separated).
-    Format thường: so_cccd|so_cu|ngay_sinh_ddmmyyyy|ngay_het_han_ddmmyyyy|ho_ten|dia_chi[|gioi_tinh...]
-    Linh hoạt: tìm field đầu tiên là 12 chữ số trong 3 field đầu.
-    """
-    parts = text.strip().split("|")
-    if len(parts) < 6:
+    """Parse QR CCCD linh hoạt theo pattern thay vì map cứng theo index."""
+    raw = (text or "").strip()
+    if not raw:
         return None
 
-    # Tìm số CCCD (12 chữ số) trong 3 field đầu
+    parts = [p.strip() for p in re.split(r"[|\r\n;]+", raw) if p and p.strip()]
+    if not parts:
+        return None
+
+    now_year = datetime.now().year
+
+    def fold(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s or "")
+        s = "".join(ch for ch in s if not unicodedata.combining(ch))
+        return s.replace("đ", "d").replace("Đ", "D").lower()
+
+    def is_name_candidate(s: str) -> bool:
+        if not s:
+            return False
+        if re.search(r"\d", s):
+            return False
+        words = s.split()
+        if not (2 <= len(words) <= 6):
+            return False
+        fs = fold(s)
+        if re.search(
+            r"bo cong an|ministry|public security|cong hoa|socialist|identity|citizen|can cuoc|"
+            r"noi thuong tru|noi cu tru|place of|date of|quoc tich|nationality|que quan",
+            fs,
+        ):
+            return False
+        return True
+
+    def is_address_candidate(s: str) -> bool:
+        fs = fold(s)
+        return (
+            len(s) >= 10
+            and (
+                "," in s
+                or re.search(r"\b(thon|to dan pho|xa|phuong|huyen|quan|tinh|thanh pho|tp)\b", fs)
+            )
+        )
+
+    def parse_date(raw_date: str) -> str:
+        s = re.sub(r"\s+", "", raw_date or "")
+        if not s:
+            return ""
+        m = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", s)
+        if m:
+            dd = int(m.group(1))
+            mm = int(m.group(2))
+            yyyy = int(m.group(3))
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+            return ""
+        if re.fullmatch(r"\d{8}", s):
+            # ddmmyyyy
+            dd = int(s[0:2])
+            mm = int(s[2:4])
+            yyyy = int(s[4:8])
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+            # yyyymmdd fallback
+            yyyy = int(s[0:4])
+            mm = int(s[4:6])
+            dd = int(s[6:8])
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+        return ""
+
+    def collect_dates(part: str) -> list[str]:
+        out = []
+        compact = re.sub(r"\s+", "", part or "")
+        for m in re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{4}", compact):
+            d = parse_date(m)
+            if d:
+                out.append(d)
+        for m in re.findall(r"\d{8}", compact):
+            d = parse_date(m)
+            if d:
+                out.append(d)
+        if re.fullmatch(r"\d{16}", compact):
+            d1 = parse_date(compact[:8])
+            d2 = parse_date(compact[8:])
+            if d1:
+                out.append(d1)
+            if d2:
+                out.append(d2)
+        # dedupe preserve order
+        seen = set()
+        uniq = []
+        for d in out:
+            if d not in seen:
+                seen.add(d)
+                uniq.append(d)
+        return uniq
+
     cccd = ""
     cccd_idx = -1
-    for i, p in enumerate(parts[:3]):
-        if re.fullmatch(r"\d{12}", p.strip()):
-            cccd = p.strip()
-            cccd_idx = i
+    for idx, part in enumerate(parts):
+        m = re.search(r"(?<!\d)(\d{12})(?!\d)", part)
+        if m:
+            cccd = m.group(1)
+            cccd_idx = idx
             break
     if not cccd:
         return None
 
-    def fmt_date(s: str) -> str:
-        s = s.strip()
-        if re.fullmatch(r"\d{8}", s):
-            return f"{s[0:2]}/{s[2:4]}/{s[4:8]}"
-        return s
+    name = ""
+    birth = ""
+    issue = ""
+    expiry = ""
+    gender = ""
+    address = ""
 
-    # Lấy field tương đối từ vị trí cccd_idx
-    # Format chuẩn từ cccd_idx: [cccd, old_id, dob, doe, name, address, gender...]
-    def get(offset: int) -> str:
-        i = cccd_idx + offset
-        return parts[i].strip() if i < len(parts) else ""
+    # Label-first extraction
+    for i, part in enumerate(parts):
+        fs = fold(part)
+        label_val = part
+        if ":" in part:
+            label_val = part.split(":", 1)[1].strip()
+        if not name and re.search(r"ho va ten|ho ten|full name", fs) and label_val:
+            if is_name_candidate(label_val):
+                name = label_val
+            elif i + 1 < len(parts) and is_name_candidate(parts[i + 1]):
+                name = parts[i + 1]
+        if not gender and re.search(r"\b(nam|nu|nữ|male|female)\b", fs):
+            if re.search(r"\b(nam|male)\b", fs):
+                gender = "Nam"
+            elif re.search(r"\b(nu|nữ|female)\b", fs):
+                gender = "Nữ"
+        if not address and re.search(r"noi thuong tru|noi cu tru|place of residence", fs):
+            if label_val:
+                address = label_val
+            elif i + 1 < len(parts):
+                address = parts[i + 1].strip()
+        dvals = collect_dates(part)
+        if dvals:
+            if re.search(r"ngay sinh|date of birth", fs) and not birth:
+                birth = dvals[0]
+            if re.search(r"ngay cap|date of issue", fs) and not issue:
+                issue = dvals[0]
+            if re.search(r"ngay het han|date of expiry|co gia tri den|có giá trị đến", fs) and not expiry:
+                expiry = dvals[-1]
 
-    gioi_tinh_raw = get(6).lower()
-    gioi_tinh = "Nam" if gioi_tinh_raw == "nam" else ("Nữ" if gioi_tinh_raw in ("nữ", "nu") else "")
+    # Heuristic extraction
+    if not name:
+        preferred = []
+        if 0 <= cccd_idx + 1 < len(parts):
+            preferred.append(parts[cccd_idx + 1])
+        if 0 <= cccd_idx + 2 < len(parts):
+            preferred.append(parts[cccd_idx + 2])
+        for p in preferred + parts:
+            if is_name_candidate(p):
+                name = p
+                break
+
+    if not gender:
+        for part in parts:
+            fs = fold(part)
+            if re.search(r"\b(nam|male)\b", fs):
+                gender = "Nam"
+                break
+            if re.search(r"\b(nu|nữ|female)\b", fs):
+                gender = "Nữ"
+                break
+
+    if not address:
+        addr_candidates = [p for p in parts if is_address_candidate(p)]
+        if addr_candidates:
+            addr_candidates.sort(key=len, reverse=True)
+            address = addr_candidates[0]
+
+    all_dates = []
+    for part in parts:
+        all_dates.extend(collect_dates(part))
+
+    def to_year(d: str) -> int:
+        return int(d.split("/")[-1]) if d else 0
+
+    if all_dates:
+        if not birth:
+            birth_candidates = [d for d in all_dates if 1900 <= to_year(d) <= now_year]
+            if birth_candidates:
+                birth = sorted(birth_candidates, key=to_year)[0]
+        if not issue:
+            issue_candidates = [d for d in all_dates if 2000 <= to_year(d) <= now_year + 1 and d != birth]
+            if issue_candidates:
+                issue = sorted(issue_candidates, key=to_year)[0]
+        if not expiry:
+            expiry_candidates = [d for d in all_dates if to_year(d) >= now_year]
+            if expiry_candidates:
+                expiry = sorted(expiry_candidates, key=to_year)[-1]
+
+    # Keep only meaningful address text
+    if address:
+        fs_addr = fold(address)
+        if re.search(r"bo cong an|ministry|public security|quoc tich|nationality", fs_addr):
+            address = ""
 
     return {
-        "so_giay_to":   cccd,
-        "ngay_sinh":    fmt_date(get(2)),
-        "ngay_het_han": fmt_date(get(3)),
-        "ho_ten":       get(4),
-        "dia_chi":      get(5),
-        "gioi_tinh":    gioi_tinh,
+        "so_giay_to": cccd,
+        "ho_ten": (name or "").strip(),
+        "ngay_sinh": (birth or "").strip(),
+        "gioi_tinh": gender,
+        "dia_chi": (address or "").strip(),
+        "ngay_cap": (issue or "").strip(),
+        "ngay_het_han": (expiry or "").strip(),
     }
 
 
@@ -313,7 +586,7 @@ def group_documents(results: list) -> dict:
             "gioi_tinh":    (qr.get("gioi_tinh") if qr else None) or fd.get("gioi_tinh", ""),
             "dia_chi":      dia_chi,
             "ngay_het_han": qr["ngay_het_han"]  if qr else fd.get("ngay_het_han", ""),
-            "ngay_cap":     bd.get("ngay_cap", ""),
+            "ngay_cap":     (qr.get("ngay_cap") if qr else "") or bd.get("ngay_cap", ""),
             "_source":      "cccd" + ("+back" if back_match else " (thiếu mặt sau)"),
             "_side":        side,
             "_qr":          bool(qr),
@@ -342,7 +615,7 @@ def group_documents(results: list) -> dict:
             "gioi_tinh":    qr.get("gioi_tinh", "") if qr else "",
             "dia_chi":      dia_chi,
             "ngay_het_han": qr["ngay_het_han"]  if qr else "",
-            "ngay_cap":     bd.get("ngay_cap", ""),
+            "ngay_cap":     (qr.get("ngay_cap") if qr else "") or bd.get("ngay_cap", ""),
             "_source":      "cccd+back" if qr else "cccd_back only",
             "_qr":          bool(qr),
             "_files":       [back.get("filename", "")],

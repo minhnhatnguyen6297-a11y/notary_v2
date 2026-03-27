@@ -17,6 +17,7 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="Asia/Ho_Chi_Minh",
     enable_utc=False,
+    broker_connection_retry_on_startup=True,
 )
 
 # Ensure tasks are registered (Windows-friendly)

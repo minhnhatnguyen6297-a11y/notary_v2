@@ -2,7 +2,7 @@
 
 > Đọc file này trước khi làm bất kỳ thứ gì trong project.
 > Cập nhật khi có thay đổi kiến trúc hoặc fix bug xong.
-| 6 | ðŸŸ¡ MED | `celery_app.py` | n/a | Worker báº£o `Received unregistered task 'process_ocr_job'` â†’ job treo (âœ… FIXED 26/03/2026: thÃªm `autodiscover_tasks(["tasks"])`, cáº§n restart worker) |
+| 6 | 🟡 MED | `celery_app.py` | n/a | Worker báo `Received unregistered task 'process_ocr_job'` → job treo (✅ FIXED 26/03/2026: import tường minh `tasks` trong `celery_app.py`, cần restart worker) |
 
 ---
 
@@ -168,11 +168,19 @@ Hệ thống có 2 luồng trích xuất dữ liệu thẻ và giấy tờ chạ
    - Model: `gpt-4o-mini` hoặc `gemini-2.0-flash` (tự động fallback).
    - Ưu điểm: Hiểu ngữ cảnh, trích xuất JSON chính xác cao, không tốn RAM server.
    - Cấu hình: Key trong `.env`, model mặc định `gemini-2.0-flash`.
-2. **Local OCR (YOLO + EasyOCR + VietOCR) - Chạy Offline**:
+2. **Local OCR (YOLO + RapidOCR) - Chạy Offline**:
    - Route: `POST /api/ocr/analyze-local` (code trong `ocr_local.py`).
-   - Pipeline: tiền xử lý ảnh → **YOLO** cắt ảnh + nhận diện loại giấy tờ/mặt → **Quét QR** (nếu rõ) → **EasyOCR** detect text box → **VietOCR** nhận dạng text → regex lọc trường.
-   - Ưu điểm: 100% miễn phí, chạy CPU, có thêm phân loại giấy tờ/mặt và ưu tiên QR.
-   - Nhược điểm: nặng RAM/CPU; cần weights YOLO + VietOCR. Đã cài pre-load tại `main.py` (lifespan) để tránh crash.
+   - Pipeline chuẩn hóa:
+     - Quét **QR trước** (multi-pass, xoay 0/90/180/270).
+     - Nếu QR hợp lệ (`CCCD + name/birth/gender`): **tin QR 100% và dừng OCR text** cho ảnh đó.
+     - Nếu không có QR: chạy OCR fallback, ghép theo CCCD và áp dụng luật cứng địa chỉ theo vị trí mặt thẻ.
+   - Luật địa chỉ:
+     - CCCD cũ (trước 01/07/2024): lấy từ block `Nơi thường trú` ở **dưới cùng mặt trước**.
+     - CCCD mới (sau 01/07/2024): lấy từ block `Nơi cư trú` ở **trên cùng mặt sau**.
+   - Luật tên: ưu tiên `QR > mặt trước > MRZ`; MRZ chỉ dùng khi thiếu hoàn toàn.
+   - UI local hiển thị nguồn theo `QR/OCR + loại mặt`, không dùng nhãn `AI`.
+   - Ưu điểm: 100% miễn phí, chạy CPU, có thêm phân loại giấy tờ/mặt và ưu tiên QR tuyệt đối.
+   - Nhược điểm: vẫn cần OpenCV/ONNX Runtime; nếu còn bật YOLO thì vẫn phụ thuộc weights YOLO và Torch cho bước crop/phân loại.
 
 **Lưu ý UI**: Kết quả của cả 2 luồng đều đổ về Cùng Một Vùng `Staging Area` (`ocr-staging-area` trên `form.html`) để người dùng dò lại và quyết định trước khi đẩy vào People Pool.
 
@@ -181,7 +189,8 @@ Hệ thống có 2 luồng trích xuất dữ liệu thẻ và giấy tờ chạ
 ## Môi trường & Hệ thống
 
 - Để cài đặt nhanh repo này trên máy tính Windows mới, chạy file: **`setup.bat`**
-- File này tự động tạo `venv`, cài thư viện `requirements.txt` (loại bỏ các lib quá nặng) và tạo `.env` từ `.env.example`.
+- File này tự động tạo `venv`, cài thư viện `requirements.txt` và tạo `.env` từ `.env.example`.
+- Sau đó chỉ cần chạy **`run.bat`**: script này sẽ tự kiểm tra Local OCR và tự gọi `install_local_ocr.bat --auto` nếu máy còn thiếu dependency.
 
 ---
 
@@ -223,10 +232,11 @@ Hệ thống có 2 luồng trích xuất dữ liệu thẻ và giấy tờ chạ
 
 ```bash
 # Windows
-run.bat
+run.bat   # khoi dong ca server FastAPI va Celery worker Local OCR
 
 # Hoặc thủ công
-uvicorn main:app --reload --port 8000
+python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
+python -m uvicorn main:app --port 8000
 ```
 
 Mở: http://localhost:8000
@@ -251,9 +261,10 @@ Mở: http://localhost:8000
 - [x] Hiện nút "Local OCR" bị ẩn/disabled trong giao diện.
 - [x] Đồng bộ trạng thái Enable/Disable của nút AI và Local theo queue ảnh.
 - [x] Thu nhỏ ảnh trước khi gửi lên Cloud OCR để tiết kiệm token và tránh limit size.
-- [x] Triển khai pipeline Local OCR mới: tiền xử lý → **YOLO** cắt/nhận diện → **QR** → **EasyOCR** detect → **VietOCR** nhận dạng → regex lọc trường.
-- [x] Tối ưu Startup: warmup Local OCR (EasyOCR/VietOCR/YOLO) ở `main.py` để giảm crash/lỗi lần gọi đầu.
+- [x] Triển khai pipeline Local OCR mới: tiền xử lý → **YOLO** cắt/nhận diện → **QR** → **RapidOCR** nhận dạng → regex lọc trường.
+- [x] Tối ưu Startup: warmup Local OCR (RapidOCR/YOLO) ở `main.py` để giảm crash/lỗi lần gọi đầu.
 - [x] Cập nhật `install_local_ocr.bat` + `LOCAL_AI_INSTALL_GUIDE.md` theo pipeline mới.
+- [x] Tích hợp kiểm tra/cài Local OCR trực tiếp vào `run.bat`, không cần khởi động/cài riêng bằng tay ở lần đầu.
 
 ### 🚧 Đang làm dở (Doing / Pending)
 - [ ] Kiểm tra độ chính xác pipeline mới trên ảnh CCCD thật (nhiều góc chụp).
@@ -263,41 +274,45 @@ Mở: http://localhost:8000
 
 ---
 
-## ⚠️ Ghi chú quan trọng: Lỗi CPU không hỗ trợ AVX (Torch crash)
+## ⚠️ Ghi chú quan trọng: CPU không hỗ trợ AVX (Torch / YOLO crash)
 
-**Triệu chứng:** Khi bấm Local OCR, worker Celery bị tắt đột ngột. Log hiển thị:
+**Triệu chứng:** Khi bật Local OCR có YOLO, worker Celery có thể bị tắt đột ngột. Log thường hiển thị:
 - `Windows fatal exception: code 0xc000001d`
 - `Fatal Python error: Illegal instruction`
-- Stack trace đi vào `torch` → `easyocr` → `vietocr`
+- Stack trace đi vào `torch` hoặc thư viện phụ trợ của YOLO
 
-**Nguyên nhân gốc:** CPU không hỗ trợ AVX/AVX2 (ví dụ: Intel Pentium Gold G6405). PyTorch wheel hiện tại được build với AVX, nên khi EasyOCR/VietOCR gọi Torch sẽ crash cứng (không bắt được exception).
+**Nguyên nhân gốc:** Một số CPU cũ không hỗ trợ AVX/AVX2. PyTorch CPU wheel hiện tại thường được build với AVX, nên khi nhánh YOLO dùng Torch để cắt ảnh / phân loại giấy tờ, process có thể crash cứng.
 
-**Tác động:** Local OCR treo vĩnh viễn, worker chết ngay khi xử lý ảnh không có QR.
+**Phạm vi ảnh hưởng hiện tại:** Sau khi chuyển sang **RapidOCR**, lỗi này **không còn nằm ở text OCR nữa**. RapidOCR vẫn chạy được trên CPU thông thường; phần rủi ro còn lại chủ yếu nằm ở **YOLO + Torch**.
 
 ### Hướng xử lý đã thống nhất
-1. **Tạm thời giữ hệ thống chạy** bằng chế độ an toàn:
-   - `LOCAL_OCR_DISABLE_TORCH=1` → chỉ cho phép QR đi qua.
-   - Nếu không có QR thì trả lỗi rõ ràng thay vì crash.
-2. **Cố gắng "cứu EasyOCR"** theo 2 nhánh:
-   - **Nhánh A (ưu tiên, ít can thiệp):** tắt `EasyOCR quantize` và thử downgrade torch về bản CPU cũ hơn (1.10.x / 1.9.x).
-   - **Nhánh B (triệt để):** build PyTorch từ source với cấu hình **no-AVX** (tốn thời gian, rủi ro).
-3. **Không ép cài torch theo từng máy nếu không được phép**: vì mỗi máy trạm khác nhau có thể phát sinh lỗi tương tự.
+1. **Ưu tiên chế độ an toàn trên máy không có AVX**:
+   - đặt `LOCAL_OCR_DISABLE_TORCH=1`
+   - hệ thống vẫn chạy Local OCR bằng **RapidOCR trên full image**
+   - đổi lại sẽ mất bước crop / phân loại bằng YOLO
+2. **Chỉ bật YOLO trên máy có AVX ổn định**:
+   - khi cần độ chính xác cao hơn ở bước cắt ảnh
+   - khi đã xác nhận máy chạy Torch ổn
+3. **Không tùy biến Torch theo từng máy nếu chưa được phép**:
+   - vì rất dễ tạo chênh lệch môi trường giữa các máy trạm
+   - khó bảo trì khi force pull repo sang máy khác
 
 ### Note bắt buộc cho agent sau này
-**Trước khi sửa Pytorch**, hãy hỏi người dùng:
-- Có muốn **tùy biến torch theo cấu hình máy** hiện tại (chấp nhận rủi ro máy khác sẽ lỗi lại)?
-- Hay chuyển sang **VPS + Docker** để chạy OCR ổn định, tránh phụ thuộc phần cứng?
+**Trước khi sửa PyTorch / YOLO theo máy**, hãy hỏi người dùng:
+- Có muốn **tùy biến theo đúng cấu hình CPU hiện tại** không?
+- Hay ưu tiên **giữ Local OCR ở chế độ RapidOCR an toàn**?
+- Nếu cần YOLO nhưng máy không hỗ trợ AVX, có chấp nhận phương án **VPS / Docker riêng cho OCR** không?
 
-### Ý tưởng triển khai lần sau (gợi ý chi tiết)
-**Option 1: Sửa theo cấu hình máy local**
+### Hướng triển khai nếu gặp lại lỗi AVX
+**Option 1: Giữ local theo hướng ổn định**
 - Xác định CPU có AVX hay không.
-- Nếu không AVX:
-  - Tắt `EasyOCR quantize` trước.
-  - Nếu vẫn crash → downgrade torch (1.10.x / 1.9.x CPU).
-  - Nếu vẫn crash → build torch from source với no-AVX.
+- Nếu không có AVX:
+  - bật `LOCAL_OCR_DISABLE_TORCH=1`
+  - chạy `RapidOCR` trên full image
+  - không cố ép cài thêm Torch / YOLO trên máy đó
 
-**Option 2: Dùng VPS + Docker**
-- Chạy OCR pipeline trong container (Torch + EasyOCR + VietOCR ổn định).
+**Option 2: Tách YOLO sang môi trường riêng**
+- Chạy YOLO / OCR nặng trong VPS hoặc Docker ổn định hơn.
 - Máy trạm chỉ gọi API nội bộ.
-- Ưu điểm: ổn định, không lệ thuộc CPU yếu.
+- Ưu điểm: ít phụ thuộc phần cứng local.
 - Nhược điểm: cần hạ tầng và chi phí vận hành.

@@ -40,6 +40,38 @@ def migrate_customers_nullable():
     con.close()
 
 
+def _ensure_table_columns(cur, table_name: str, expected_columns: dict[str, str]):
+    cur.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    for column_name, column_sql in expected_columns.items():
+        if column_name not in existing_columns:
+            cur.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
+def migrate_inheritance_cases_schema():
+    """Them cac cot moi cho bang inheritance_cases tren DB cu."""
+    con = sqlite3.connect("notary.db")
+    cur = con.cursor()
+    _ensure_table_columns(cur, "inheritance_cases", {
+        "noi_niem_yet": "VARCHAR(200)",
+    })
+    con.commit()
+    con.close()
+
+
+def migrate_properties_schema():
+    """Them cac cot moi cho bang properties tren DB cu."""
+    con = sqlite3.connect("notary.db")
+    cur = con.cursor()
+    _ensure_table_columns(cur, "properties", {
+        "dien_tich": "FLOAT",
+        "loai_so": "VARCHAR(200)",
+        "land_rows_json": "TEXT",
+    })
+    con.commit()
+    con.close()
+
+
 def get_db():
     """Cung cấp kết nối DB cho mỗi request, tự đóng sau khi xong."""
     db = SessionLocal()

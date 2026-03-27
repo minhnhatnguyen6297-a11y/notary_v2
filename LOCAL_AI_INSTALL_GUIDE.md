@@ -1,6 +1,6 @@
-# Cẩm nang Kích hoạt Local OCR (YOLO + EasyOCR + VietOCR) trên Windows
+# Cẩm nang Kích hoạt Local OCR (YOLO + RapidOCR) trên Windows
 
-Nếu bạn muốn chạy mô-đun AI hạng nặng (OCR Offline) trực tiếp trên máy Windows để đạt được **100% chức năng** của Repo này, bạn buộc phải "dọn dẹp" lại môi trường máy tính để tránh lỗi DLL của thư viện C++ (PyTorch/OpenCV/YOLO).
+Nếu bạn muốn chạy mô-đun AI hạng nặng (OCR Offline) trực tiếp trên máy Windows để đạt được **100% chức năng** của Repo này, bạn buộc phải "dọn dẹp" lại môi trường máy tính để tránh lỗi DLL của thư viện C++ (PyTorch/OpenCV/YOLO) và giữ đường OCR text engine ở mức nhẹ hơn với RapidOCR.
 
 Dưới đây là 3 bước chuẩn chỉnh nhất dành cho người mới:
 
@@ -30,7 +30,8 @@ Python 3.10 là phiên bản hoàn hảo nhất, mọi file `wheel` (.whl) của
 Sau khi máy bạn đã "thay máu" hoàn tất, hãy quay lại thư mục Code (`notary_v2`):
 
 1. Bấm đúp **`setup.bat`** (Nó sẽ tạo ra 1 thư mục `venv` hoàn toàn mới bằng lõi Python 3.10 và cài các thư viện Web).
-2. Khi hoàn tất, bấm đúp **`install_local_ocr.bat`** (Mất khoảng 1-2 phút) để nó tải PyTorch bản chuẩn cho Python 3.10 cùng bộ **YOLO + EasyOCR + VietOCR**.
-3. Cuối cùng, bấm đúp **`run.bat`** để mở Server.
+2. Bấm đúp **`run.bat`** để mở Server. Ngay lần chạy đầu, script sẽ **tự kiểm tra và tự cài Local OCR** nếu máy còn thiếu bộ **YOLO + RapidOCR**.
+3. Script cài sẽ tự ghim lại **`numpy<2`** để tránh cảnh báo/xung đột giữa Torch và NumPy 2.x trên Windows.
+4. Chỉ khi bạn muốn cài trước bằng tay hoặc debug riêng, mới cần chạy **`install_local_ocr.bat`**.
 
 Bây giờ bạn có thể thử ném một tấm CCCD vào Web, bấm nút **`[ Local OCR (Miễn phí) ]`** và tận hưởng "con quái thú" AI chạy 100% Offline trên RAM máy trạm của bạn.
