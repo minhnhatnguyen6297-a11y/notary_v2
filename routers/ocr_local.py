@@ -43,6 +43,7 @@ VIETOCR_WEIGHTS = os.getenv("LOCAL_OCR_VIETOCR_WEIGHTS", "").strip()
 VIETOCR_DEVICE = os.getenv("LOCAL_OCR_VIETOCR_DEVICE", "cpu").strip()
 
 EASYOCR_LANGS = os.getenv("LOCAL_OCR_EASYOCR_LANGS", "vi,en")
+EASYOCR_QUANTIZE = os.getenv("LOCAL_OCR_EASYOCR_QUANTIZE", "1").strip() != "0"
 
 MIN_BOX_SCORE = float(os.getenv("LOCAL_OCR_MIN_BOX_SCORE", "0.3"))
 TEXT_LLM_MODEL = os.getenv("OCR_TEXT_LLM_MODEL", "gpt-4o-mini")
@@ -60,6 +61,10 @@ def _get_openai_key() -> str:
     if not key:
         key = _read_env().get("OPENAI_API_KEY", "")
     return key
+
+
+def _torch_disabled() -> bool:
+    return os.getenv("LOCAL_OCR_DISABLE_TORCH", "").strip() == "1"
 
 
 # ---------------------- Lazy-loaded models ----------------------
@@ -96,10 +101,20 @@ def _get_easyocr_reader():
     global _easyocr_reader
     if _easyocr_reader is not None:
         return _easyocr_reader
+    if _torch_disabled():
+        raise HTTPException(
+            status_code=500,
+            detail="Torch bi tat (LOCAL_OCR_DISABLE_TORCH=1).",
+        )
     try:
         import easyocr
         langs = [s.strip() for s in EASYOCR_LANGS.split(",") if s.strip()]
-        _easyocr_reader = easyocr.Reader(langs or ["vi", "en"], gpu=False, verbose=False)
+        _easyocr_reader = easyocr.Reader(
+            langs or ["vi", "en"],
+            gpu=False,
+            verbose=False,
+            quantize=EASYOCR_QUANTIZE,
+        )
     except ImportError:
         raise HTTPException(
             status_code=500,
@@ -114,6 +129,11 @@ def _get_vietocr_predictor():
     global _vietocr_predictor
     if _vietocr_predictor is not None:
         return _vietocr_predictor
+    if _torch_disabled():
+        raise HTTPException(
+            status_code=500,
+            detail="Torch bi tat (LOCAL_OCR_DISABLE_TORCH=1).",
+        )
     try:
         from vietocr.tool.predictor import Predictor
         from vietocr.tool.config import Cfg
@@ -448,6 +468,32 @@ def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
     img_bgr = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
     if img_bgr is None:
         raise ValueError("Khong doc duoc anh")
+
+    # Safe mode: avoid torch-based OCR to prevent hard crash on unsupported CPU.
+    if _torch_disabled():
+        if qr_text:
+            parsed = parse_cccd_qr(qr_text)
+            return {
+                "persons": [{
+                    "type": "person",
+                    "data": parsed or {},
+                    "_source": "QR only (safe mode)",
+                    "_qr": True,
+                    "_debug_lines": [],
+                }],
+                "properties": [],
+                "marriages": [],
+                "errors": [],
+                "summary": {
+                    "total_images": 1,
+                    "local_engine": "QR only (safe mode)",
+                },
+            }
+        raise RuntimeError(
+            "Torch/EasyOCR/VietOCR da bi tat. "
+            "May khong ho tro tap lenh CPU (AVX) hoac torch crash. "
+            "Hay cai torch phu hop hoac tat LOCAL_OCR_DISABLE_TORCH."
+        )
 
     img_bgr = _preprocess(img_bgr)
     crops = _detect_documents(img_bgr)

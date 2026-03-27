@@ -260,3 +260,44 @@ Mở: http://localhost:8000
 - [ ] Tinh chỉnh Regex trong `ocr_local.py` để bóc tách địa chỉ/họ tên chính xác hơn.
 - [ ] Xử lý trường hợp Server bị "Connection Reset" khi uvicorn tự reload trong lúc đang tải model.
 - [ ] Thêm thanh loading ProgressBar cho Local OCR vì nó chạy trên CPU nên sẽ chậm hơn Cloud (~5-10s/ảnh).
+
+---
+
+## ⚠️ Ghi chú quan trọng: Lỗi CPU không hỗ trợ AVX (Torch crash)
+
+**Triệu chứng:** Khi bấm Local OCR, worker Celery bị tắt đột ngột. Log hiển thị:
+- `Windows fatal exception: code 0xc000001d`
+- `Fatal Python error: Illegal instruction`
+- Stack trace đi vào `torch` → `easyocr` → `vietocr`
+
+**Nguyên nhân gốc:** CPU không hỗ trợ AVX/AVX2 (ví dụ: Intel Pentium Gold G6405). PyTorch wheel hiện tại được build với AVX, nên khi EasyOCR/VietOCR gọi Torch sẽ crash cứng (không bắt được exception).
+
+**Tác động:** Local OCR treo vĩnh viễn, worker chết ngay khi xử lý ảnh không có QR.
+
+### Hướng xử lý đã thống nhất
+1. **Tạm thời giữ hệ thống chạy** bằng chế độ an toàn:
+   - `LOCAL_OCR_DISABLE_TORCH=1` → chỉ cho phép QR đi qua.
+   - Nếu không có QR thì trả lỗi rõ ràng thay vì crash.
+2. **Cố gắng "cứu EasyOCR"** theo 2 nhánh:
+   - **Nhánh A (ưu tiên, ít can thiệp):** tắt `EasyOCR quantize` và thử downgrade torch về bản CPU cũ hơn (1.10.x / 1.9.x).
+   - **Nhánh B (triệt để):** build PyTorch từ source với cấu hình **no-AVX** (tốn thời gian, rủi ro).
+3. **Không ép cài torch theo từng máy nếu không được phép**: vì mỗi máy trạm khác nhau có thể phát sinh lỗi tương tự.
+
+### Note bắt buộc cho agent sau này
+**Trước khi sửa Pytorch**, hãy hỏi người dùng:
+- Có muốn **tùy biến torch theo cấu hình máy** hiện tại (chấp nhận rủi ro máy khác sẽ lỗi lại)?
+- Hay chuyển sang **VPS + Docker** để chạy OCR ổn định, tránh phụ thuộc phần cứng?
+
+### Ý tưởng triển khai lần sau (gợi ý chi tiết)
+**Option 1: Sửa theo cấu hình máy local**
+- Xác định CPU có AVX hay không.
+- Nếu không AVX:
+  - Tắt `EasyOCR quantize` trước.
+  - Nếu vẫn crash → downgrade torch (1.10.x / 1.9.x CPU).
+  - Nếu vẫn crash → build torch from source với no-AVX.
+
+**Option 2: Dùng VPS + Docker**
+- Chạy OCR pipeline trong container (Torch + EasyOCR + VietOCR ổn định).
+- Máy trạm chỉ gọi API nội bộ.
+- Ưu điểm: ổn định, không lệ thuộc CPU yếu.
+- Nhược điểm: cần hạ tầng và chi phí vận hành.

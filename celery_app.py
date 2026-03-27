@@ -19,5 +19,5 @@ celery_app.conf.update(
     enable_utc=False,
 )
 
-# Ensure tasks are registered
-celery_app.autodiscover_tasks(["tasks"])
+# Ensure tasks are registered (Windows-friendly)
+import tasks  # noqa: F401
