@@ -271,6 +271,7 @@ Mở: http://localhost:8000
 - [ ] Tinh chỉnh Regex trong `ocr_local.py` để bóc tách địa chỉ/họ tên chính xác hơn.
 - [ ] Xử lý trường hợp Server bị "Connection Reset" khi uvicorn tự reload trong lúc đang tải model.
 - [ ] Thêm thanh loading ProgressBar cho Local OCR vì nó chạy trên CPU nên sẽ chậm hơn Cloud (~5-10s/ảnh).
+- [ ] LLM Fallback (tự động sửa dấu/bù trường) đang tạm tắt để tối ưu tốc độ Local OCR; đã chuyển sang cơ chế bôi đỏ UI để người dùng tự sửa, và sẽ phát triển lại LLM Fallback trong tương lai.
 
 ---
 

@@ -24,7 +24,7 @@ def _delete_file(path: str | None):
 
 
 @celery_app.task(name="process_ocr_job")
-def process_ocr_job(job_id: str, qr_text: str | None = None):
+def process_ocr_job(job_id: str, qr_text: str | None = None, client_qr_failed: bool = False):
     db = SessionLocal()
     job = None
     try:
@@ -42,7 +42,11 @@ def process_ocr_job(job_id: str, qr_text: str | None = None):
         with open(job.temp_file_path, "rb") as f:
             file_bytes = f.read()
 
-        result = local_ocr_from_bytes(file_bytes, qr_text=qr_text)
+        result = local_ocr_from_bytes(
+            file_bytes,
+            qr_text=qr_text,
+            client_qr_failed=client_qr_failed,
+        )
         job.result_json = result
         job.status = "completed"
         job.error_message = None

@@ -1059,14 +1059,39 @@ def _build_field_sources(source_type: str, data: dict) -> dict:
     return out
 
 
-def _analyze_crop(crop: DocCrop, seeded_qr_text: str | None = None, allow_llm: bool = False) -> dict:
-    qr_data, qr_text = _try_qr_data_from_crop(crop, seeded_qr_text)
+_CRITICAL_WARNING_FIELDS = ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap")
+
+
+def _collect_warnings(data: dict) -> List[str]:
+    warnings: List[str] = []
+    for key in _CRITICAL_WARNING_FIELDS:
+        if not (data.get(key) or "").strip():
+            warnings.append(key)
+
+    ho_ten = (data.get("ho_ten") or "").strip()
+    if ho_ten and _count_vietnamese_diacritics(ho_ten) < 2 and "ho_ten" not in warnings:
+        warnings.append("ho_ten")
+
+    return warnings
+
+
+def _analyze_crop(
+    crop: DocCrop,
+    seeded_qr_text: str | None = None,
+    allow_llm: bool = False,
+    client_qr_failed: bool = False,
+) -> dict:
+    qr_data = None
+    qr_text = ""
+    if not client_qr_failed:
+        qr_data, qr_text = _try_qr_data_from_crop(crop, seeded_qr_text)
     doc_type_from_model = crop.doc_type if crop.doc_type != "unknown" else "unknown"
 
     # QR gate: neu QR hop le thi dung OCR text cho anh nay.
     if _is_valid_qr_data(qr_data):
         data = _build_qr_person_data(qr_data or {})
         data.pop("ngay_het_han", None)
+        warnings = _collect_warnings(data)
         return {
             "data": data,
             "doc_type": doc_type_from_model,
@@ -1078,6 +1103,7 @@ def _analyze_crop(crop: DocCrop, seeded_qr_text: str | None = None, allow_llm: b
             "source_type": "QR",
             "side": _infer_side(doc_type_from_model),
             "field_sources": _build_field_sources("QR", data),
+            "warnings": warnings,
         }
 
     ocr_boxes = _rapidocr_recognize(crop.img)
@@ -1105,6 +1131,7 @@ def _analyze_crop(crop: DocCrop, seeded_qr_text: str | None = None, allow_llm: b
         if restored:
             data["ho_ten"] = restored
 
+    warnings = _collect_warnings(data)
     return {
         "data": data,
         "doc_type": inferred_doc_type,
@@ -1116,10 +1143,15 @@ def _analyze_crop(crop: DocCrop, seeded_qr_text: str | None = None, allow_llm: b
         "source_type": "OCR",
         "side": _infer_side(inferred_doc_type),
         "field_sources": _build_field_sources("OCR", data),
+        "warnings": warnings,
     }
 
 
-def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
+def local_ocr_from_bytes(
+    file_bytes: bytes,
+    qr_text: str | None = None,
+    client_qr_failed: bool = False,
+) -> dict:
     _ensure_local_ocr_dependencies()
     img_np = np.frombuffer(file_bytes, np.uint8)
     img_bgr = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
@@ -1132,7 +1164,12 @@ def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
     candidates = []
     seeded_qr = qr_text
     for crop in crops:
-        analyzed = _analyze_crop(crop, seeded_qr_text=seeded_qr, allow_llm=True)
+        analyzed = _analyze_crop(
+            crop,
+            seeded_qr_text=seeded_qr,
+            allow_llm=False,
+            client_qr_failed=client_qr_failed,
+        )
         candidates.append(analyzed)
         seeded_qr = None
 
@@ -1147,6 +1184,7 @@ def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
 
     data = best["data"]
     raw_text = best["raw_text"]
+    warnings = best.get("warnings") or _collect_warnings(data)
 
     return {
         "persons": [{
@@ -1156,6 +1194,7 @@ def local_ocr_from_bytes(file_bytes: bytes, qr_text: str | None = None) -> dict:
             "source_type": best.get("source_type", "OCR"),
             "side": best.get("side", "unknown"),
             "field_sources": best.get("field_sources", {}),
+            "warnings": warnings,
         }],
         "properties": [],
         "marriages": [],
@@ -1216,6 +1255,7 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
                     best = {**c, "score": score}
             if best:
                 data = best["data"]
+                warnings = best.get("warnings") or _collect_warnings(data)
                 persons.append({
                     "type": "person",
                     "data": data,
@@ -1225,6 +1265,7 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
                     "source_type": best.get("source_type", "OCR"),
                     "side": best.get("side", "unknown"),
                     "field_sources": best.get("field_sources", {}),
+                    "warnings": warnings,
                     "_debug_lines": best["_lines"],
                 })
             else:
@@ -1247,7 +1288,11 @@ async def analyze_images_local(files: List[UploadFile] = File(...)):
 
 
 @router.post("/local/submit")
-async def submit_local_job(file: UploadFile = File(...), qr_text: str | None = Form(None)):
+async def submit_local_job(
+    file: UploadFile = File(...),
+    qr_text: str | None = Form(None),
+    client_qr_failed: bool = Form(False),
+):
     if not file:
         raise HTTPException(status_code=400, detail="Chua co file")
     _ensure_local_ocr_dependencies()
@@ -1279,7 +1324,7 @@ async def submit_local_job(file: UploadFile = File(...), qr_text: str | None = F
         db.close()
 
     from tasks import process_ocr_job
-    process_ocr_job.delay(job_id, qr_text)
+    process_ocr_job.delay(job_id, qr_text, client_qr_failed)
     return {"job_id": job_id, "status": "queued"}
 
 

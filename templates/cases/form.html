@@ -472,6 +472,12 @@ endif %}
       min-height: 12px;
     }
 
+    .ocr-input-warning {
+      border-color: #ef4444 !important;
+      background: #fef2f2 !important;
+      box-shadow: 0 0 0 .08rem rgba(239, 68, 68, .18) !important;
+    }
+
     .card-remove-btn {
       position: absolute;
       top: -8px;
@@ -3072,7 +3078,7 @@ endif %}
               delete qrWorkerPending[id];
               resolve(null);
             }
-          }, 5000);
+          }, 1500);
         });
       }
 
@@ -3507,6 +3513,11 @@ endif %}
         return out;
       }
 
+      function normalizeWarnings(value) {
+        if (!Array.isArray(value)) return [];
+        return value.map(v => String(v || '').trim()).filter(Boolean);
+      }
+
       function mergeOcrResultsInPlace() {
         const merged = [];
         const personByDoc = new Map();
@@ -3528,7 +3539,11 @@ endif %}
             continue;
           }
           if (!personByDoc.has(doc)) {
-            const first = { ...r, data: { ...(r.data || {}) } };
+            const warnings = Array.from(new Set([
+              ...normalizeWarnings(r.warnings),
+              ...normalizeWarnings(r.data?.warnings),
+            ]));
+            const first = { ...r, data: { ...(r.data || {}) }, warnings };
             personByDoc.set(doc, first);
             merged.push(first);
             continue;
@@ -3563,6 +3578,12 @@ endif %}
           if (!target.filename && r.filename) target.filename = r.filename;
           if (!target.document_type && r.document_type) target.document_type = r.document_type;
           target.field_sources = { ...(target.field_sources || {}), ...(r.field_sources || {}) };
+          target.warnings = Array.from(new Set([
+            ...normalizeWarnings(target.warnings),
+            ...normalizeWarnings(target.data?.warnings),
+            ...normalizeWarnings(r.warnings),
+            ...normalizeWarnings(r.data?.warnings),
+          ]));
         }
         ocrResults = merged;
       }
@@ -3690,7 +3711,15 @@ endif %}
             const person = parseQRToPerson(qrText);
             if (person) {
               item.status = 'qr';
-              item._result = { type: 'person', data: person, source: 'QR', source_type: 'QR', side: person.side || 'unknown', filename: item.name };
+              item._result = {
+                type: 'person',
+                data: person,
+                source: 'QR',
+                source_type: 'QR',
+                side: person.side || 'unknown',
+                warnings: [],
+                filename: item.name
+              };
               renderQueue();
               continue;
             }
@@ -3723,6 +3752,7 @@ endif %}
           const blob = item.file || await (await fetch(item.dataUrl)).blob();
           formData.append('file', blob, item.name);
           if (qrText) formData.append('qr_text', qrText);
+          if (!qrText) formData.append('client_qr_failed', 'true');
           const resp = await fetch('/api/ocr/local/submit', { method: 'POST', body: formData });
           if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
           const data = await resp.json();
@@ -3746,6 +3776,10 @@ endif %}
                 const r = persons[0];
                 const sourceType = String(r.source_type || (r._qr ? 'QR' : 'OCR')).toUpperCase() === 'QR' ? 'QR' : 'OCR';
                 const side = r.side || 'unknown';
+                const warnings = Array.from(new Set([
+                  ...(Array.isArray(r.warnings) ? r.warnings : []),
+                  ...(Array.isArray(r.data?.warnings) ? r.data.warnings : []),
+                ].map(v => String(v || '').trim()).filter(Boolean)));
                 item.status = sourceType === 'QR' ? 'qr' : 'ocr';
                 const docType = rjson.doc_type || 'UNKNOWN';
                 const personData = { ...(r.data || {}) };
@@ -3758,6 +3792,7 @@ endif %}
                   source: sourceType,
                   source_type: sourceType,
                   side,
+                  warnings,
                   filename: item.name,
                   document_type: docType
                 };
@@ -3793,12 +3828,8 @@ endif %}
         }
 
         try {
-          const jobs = [];
-          for (const item of needsOcr) {
-            await submitLocalJob(item, item._qrText);
-            jobs.push(pollLocalJob(item));
-          }
-          await Promise.all(jobs);
+          await Promise.all(needsOcr.map(item => submitLocalJob(item, item._qrText)));
+          await Promise.all(needsOcr.map(item => pollLocalJob(item)));
         } catch (e) {
           for (const item of needsOcr) { item.status = 'error'; item._errorMsg = e.message; renderQueue(); }
           updateLocalStatus(needsOcr);
@@ -3893,6 +3924,11 @@ endif %}
       function personCard(d, idx, result) {
         // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
+        const warningFields = new Set(
+          (Array.isArray(result?.warnings) ? result.warnings : [])
+            .map(v => String(v || '').trim())
+            .filter(Boolean)
+        );
 
         // Badge + note + supplement button theo nguồn
         let srcBadge, suppNote = '', suppBtn = '';
@@ -3917,10 +3953,10 @@ endif %}
         }
 
         const inp = (key, val, ph, flex = 'flex:1;min-width:80px;') =>
-          `<input type="text" class="form-control form-control-sm ocr-input" data-idx="${idx}" data-key="${key}"
+          `<input type="text" class="form-control form-control-sm ocr-input ${warningFields.has(key) ? 'ocr-input-warning' : ''}" data-idx="${idx}" data-key="${key}"
               value="${(val || '').replace(/"/g, '&quot;')}" placeholder="${ph}"
               style="font-size:13px;${flex}" oninput="ocrUpdateField(${idx},'${key}',this.value)">`;
-        const genderSel = `<select class="form-select form-select-sm ocr-input" data-idx="${idx}" data-key="gioi_tinh"
+        const genderSel = `<select class="form-select form-select-sm ocr-input ${warningFields.has('gioi_tinh') ? 'ocr-input-warning' : ''}" data-idx="${idx}" data-key="gioi_tinh"
             style="font-size:13px;flex:0 0 90px;" onchange="ocrUpdateField(${idx},'gioi_tinh',this.value)">
         <option value="">Giới tính</option>
         <option value="Nam" ${d.gioi_tinh === 'Nam' ? 'selected' : ''}>Nam</option>
@@ -4002,7 +4038,13 @@ endif %}
 
       // ── Cập nhật field khi user sửa ────────────────────────────────────────
       window.ocrUpdateField = function (idx, key, val) {
-        if (ocrResults[idx]?.data) ocrResults[idx].data[key] = val;
+        const row = ocrResults[idx];
+        if (row?.data) row.data[key] = val;
+        if (row && Array.isArray(row.warnings) && row.warnings.length) {
+          row.warnings = row.warnings.filter(w => String(w || '').trim() !== key);
+        }
+        const inputEl = document.querySelector(`.ocr-input[data-idx="${idx}"][data-key="${key}"]`);
+        if (inputEl) inputEl.classList.remove('ocr-input-warning');
       };
 
       // ── Auto-stage sau khi OCR xong ──────────────────────────────────────
