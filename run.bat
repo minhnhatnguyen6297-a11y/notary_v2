@@ -78,6 +78,79 @@ if errorlevel 1 (
 )
 echo [RUN] Local OCR san sang.
 
+:: 3.1 Tu dong bat model OCR rec tieng Viet/Latin neu co san local
+set "OCR_MODEL_DIR=%PROJECT_DIR%models\rapidocr"
+if not exist "%OCR_MODEL_DIR%" mkdir "%OCR_MODEL_DIR%"
+set "OCR_REC_MODEL="
+set "OCR_REC_KEYS="
+
+if defined LOCAL_OCR_REC_MODEL_PATH (
+  if exist "%LOCAL_OCR_REC_MODEL_PATH%" set "OCR_REC_MODEL=%LOCAL_OCR_REC_MODEL_PATH%"
+)
+if defined LOCAL_OCR_REC_KEYS_PATH (
+  if exist "%LOCAL_OCR_REC_KEYS_PATH%" set "OCR_REC_KEYS=%LOCAL_OCR_REC_KEYS_PATH%"
+)
+
+if not defined OCR_REC_MODEL (
+  for %%f in (
+    "%OCR_MODEL_DIR%\vi_PP-OCRv4_rec_infer.onnx"
+    "%OCR_MODEL_DIR%\vi_PP-OCRv3_rec_infer.onnx"
+    "%OCR_MODEL_DIR%\latin_PP-OCRv5_mobile_rec.onnx"
+    "%OCR_MODEL_DIR%\latin_PP-OCRv4_mobile_rec.onnx"
+    "%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx"
+    "%OCR_MODEL_DIR%\latin_PP-OCRv3_mobile_rec.onnx"
+  ) do (
+    if not defined OCR_REC_MODEL if exist "%%~f" set "OCR_REC_MODEL=%%~f"
+  )
+)
+
+if not defined OCR_REC_MODEL (
+  echo [RUN] Chua co OCR rec model local. Dang thu tai tu dong Latin model...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop';" ^
+    "$dir='%OCR_MODEL_DIR%'; New-Item -ItemType Directory -Force -Path $dir | Out-Null;" ^
+    "Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/breezedeus/cnocr-ppocr-latin_PP-OCRv3/resolve/main/latin_PP-OCRv3_rec_infer.onnx' -OutFile (Join-Path $dir 'latin_PP-OCRv3_rec_infer.onnx');" ^
+    "Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/latin_dict.txt' -OutFile (Join-Path $dir 'latin_dict.txt');"
+  if not errorlevel 1 (
+    if exist "%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx" set "OCR_REC_MODEL=%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx"
+    if exist "%OCR_MODEL_DIR%\latin_dict.txt" set "OCR_REC_KEYS=%OCR_MODEL_DIR%\latin_dict.txt"
+    echo [RUN] Da tai xong OCR rec model vao %OCR_MODEL_DIR%.
+  ) else (
+    echo [WARN] Tai model OCR tu dong that bai. Se fallback model mac dinh.
+  )
+)
+
+if not defined OCR_REC_KEYS (
+  for %%f in (
+    "%OCR_MODEL_DIR%\vi_dict.txt"
+    "%OCR_MODEL_DIR%\latin_dict.txt"
+    "%OCR_MODEL_DIR%\ppocr_keys_v1.txt"
+  ) do (
+    if not defined OCR_REC_KEYS if exist "%%~f" set "OCR_REC_KEYS=%%~f"
+  )
+)
+
+if defined OCR_REC_MODEL (
+  set "LOCAL_OCR_REC_MODEL_PATH=%OCR_REC_MODEL%"
+  if defined OCR_REC_KEYS (
+    set "LOCAL_OCR_REC_KEYS_PATH=%OCR_REC_KEYS%"
+  ) else (
+    set "LOCAL_OCR_REC_KEYS_PATH="
+  )
+  echo [RUN] Bat OCR rec model: %LOCAL_OCR_REC_MODEL_PATH%
+  if defined LOCAL_OCR_REC_KEYS_PATH (
+    echo [RUN] OCR rec keys      : %LOCAL_OCR_REC_KEYS_PATH%
+  ) else (
+    echo [RUN] OCR rec keys      : ^<khong can/khong tim thay^>
+  )
+) else (
+  set "LOCAL_OCR_REC_MODEL_PATH="
+  set "LOCAL_OCR_REC_KEYS_PATH="
+  echo [WARN] Chua tim thay model rec tieng Viet/Latin trong:
+  echo [WARN]   %OCR_MODEL_DIR%
+  echo [WARN] He thong se fallback model mac dinh - de mat dau tieng Viet.
+)
+
 :: 4. Dong tat ca process cu (server + worker)
 echo [RUN] Dong cac process cu...
 taskkill /F /FI "WINDOWTITLE eq Celery Worker" >nul 2>&1
@@ -102,17 +175,13 @@ echo [RUN] Khoi dong Celery worker...
 if not exist "logs" mkdir logs
 if not exist "tmp" mkdir tmp
 if not exist "tmp\ocr" mkdir tmp\ocr
-del /q "logs\celery_worker.log" >nul 2>&1
 del /q "ocr_jobs.db" >nul 2>&1
 del /q "tmp\ocr\*" >nul 2>&1
 set PYTHONFAULTHANDLER=1
 set TORCH_SHOW_CPP_STACKTRACES=1
 echo [RUN] Da don broker local cu (ocr_jobs.db) truoc khi boot worker.
-start "Celery Worker" /D "%PROJECT_DIR%" cmd /k ""%VENV_PYTHON%" -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO --logfile=logs\celery_worker.log"
+start "Celery Worker" /D "%PROJECT_DIR%" cmd /k ""%VENV_PYTHON%" -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO"
 timeout /t 2 /nobreak >nul
-if not exist "logs\celery_worker.log" (
-  echo [WARN] Worker chua tao log. Neu cua so worker trong, vui long chay lai run.bat.
-)
 
 :: 7. Chay server
 echo.
@@ -147,7 +216,7 @@ goto :WAIT_SERVER
 echo.
 echo [INFO] He thong da khoi dong (server + worker).
 echo        Mo trinh duyet: http://%HOST%:%PORT%
-echo        Log worker: logs\celery_worker.log
+echo        Xem log worker truc tiep tren cua so "Celery Worker".
 echo        De dung: dong 2 cua so Server va Celery Worker.
 echo.
 pause

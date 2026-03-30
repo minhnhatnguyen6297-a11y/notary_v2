@@ -3701,32 +3701,6 @@ endif %}
         btn.disabled = true;
         document.getElementById('ocr-btn-text-local').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang phân tích...';
 
-        const needsOcr = [];
-        for (const item of pending) {
-          item.status = 'processing';
-          renderQueue();
-          const qrText = await tryQRScan(item.dataUrl);
-          item._qrText = qrText || '';
-          if (qrText) {
-            const person = parseQRToPerson(qrText);
-            if (person) {
-              item.status = 'qr';
-              item._result = {
-                type: 'person',
-                data: person,
-                source: 'QR',
-                source_type: 'QR',
-                side: person.side || 'unknown',
-                warnings: [],
-                filename: item.name
-              };
-              renderQueue();
-              continue;
-            }
-          }
-          needsOcr.push(item);
-        }
-
         async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
         function setLocalStatus(text) {
           const el = document.getElementById('ocr-local-status');
@@ -3746,101 +3720,154 @@ endif %}
           if (done === total) return setLocalStatus(`Hoàn tất (${done}/${total})`);
           return setLocalStatus('Đang xử lý...');
         }
+        try {
+          const qrTexts = [];
+          const clientQrFailed = [];
+          for (const item of pending) {
+            item.status = 'processing';
+            renderQueue();
+            const qrText = await tryQRScan(item.dataUrl);
+            item._qrText = qrText || '';
+            qrTexts.push(item._qrText);
+            clientQrFailed.push(!qrText);
+          }
 
-        async function submitLocalJob(item, qrText) {
           const formData = new FormData();
-          const blob = item.file || await (await fetch(item.dataUrl)).blob();
-          formData.append('file', blob, item.name);
-          if (qrText) formData.append('qr_text', qrText);
-          if (!qrText) formData.append('client_qr_failed', 'true');
-          const resp = await fetch('/api/ocr/local/submit', { method: 'POST', body: formData });
-          if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
-          const data = await resp.json();
-          item._jobId = data.job_id;
-          item._queuedAt = Date.now();
-          item.status = 'queued';
+          for (const item of pending) {
+            const blob = item.file || await (await fetch(item.dataUrl)).blob();
+            formData.append('files', blob, item.name);
+            item._queuedAt = Date.now();
+            item.status = 'queued';
+          }
+          formData.append('qr_texts_json', JSON.stringify(qrTexts));
+          formData.append('client_qr_failed_json', JSON.stringify(clientQrFailed));
           renderQueue();
-          updateLocalStatus(needsOcr);
-        }
+          updateLocalStatus(pending);
 
-        async function pollLocalJob(item) {
+          const submitResp = await fetch('/api/ocr/local/submit-batch', { method: 'POST', body: formData });
+          if (!submitResp.ok) throw new Error(`Server lỗi ${submitResp.status}`);
+          const submitData = await submitResp.json();
+          const jobId = submitData.job_id;
+          if (!jobId) throw new Error('Không nhận được job_id từ server');
+
           const maxAttempts = 300; // ~10 phút
           for (let i = 0; i < maxAttempts; i++) {
-            const resp = await fetch(`/api/ocr/local/status/${item._jobId}`);
+            const resp = await fetch(`/api/ocr/local/status/${jobId}`);
             if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
             const data = await resp.json();
+
             if (data.status === 'completed') {
               const rjson = data.result_json || {};
-              const persons = rjson.persons || [];
-              if (persons.length) {
-                const r = persons[0];
-                const sourceType = String(r.source_type || (r._qr ? 'QR' : 'OCR')).toUpperCase() === 'QR' ? 'QR' : 'OCR';
-                const side = r.side || 'unknown';
+              const imageResults = Array.isArray(rjson.image_results) ? rjson.image_results : [];
+              const imageByIndex = new Map();
+              imageResults.forEach(ir => imageByIndex.set(Number(ir.index), ir));
+
+              for (let idx = 0; idx < pending.length; idx++) {
+                const item = pending[idx];
+                const ir = imageByIndex.get(idx);
+                if (!ir) {
+                  item.status = 'error';
+                  item._errorMsg = 'Không có kết quả ảnh';
+                  continue;
+                }
+                const src = String(ir.source_type || '').toUpperCase();
+                if (src === 'ERROR') {
+                  item.status = 'error';
+                  item._errorMsg = ir.error || 'Không nhận diện được nội dung';
+                } else if (src === 'QR') {
+                  item.status = 'qr';
+                } else if (src === 'OCR') {
+                  item.status = 'ocr';
+                } else {
+                  item.status = 'error';
+                  item._errorMsg = 'Không nhận diện được nội dung';
+                }
+              }
+
+              const persons = Array.isArray(rjson.persons) ? rjson.persons : [];
+              for (const p of persons) {
+                const sourceType = String(p.source_type || p.source || '').toUpperCase() === 'QR' ? 'QR' : 'OCR';
+                const side = p.side || 'unknown';
                 const warnings = Array.from(new Set([
-                  ...(Array.isArray(r.warnings) ? r.warnings : []),
-                  ...(Array.isArray(r.data?.warnings) ? r.data.warnings : []),
+                  ...(Array.isArray(p.warnings) ? p.warnings : []),
+                  ...(Array.isArray(p.data?.warnings) ? p.data.warnings : []),
                 ].map(v => String(v || '').trim()).filter(Boolean)));
-                item.status = sourceType === 'QR' ? 'qr' : 'ocr';
-                const docType = rjson.doc_type || 'UNKNOWN';
-                const personData = { ...(r.data || {}) };
+                const personData = { ...(p.data || {}) };
                 personData.source_type = sourceType;
                 personData.side = side;
-                if (r.field_sources) personData.field_sources = r.field_sources;
-                item._result = {
+                if (p.field_sources) personData.field_sources = p.field_sources;
+                if (!personData._raw_text && p.raw_text) personData._raw_text = p.raw_text;
+                ocrResults.push({
                   type: 'person',
                   data: personData,
                   source: sourceType,
                   source_type: sourceType,
                   side,
+                  profile: p.profile || personData.profile || 'unknown',
+                  field_sources: p.field_sources || {},
                   warnings,
-                  filename: item.name,
-                  document_type: docType
-                };
-                ocrResults.push(item._result);
-              } else {
+                  raw_text: personData._raw_text || p.raw_text || '',
+                  filename: Array.isArray(p._files) && p._files.length ? p._files[0] : ''
+                });
+              }
+
+              const summary = rjson.summary || {};
+              const qrHits = Number(summary.qr_hits || 0);
+              const ocrRuns = Number(summary.ocr_runs || 0);
+              const recModelMode = summary.rec_model_mode ? ` • model: ${summary.rec_model_mode}` : '';
+              setLocalStatus(`Hoàn tất (${pending.filter(i => i.status === 'ocr' || i.status === 'qr').length}/${pending.length}) • QR: ${qrHits} • OCR: ${ocrRuns}${recModelMode}`);
+              renderQueue();
+              break;
+            }
+
+            if (data.status === 'failed') {
+              for (const item of pending) {
                 item.status = 'error';
-                item._errorMsg = 'Không nhận diện được nội dung';
+                item._errorMsg = data.error_message || 'Không nhận diện được nội dung';
               }
               renderQueue();
-              updateLocalStatus(needsOcr);
-              return;
+              updateLocalStatus(pending);
+              throw new Error(data.error_message || 'Job OCR bị lỗi');
             }
-            if (data.status === 'failed') {
-              item.status = 'error';
-              item._errorMsg = data.error_message || 'Không nhận diện được nội dung';
-              renderQueue();
-              updateLocalStatus(needsOcr);
-              return;
+
+            for (const item of pending) {
+              item.status = data.status === 'processing' ? 'processing' : 'queued';
+              if (item.status === 'queued' && item._queuedAt && (Date.now() - item._queuedAt) > 45000 && !item._warnedQueued) {
+                item._warnedQueued = true;
+                showToast('OCR đang xếp hàng quá lâu. Hãy kiểm tra cửa sổ worker do run.bat mở ra.', 'warning');
+              }
             }
-            item.status = data.status === 'processing' ? 'processing' : 'queued';
             renderQueue();
-            updateLocalStatus(needsOcr);
-            if (item.status === 'queued' && item._queuedAt && (Date.now() - item._queuedAt) > 45000 && !item._warnedQueued) {
-              item._warnedQueued = true;
-              showToast('OCR đang xếp hàng quá lâu. Hãy kiểm tra cửa sổ worker do run.bat mở ra.', 'warning');
-            }
+            updateLocalStatus(pending);
             await sleep(2000);
           }
-          item.status = 'error';
-          item._errorMsg = 'Quá thời gian chờ OCR';
-          renderQueue();
-          updateLocalStatus(needsOcr);
-        }
 
-        try {
-          await Promise.all(needsOcr.map(item => submitLocalJob(item, item._qrText)));
-          await Promise.all(needsOcr.map(item => pollLocalJob(item)));
+          if (pending.some(i => i.status === 'processing' || i.status === 'queued')) {
+            for (const item of pending) {
+              if (item.status === 'processing' || item.status === 'queued') {
+                item.status = 'error';
+                item._errorMsg = 'Quá thời gian chờ OCR';
+              }
+            }
+            renderQueue();
+            updateLocalStatus(pending);
+          }
         } catch (e) {
-          for (const item of needsOcr) { item.status = 'error'; item._errorMsg = e.message; renderQueue(); }
-          updateLocalStatus(needsOcr);
+          for (const item of pending) {
+            if (item.status === 'processing' || item.status === 'queued') {
+              item.status = 'error';
+            }
+            item._errorMsg = e.message || 'Không nhận diện được nội dung';
+          }
+          renderQueue();
+          updateLocalStatus(pending);
           showToast('Lỗi OCR Local: ' + e.message, 'danger');
         }
 
-        for (const item of pending.filter(i => i.status === 'qr' && i._result)) ocrResults.push(item._result);
         mergeOcrResultsInPlace();
         renderResults();
         autoStageOcrResults();
-        updateLocalStatus(needsOcr);
+        updateLocalStatus(pending);
 
         btn.disabled = false;
         document.getElementById('ocr-btn-text-local').innerHTML = '<i class="bi bi-cpu me-1"></i>Local OCR (Miễn phí)';
@@ -3920,15 +3947,44 @@ endif %}
       function hasDiacritics(str) {
         return /[àáâãèéêìíòóôõùúăđĩũơưạảấầẩẫậắằẳẵặẹẻẽềếệỉịọỏốồổỗộớờởỡợụủứừửữựỳýỵỷỹ]/i.test(str || '');
       }
+      function countVietnameseDiacritics(str) {
+        let total = 0;
+        for (const ch of String(str || '')) {
+          if (ch === 'đ' || ch === 'Đ') total += 1;
+          const nfd = ch.normalize('NFD');
+          if (/[\u0300-\u036f]/.test(nfd)) total += 1;
+        }
+        return total;
+      }
 
       function personCard(d, idx, result) {
         // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
+        const sourceTagForRaw = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
+        const rawTextValue = sourceTagForRaw === 'OCR'
+          ? String((d._raw_text || d.raw_text || result?.raw_text || '') || '')
+          : '';
+        const rawTextEscaped = rawTextValue
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/`/g, '&#96;');
         const warningFields = new Set(
           (Array.isArray(result?.warnings) ? result.warnings : [])
             .map(v => String(v || '').trim())
             .filter(Boolean)
         );
+        const fieldSources = {
+          ...(d.field_sources || {}),
+          ...(result?.field_sources || {})
+        };
+        const nameSource = String(fieldSources.ho_ten || '').toLowerCase();
+        if (nameSource === 'ocr' && countVietnameseDiacritics(displayName) < 2) {
+          warningFields.add('ho_ten');
+        }
+        if (!String(d.dia_chi || '').trim()) {
+          warningFields.add('dia_chi');
+        }
 
         // Badge + note + supplement button theo nguồn
         let srcBadge, suppNote = '', suppBtn = '';
@@ -3962,6 +4018,15 @@ endif %}
         <option value="Nam" ${d.gioi_tinh === 'Nam' ? 'selected' : ''}>Nam</option>
         <option value="Nữ" ${d.gioi_tinh === 'Nữ' ? 'selected' : ''}>Nữ</option>
       </select>`;
+        const rawTextBlock = rawTextValue
+          ? `<div style="margin-top:6px;">
+              <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:12px;padding:2px 8px;" onclick="ocrToggleRawText(${idx})">
+                Xem Text Thô
+              </button>
+              <textarea id="ocr-raw-text-${idx}" class="form-control form-control-sm d-none" readonly
+                style="margin-top:6px;font-size:12px;line-height:1.4;min-height:110px;max-height:220px;overflow:auto;white-space:pre-wrap;">${rawTextEscaped}</textarea>
+            </div>`
+          : '';
 
         return `
     <div class="ocr-person-card" data-idx="${idx}"
@@ -3978,6 +4043,7 @@ endif %}
       <div style="margin-top:5px;">
         ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
       </div>
+      ${rawTextBlock}
     </div>`;
       }
 
@@ -4045,6 +4111,11 @@ endif %}
         }
         const inputEl = document.querySelector(`.ocr-input[data-idx="${idx}"][data-key="${key}"]`);
         if (inputEl) inputEl.classList.remove('ocr-input-warning');
+      };
+      window.ocrToggleRawText = function (idx) {
+        const area = document.getElementById(`ocr-raw-text-${idx}`);
+        if (!area) return;
+        area.classList.toggle('d-none');
       };
 
       // ── Auto-stage sau khi OCR xong ──────────────────────────────────────

@@ -317,3 +317,82 @@ Mở: http://localhost:8000
 - Máy trạm chỉ gọi API nội bộ.
 - Ưu điểm: ít phụ thuộc phần cứng local.
 - Nhược điểm: cần hạ tầng và chi phí vận hành.
+
+---
+
+## 🆕 Local OCR Batch QR-First (Update 30/03/2026)
+
+### Muc tieu ban cap nhat nay
+- On dinh ket qua khi quet nhieu anh CCCD trong 1 lan.
+- Uu tien QR truoc OCR text de tranh quet du thua.
+- Giu output tuong thich UI cu (`side`, `doc_type`) va bo sung `profile`.
+- Them kenh canh bao do de nguoi dung sua tay nhanh.
+
+### API moi (Batch)
+- Endpoint moi: `POST /api/ocr/local/submit-batch`
+- Input: `files[]`, `qr_texts_json`, `client_qr_failed_json` (optional).
+- Output submit: `{ job_id, status }`
+- Poll ket qua: `GET /api/ocr/local/status/{job_id}`
+- `result_json` mo rong:
+  - `persons[]`: danh sach person da merge.
+  - `image_results[]`: ket qua theo dung index file dau vao.
+  - `summary`: thong ke batch (`qr_hits`, `ocr_runs`, `skipped_by_qr`, `rec_model_mode`...).
+
+### Orchestration flow moi (chi tiet)
+1. Nhan full batch anh -> tien xu ly tung anh.
+2. Quet QR hang loat truoc (uu tien `qr_texts_json`, fallback decode server).
+3. Probe nhanh anh khong co QR de doan `side/profile/cccd`.
+4. Ghep cap front/back theo CCCD va tin hieu profile.
+5. Neu cap anh da du du lieu tu QR -> skip OCR text cho anh do.
+6. Chi OCR full cho anh/mat the con thieu thong tin.
+7. Merge deterministic theo quy tac nguon:
+   - `QR` > `OCR front` > `OCR back/MRZ` (chi fallback khi trong).
+8. Tra ket qua tong hop + warning + raw_text.
+
+### Profile 4 loai CCCD
+- `cccd_front_old`
+- `cccd_back_old`
+- `cccd_front_new`
+- `cccd_back_new`
+
+Rule extraction theo profile:
+- `cccd_front_new`: khong lay dia chi.
+- `cccd_front_old`: dia chi bat buoc tim theo block `Noi thuong tru`.
+- `cccd_back_new`: dia chi bat buoc tim theo block `Noi cu tru`.
+- `cccd_back_old`: khong lay dia chi.
+
+### Normalize OCR text
+- Co bo normalize de sua loi OCR pho bien truoc regex.
+- Muc tieu: giam sai lech label khi OCR mat dau/mat ky tu.
+- Du lieu raw van duoc giu de truy vet va debug.
+
+### Address multi-line (fix trong batch moi)
+- Khi thay label dia chi (`Noi thuong tru` / `Noi cu tru`), he thong noi nhieu dong ben duoi.
+- Dung khi gap stop words (vi du: `Noi dang ky khai sinh`, `Ngay cap`, `IDVNM`, `Que quan`, `Quoc tich`, `Gioi tinh`, `Ngay sinh`, `Ngay het han`).
+- Muc tieu: tranh mat dia chi do OCR cat thanh nhieu box.
+
+### Human-in-the-loop warnings
+- Backend tra `warnings[]` cho image/person co dau hieu rui ro.
+- Frontend boi do input:
+  - `ho_ten` neu source la OCR va ten gan nhu khong dau.
+  - `dia_chi` neu rong.
+- Khi nguoi dung sua tay field, canh bao do duoc go ngay.
+
+### Raw text debug
+- Backend in raw text RapidOCR ra terminal worker de debug regex/model.
+- UI co nut/khung `Xem Text Tho` de copy raw text tung the.
+- Anh da co QR hop le se duoc skip OCR parse (khong nen co raw OCR text parser cho anh do).
+
+### Cau hinh RapidOCR rec model tieng Viet/Latin
+- Env:
+  - `LOCAL_OCR_REC_MODEL_PATH`
+  - `LOCAL_OCR_REC_KEYS_PATH`
+- Neu co file hop le: khoi tao RapidOCR voi custom rec model.
+- Neu thieu file hoac init loi: in warning va fallback RapidOCR mac dinh (graceful fallback, khong lam sap luong).
+- `summary.rec_model_mode` cho biet mode dang chay.
+
+### run.bat da cap nhat
+- Tu dong tim rec model trong `models/rapidocr`.
+- Neu chua co model: thu tai tu dong model Latin + dict.
+- Khoi dong Celery worker de log hien truc tiep tren cua so `Celery Worker`.
+- Muc tieu: giup de theo doi QR-first/OCR/warnings ma khong can mo them log file.
