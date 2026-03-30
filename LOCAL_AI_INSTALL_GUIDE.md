@@ -1,37 +1,35 @@
-# Cẩm nang Kích hoạt Local OCR (YOLO + RapidOCR) trên Windows
+# Huong dan Local OCR RapidOCR-only tren Windows
 
-Nếu bạn muốn chạy mô-đun AI hạng nặng (OCR Offline) trực tiếp trên máy Windows để đạt được **100% chức năng** của Repo này, bạn buộc phải "dọn dẹp" lại môi trường máy tính để tránh lỗi DLL của thư viện C++ (PyTorch/OpenCV/YOLO) và giữ đường OCR text engine ở mức nhẹ hơn với RapidOCR.
+Tai lieu nay da duoc chuan hoa theo huong RapidOCR-only.
+He thong local OCR khong con dung module crop/phn loai rieng.
 
-Dưới đây là 3 bước chuẩn chỉnh nhất dành cho người mới:
+## Buoc 1: Cai Python
 
----
+1. Cai Python 3.10.x (khuyen nghi 3.10.11, 64-bit).
+2. Bat buoc tick `Add python.exe to PATH` khi cai.
 
-### Bước 1: Dọn dẹp tàn dư cũ (Python 3.13)
-Phiên bản Python 3.13 hiện tại của bạn là nguyên nhân chính gây ra lỗi `c10.dll` vì các thư viện AI chưa hỗ trợ kịp.
-1. Mở **Control Panel** -> **Uninstall a program**.
-2. Tìm chữ `Python 3.13` (kể cả bản Launcher) và ấn **Uninstall** toàn bộ.
-3. Quay lại thư mục code dự án của bạn (thư mục chứa `run.bat`), tìm thư mục **`venv`** và **XÓA THẲNG TAY** thư mục đó (Shift + Delete). *Lý do: thư mục này đang chứa các thư viện tải bằng lỗi 3.13 cũ, giữ lại sẽ gây lỗi.*
+## Buoc 2: Khoi tao moi truong
 
-### Bước 2: Cài đặt Python "Quốc dân" 3.10
-Python 3.10 là phiên bản hoàn hảo nhất, mọi file `wheel` (.whl) của AI đều gắn liền với nó, giúp máy không bao giờ phải tự build C++.
-1. Nhấp vào link tải **Python 3.10.11 (64-bit)**: [Windows installer (64-bit)](https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe)
-2. Mở file `.exe` vừa tải. **[CỰC KỲ QUAN TRỌNG]**: Ở màn hình cài đặt đầu tiên, bạn bắt buộc phải tích chọn ô **`Add python.exe to PATH`** ở góc dưới cùng bên trái.
-3. Nhấp `Install Now` và đợi hoàn thiện.
+1. Chay `setup.bat` de tao `venv` va cai thu vien nen.
+2. File `.env` duoc tao tu `.env.example` neu chua ton tai.
 
-### Bước 3: Tiêm "Thuốc trợ lực" C++ (Runtime DLL)
-Để Windows không bao giờ than phiền về các file `.dll` vắng mặt khi kích hoạt PyTorch hoặc OpenCV.
-1. Nhấp vào link tải từ Microsoft: [VC_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-2. Cài đặt file vừa tải vào máy (rất nhanh, chỉ 5 giây).
-3. (Khuyến nghị) Khởi động lại máy tính 1 lần để Windows nạp DLL nền.
+## Buoc 3: Cai Local OCR
 
----
+1. Chay `run.bat`.
+2. Script se tu kiem tra Local OCR va goi `install_local_ocr.bat --auto` neu thieu dependency.
+3. Neu muon cai truoc bang tay, chay `install_local_ocr.bat`.
+4. Neu may co NVIDIA CUDA va muon dung GPU, cai them:
+   - `pip install -r requirements-gpu.txt`
 
-### Bước 4: Khởi chạy 100% Sức mạnh App
-Sau khi máy bạn đã "thay máu" hoàn tất, hãy quay lại thư mục Code (`notary_v2`):
+## Luong xu ly hien tai
 
-1. Bấm đúp **`setup.bat`** (Nó sẽ tạo ra 1 thư mục `venv` hoàn toàn mới bằng lõi Python 3.10 và cài các thư viện Web).
-2. Bấm đúp **`run.bat`** để mở Server. Ngay lần chạy đầu, script sẽ **tự kiểm tra và tự cài Local OCR** nếu máy còn thiếu bộ **YOLO + RapidOCR**.
-3. Script cài sẽ tự ghim lại **`numpy<2`** để tránh cảnh báo/xung đột giữa Torch và NumPy 2.x trên Windows.
-4. Chỉ khi bạn muốn cài trước bằng tay hoặc debug riêng, mới cần chạy **`install_local_ocr.bat`**.
+- Frontend uu tien QR truoc.
+- Backend Local OCR dung Smart Crop OpenCV (soft fallback ve full image).
+- Backend luon co rescue pass quet QR, khong bi chan boi `client_qr_failed`.
+- `summary.local_engine` se tra ve `RapidOCR (CPU)` hoac `RapidOCR (GPU)`.
 
-Bây giờ bạn có thể thử ném một tấm CCCD vào Web, bấm nút **`[ Local OCR (Miễn phí) ]`** và tận hưởng "con quái thú" AI chạy 100% Offline trên RAM máy trạm của bạn.
+## Kiem tra nhanh sau cai dat
+
+1. Mo `http://127.0.0.1:8000`.
+2. Vao modal OCR anh va upload bo anh test.
+3. Xac nhan queue chay duoc va poll trang thai tra ket qua binh thuong.

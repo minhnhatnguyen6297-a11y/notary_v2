@@ -80,7 +80,7 @@ set "PYTHON_VER=%PYTHON_VER_RAW%"
 echo [OK] Da tim thay Python phien ban %PYTHON_VER%
 if %PY_MAJ% EQU 3 if %PY_MIN% GTR 10 (
     echo [WARN] Local OCR on dinh nhat tren Python 3.10.x.
-    echo [WARN] Neu can YOLO + RapidOCR, uu tien Python 3.10.11 de tranh loi DLL/wheel.
+    echo [WARN] Neu can RapidOCR local on dinh, uu tien Python 3.10.11.
 )
 
 :: 2. Khoi tao Virtual Environment
@@ -151,11 +151,11 @@ echo ========================================================
 echo De khoi dong Web + worker OCR:
 echo "run.bat"
 echo.
-echo run.bat se tu kiem tra va cai Local OCR ^(YOLO + RapidOCR^) neu may dang thieu.
+echo run.bat se tu kiem tra va cai Local OCR ^(RapidOCR^) neu may dang thieu.
 echo.
 echo Ghi chu:
 echo - Local OCR on dinh nhat tren Python 3.10.11
 echo - install_local_ocr.bat van co the chay tay neu ban muon cai truoc
-echo - Script install_local_ocr.bat se tu ghim numpy^<2 de tranh xung dot voi Torch
+echo - Script install_local_ocr.bat se tu ghim numpy^<2 de dam bao on dinh ONNX/OpenCV
 echo.
 pause

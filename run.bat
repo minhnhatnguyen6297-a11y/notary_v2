@@ -62,7 +62,7 @@ if not exist "%VENV_PYTHON%" (
 
 :: 3. Kiem tra Local OCR dependency
 echo [RUN] Kiem tra Local OCR...
-"%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, ultralytics; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
+"%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
 if errorlevel 1 (
   echo [RUN] Thieu hoac lech dependency Local OCR. Dang tu cai dat...
   call "%PROJECT_DIR%install_local_ocr.bat" --auto
@@ -70,7 +70,7 @@ if errorlevel 1 (
     echo [LOI] Khong the cai dat Local OCR tu dong.
     pause & exit /b 1
   )
-  "%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, ultralytics; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
+  "%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
   if errorlevel 1 (
     echo [LOI] Local OCR van chua san sang sau khi cai dat.
     pause & exit /b 1
@@ -178,7 +178,6 @@ if not exist "tmp\ocr" mkdir tmp\ocr
 del /q "ocr_jobs.db" >nul 2>&1
 del /q "tmp\ocr\*" >nul 2>&1
 set PYTHONFAULTHANDLER=1
-set TORCH_SHOW_CPP_STACKTRACES=1
 echo [RUN] Da don broker local cu (ocr_jobs.db) truoc khi boot worker.
 start "Celery Worker" /D "%PROJECT_DIR%" cmd /k ""%VENV_PYTHON%" -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO"
 timeout /t 2 /nobreak >nul

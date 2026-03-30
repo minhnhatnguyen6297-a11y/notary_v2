@@ -3010,7 +3010,7 @@ endif %}
       });
 
       // ── Resize ảnh (client-side, canvas) ──────────────────────────────────
-      async function resizeImage(file, maxPx = 1000) {
+      async function resizeImage(file, maxPx = 1000, quality = 0.82) {
         return new Promise(resolve => {
           const img = new Image();
           img.onload = () => {
@@ -3023,9 +3023,19 @@ endif %}
               const reader = new FileReader();
               reader.onload = ev => resolve({ dataUrl: ev.target.result, sizeKB: Math.round(blob.size / 1024) });
               reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.82);
+            }, 'image/jpeg', quality);
           };
           img.src = URL.createObjectURL(file);
+        });
+      }
+
+      async function fileToDataUrl(file) {
+        return new Promise(resolve => {
+          if (!file) return resolve(null);
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result || null);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
         });
       }
 
@@ -3047,26 +3057,6 @@ endif %}
         };
       }
 
-      async function resizeDataUrl(dataUrl, maxPx = 800) {
-        return new Promise(resolve => {
-          const img = new Image();
-          img.onload = () => {
-            const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.round(img.width * scale);
-            canvas.height = Math.round(img.height * scale);
-            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(blob => {
-              const reader = new FileReader();
-              reader.onload = ev => resolve({ dataUrl: ev.target.result, sizeKB: Math.round(blob.size / 1024) });
-              reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.82);
-          };
-          img.onerror = () => resolve({ dataUrl, sizeKB: 0 });
-          img.src = dataUrl;
-        });
-      }
-
       function scanQrWorker(dataUrl) {
         return new Promise(resolve => {
           if (!qrWorker) return resolve(null);
@@ -3078,7 +3068,7 @@ endif %}
               delete qrWorkerPending[id];
               resolve(null);
             }
-          }, 1500);
+          }, 3000);
         });
       }
 
@@ -3086,8 +3076,7 @@ endif %}
         if (!dataUrl) return null;
         initQrWorker();
         if (!qrWorker || typeof jsQR === 'undefined') return null;
-        const resized = await resizeDataUrl(dataUrl, 800);
-        return await scanQrWorker(resized.dataUrl);
+        return await scanQrWorker(dataUrl);
       }
 
       // ── Parse QR data → person object ─────────────────────────────────────
@@ -3221,12 +3210,16 @@ endif %}
         for (const f of Array.from(files)) {
           if (!f || !f.type.startsWith('image/')) continue;
           const id = Date.now() + '_' + Math.random().toString(36).slice(2);
-          const entry = { id, file: f, name: f.name, dataUrl: null, status: 'pending', sizeKB: 0 };
+          const entry = { id, file: f, name: f.name, dataUrl: null, qrDataUrl: null, status: 'pending', sizeKB: 0 };
           imageQueue.push(entry);
           renderQueue();
-          const { dataUrl, sizeKB } = await resizeImage(f, 1000);
-          entry.dataUrl = dataUrl;
-          entry.sizeKB = sizeKB;
+          const [preview, qrDataUrl] = await Promise.all([
+            resizeImage(f, 1000),
+            fileToDataUrl(f),
+          ]);
+          entry.dataUrl = preview?.dataUrl || null;
+          entry.sizeKB = preview?.sizeKB || 0;
+          entry.qrDataUrl = qrDataUrl || entry.dataUrl;
           renderQueue();
         }
         document.getElementById('ocr-btn-extract').disabled = !imageQueue.length;
@@ -3603,7 +3596,7 @@ endif %}
         for (const item of pending) {
           item.status = 'processing';
           renderQueue();
-          const qrText = await tryQRScan(item.dataUrl);
+          const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
           if (qrText) {
             const person = parseQRToPerson(qrText);
             if (person) {
@@ -3726,7 +3719,7 @@ endif %}
           for (const item of pending) {
             item.status = 'processing';
             renderQueue();
-            const qrText = await tryQRScan(item.dataUrl);
+            const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
             item._qrText = qrText || '';
             qrTexts.push(item._qrText);
             clientQrFailed.push(!qrText);

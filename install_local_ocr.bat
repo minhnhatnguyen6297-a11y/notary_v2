@@ -12,12 +12,11 @@ if /I "%~1"=="--auto" set "AUTO_MODE=1"
 cd /d "%PROJECT_DIR%"
 
 echo ========================================================
-echo      CAI DAT MODULE LOCAL OCR (YOLO + RapidOCR)
+echo      CAI DAT MODULE LOCAL OCR (RapidOCR-Only)
 echo ========================================================
 echo.
-echo [CANH BAO]: Module nay nang khoang 2-3GB, phu thuoc vao C++ loi
-echo va thuong xuyen xung dot Windows neu Python > 3.10.
-echo De tranh loi 'c10.dll', ban NEN dung Python 3.10.
+echo [INFO ] Goi cai dat nay toi uu cho RapidOCR + ONNX Runtime.
+echo [INFO ] Local OCR da duoc toi gian theo RapidOCR-only.
 echo.
 
 if "%AUTO_MODE%"=="0" pause
@@ -37,14 +36,6 @@ if not exist "%VENV_PIP%" (
 echo [*] Don dependency OCR cu (neu co)...
 "%VENV_PIP%" uninstall -y easyocr vietocr opencv-python opencv-python-headless >nul 2>&1
 
-echo [*] Cai dat PyTorch phien ban on dinh (CPU) cho YOLO...
-"%VENV_PIP%" install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cpu
-if errorlevel 1 (
-    echo [Loi] PyTorch...
-    if "%AUTO_MODE%"=="0" pause
-    exit /b 1
-)
-
 echo [*] Cai dat RapidOCR + ONNX Runtime + OpenCV...
 "%VENV_PIP%" install rapidocr-onnxruntime onnxruntime opencv-python==4.10.0.84 "numpy<2"
 if errorlevel 1 (
@@ -53,15 +44,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [*] Cai dat YOLO (Ultralytics) de cat anh + nhan dien loai giay to...
-"%VENV_PIP%" install ultralytics
-if errorlevel 1 (
-    echo [Loi] YOLO...
-    if "%AUTO_MODE%"=="0" pause
-    exit /b 1
-)
-
-echo [*] Khoa lai baseline NumPy de tranh xung dot voi Torch...
+echo [*] Khoa lai baseline NumPy de dam bao on dinh ONNX/OpenCV...
 "%VENV_PIP%" install "numpy<2"
 if errorlevel 1 (
     echo [Loi] NumPy baseline...
@@ -71,7 +54,7 @@ if errorlevel 1 (
 
 echo.
 echo ========================================================
-echo   CAI DAT THANH CONG! Tinh nang Local OCR da duoc mo khoa
+echo   CAI DAT THANH CONG! Local OCR RapidOCR da san sang
 echo ========================================================
 echo.
 
