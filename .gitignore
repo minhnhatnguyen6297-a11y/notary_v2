@@ -8,3 +8,5 @@ __pycache__/
 .vscode/
 logs/
 tmp/
+deploy/vps/ssh_credentials.env
+deploy/vps/bin/

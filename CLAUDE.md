@@ -21,6 +21,20 @@ python -m uvicorn main:app --port 8000
 
 URL mac dinh: `http://127.0.0.1:8000`
 
+## VPS one-click
+```bash
+bash install_vps.sh
+```
+
+Sau khi cai dat:
+- Quan ly service: `bash deploy/vps/manage_services.sh status|restart|logs`
+- Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
+
+## SSH 1-click cho team Windows
+- Tao file `deploy/vps/ssh_credentials.env` tu mau `deploy/vps/ssh_credentials.example`
+- Double-click `connect_vps.bat` de vao VPS
+- Tai lieu: `docs/VPS_CONNECT_ONE_CLICK.md`
+
 ## Local OCR - RapidOCR Only
 
 ### Muc tieu
