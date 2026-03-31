@@ -30,6 +30,7 @@ For internal team usage, this repo supports true one-click launch from Windows:
 Double-click:
 
 - `connect_vps.bat`
+- `view_vps_logs.bat` (live logs)
 
 Or run:
 
@@ -39,6 +40,13 @@ connect_vps.bat
 
 On first run, script auto-downloads `plink.exe` to `deploy/vps/bin/`.
 No manual SSH typing is needed.
+
+## 2.1) View logs live
+
+Double-click `view_vps_logs.bat` to stream:
+
+- `logs/web.log`
+- `logs/worker.log`
 
 ## 3) Notes
 
