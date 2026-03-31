@@ -5,6 +5,7 @@ import traceback
 import time
 import faulthandler
 import logging
+import sys
 
 from celery_app import celery_app
 from database import SessionLocal
@@ -13,9 +14,24 @@ from observability import configure_process_logging
 from routers.ocr_local import local_ocr_batch_from_inputs, local_ocr_from_bytes
 
 faulthandler.enable()
-WORKER_LOG_PATH = configure_process_logging("worker")
 _logger = logging.getLogger("ocr_worker")
-_logger.info("Worker logging initialized at %s", WORKER_LOG_PATH)
+_WORKER_LOGGING_READY = False
+
+
+def _ensure_worker_logging() -> None:
+    global _WORKER_LOGGING_READY
+    if _WORKER_LOGGING_READY:
+        return
+    argv = " ".join(sys.argv).lower()
+    is_celery_runtime = "celery" in argv or os.getenv("FORCE_WORKER_LOGGING", "0") == "1"
+    if not is_celery_runtime:
+        return
+    worker_log_path = configure_process_logging("worker")
+    _logger.info("Worker logging initialized at %s", worker_log_path)
+    _WORKER_LOGGING_READY = True
+
+
+_ensure_worker_logging()
 
 
 def _ms(seconds: float) -> float:
@@ -64,6 +80,7 @@ def _parse_json_array(raw: str | None):
 
 @celery_app.task(name="process_ocr_job")
 def process_ocr_job(job_id: str, qr_text: str | None = None, client_qr_failed: bool = False):
+    _ensure_worker_logging()
     db = SessionLocal()
     job = None
     try:
@@ -132,6 +149,7 @@ def process_ocr_batch_job(
     qr_texts_json: str | None = None,
     client_qr_failed_json: str | None = None,
 ):
+    _ensure_worker_logging()
     db = SessionLocal()
     job = None
     try:
