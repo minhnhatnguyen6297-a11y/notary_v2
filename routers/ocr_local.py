@@ -56,6 +56,24 @@ LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE = int(os.getenv("LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE
 LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE = float(os.getenv("LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE", "0.20"))
 
 _ENV_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+_REC_MODEL_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "models", "rapidocr"))
+_VI_REC_MODEL_CANDIDATES = [
+    os.path.join(_REC_MODEL_DIR, "vi_PP-OCRv4_rec_infer.onnx"),
+    os.path.join(_REC_MODEL_DIR, "vi_PP-OCRv3_rec_infer.onnx"),
+]
+_LATIN_REC_MODEL_CANDIDATES = [
+    os.path.join(_REC_MODEL_DIR, "latin_PP-OCRv5_mobile_rec.onnx"),
+    os.path.join(_REC_MODEL_DIR, "latin_PP-OCRv4_mobile_rec.onnx"),
+    os.path.join(_REC_MODEL_DIR, "latin_PP-OCRv3_rec_infer.onnx"),
+    os.path.join(_REC_MODEL_DIR, "latin_PP-OCRv3_mobile_rec.onnx"),
+]
+_VI_REC_KEYS_CANDIDATES = [
+    os.path.join(_REC_MODEL_DIR, "vi_dict.txt"),
+]
+_LATIN_REC_KEYS_CANDIDATES = [
+    os.path.join(_REC_MODEL_DIR, "latin_dict.txt"),
+    os.path.join(_REC_MODEL_DIR, "ppocr_keys_v1.txt"),
+]
 
 
 def _read_env() -> dict:
@@ -68,6 +86,58 @@ def _get_openai_key() -> str:
     if not key:
         key = _read_env().get("OPENAI_API_KEY", "")
     return key
+
+
+def _pick_existing_path(candidates: List[str]) -> str:
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return ""
+
+
+def _describe_rec_model_path(path: str) -> str:
+    base = os.path.basename(path or "").lower()
+    if base.startswith("vi_"):
+        return "vi_rec"
+    if "latin" in base:
+        return "latin_rec"
+    if path:
+        return "custom_rec"
+    return "default"
+
+
+def _resolve_rec_assets() -> tuple[str, str]:
+    env_model_path = LOCAL_OCR_REC_MODEL_PATH
+    env_keys_path = LOCAL_OCR_REC_KEYS_PATH
+    vi_model_path = _pick_existing_path(_VI_REC_MODEL_CANDIDATES)
+    latin_model_path = _pick_existing_path(_LATIN_REC_MODEL_CANDIDATES)
+    vi_keys_path = _pick_existing_path(_VI_REC_KEYS_CANDIDATES)
+    latin_keys_path = _pick_existing_path(_LATIN_REC_KEYS_CANDIDATES)
+
+    selected_model_path = env_model_path if env_model_path and os.path.exists(env_model_path) else ""
+    selected_keys_path = env_keys_path if env_keys_path and os.path.exists(env_keys_path) else ""
+
+    if selected_model_path:
+        current_mode = _describe_rec_model_path(selected_model_path)
+        if current_mode == "latin_rec" and vi_model_path:
+            _logger.info(
+                "Phat hien model tieng Viet, uu tien dung thay cho model Latin tu env: %s -> %s",
+                selected_model_path,
+                vi_model_path,
+            )
+            selected_model_path = vi_model_path
+            if not selected_keys_path or "latin" in os.path.basename(selected_keys_path).lower():
+                selected_keys_path = vi_keys_path or selected_keys_path
+    else:
+        selected_model_path = vi_model_path or latin_model_path
+
+    if not selected_keys_path:
+        if _describe_rec_model_path(selected_model_path) == "vi_rec":
+            selected_keys_path = vi_keys_path or latin_keys_path
+        else:
+            selected_keys_path = latin_keys_path or vi_keys_path
+
+    return selected_model_path, selected_keys_path
 
 
 # ---------------------- Lazy-loaded models ----------------------
@@ -151,8 +221,7 @@ def _get_rapidocr_engine():
             available_providers = []
             prefer_cuda = False
 
-        rec_model_path = LOCAL_OCR_REC_MODEL_PATH
-        rec_keys_path = LOCAL_OCR_REC_KEYS_PATH
+        rec_model_path, rec_keys_path = _resolve_rec_assets()
         custom_kwargs = {}
 
         if rec_model_path:
@@ -181,12 +250,16 @@ def _get_rapidocr_engine():
         if custom_kwargs.get("rec_model_path"):
             try:
                 _rapidocr_engine = RapidOCR(**custom_kwargs)
-                _rapidocr_rec_mode = "vi_rec"
-                _logger.info("RapidOCR khoi dong voi rec model tieng Viet: %s", custom_kwargs["rec_model_path"])
+                _rapidocr_rec_mode = _describe_rec_model_path(custom_kwargs["rec_model_path"])
+                _logger.info(
+                    "RapidOCR khoi dong voi rec model: %s (%s)",
+                    custom_kwargs["rec_model_path"],
+                    _rapidocr_rec_mode,
+                )
                 print(f"[OCR_LOCAL] RapidOCR rec model mode: {_rapidocr_rec_mode}")
             except Exception as e:
                 _logger.warning(
-                    "Khoi dong RapidOCR voi rec model tieng Viet that bai (%s). Fallback model mac dinh.",
+                    "Khoi dong RapidOCR voi rec model custom that bai (%s). Fallback model mac dinh.",
                     e,
                 )
                 fallback_kwargs = {}
@@ -196,7 +269,7 @@ def _get_rapidocr_engine():
                     fallback_kwargs["rec_use_cuda"] = True
                 _rapidocr_engine = RapidOCR(**fallback_kwargs)
                 _rapidocr_rec_mode = "default_fallback"
-                print(f"[OCR_LOCAL][WARNING] RapidOCR fallback mode: {_rapidocr_rec_mode} (khong dung duoc model tieng Viet)")
+                print(f"[OCR_LOCAL][WARNING] RapidOCR fallback mode: {_rapidocr_rec_mode} (khong dung duoc model custom)")
         else:
             _rapidocr_engine = RapidOCR(**custom_kwargs)
             _rapidocr_rec_mode = "default"

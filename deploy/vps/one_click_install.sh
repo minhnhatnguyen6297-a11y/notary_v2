@@ -85,6 +85,19 @@ set_env_if_empty_or_missing() {
   fi
 }
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local escaped
+  escaped="$(escape_sed_replacement "$value")"
+
+  if grep -Eq "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -185,21 +198,45 @@ download_default_ocr_model() {
   [[ "$DOWNLOAD_OCR_MODEL" == "1" ]] || return 0
 
   local model_dir="$APP_DIR/models/rapidocr"
-  local rec_model="$model_dir/latin_PP-OCRv3_rec_infer.onnx"
-  local rec_keys="$model_dir/latin_dict.txt"
+  local vi_model_v4="$model_dir/vi_PP-OCRv4_rec_infer.onnx"
+  local vi_model_v3="$model_dir/vi_PP-OCRv3_rec_infer.onnx"
+  local vi_keys="$model_dir/vi_dict.txt"
+  local latin_model="$model_dir/latin_PP-OCRv3_rec_infer.onnx"
+  local latin_keys="$model_dir/latin_dict.txt"
+  local rec_model=""
+  local rec_keys=""
 
-  if [[ ! -f "$rec_model" ]]; then
+  if [[ ! -f "$latin_model" ]]; then
     log "Tai OCR rec model mac dinh (latin)..."
-    curl -fL "https://huggingface.co/breezedeus/cnocr-ppocr-latin_PP-OCRv3/resolve/main/latin_PP-OCRv3_rec_infer.onnx" -o "$rec_model"
+    curl -fL "https://huggingface.co/breezedeus/cnocr-ppocr-latin_PP-OCRv3/resolve/main/latin_PP-OCRv3_rec_infer.onnx" -o "$latin_model"
   fi
 
-  if [[ ! -f "$rec_keys" ]]; then
+  if [[ ! -f "$latin_keys" ]]; then
     log "Tai OCR rec dictionary..."
-    curl -fL "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/latin_dict.txt" -o "$rec_keys"
+    curl -fL "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/latin_dict.txt" -o "$latin_keys"
   fi
 
-  set_env_if_empty_or_missing "LOCAL_OCR_REC_MODEL_PATH" "$rec_model"
-  set_env_if_empty_or_missing "LOCAL_OCR_REC_KEYS_PATH" "$rec_keys"
+  if [[ -f "$vi_model_v4" ]]; then
+    rec_model="$vi_model_v4"
+  elif [[ -f "$vi_model_v3" ]]; then
+    rec_model="$vi_model_v3"
+  else
+    rec_model="$latin_model"
+  fi
+
+  if [[ "$rec_model" == "$vi_model_v4" || "$rec_model" == "$vi_model_v3" ]]; then
+    if [[ -f "$vi_keys" ]]; then
+      rec_keys="$vi_keys"
+    else
+      rec_keys="$latin_keys"
+    fi
+  else
+    rec_keys="$latin_keys"
+  fi
+
+  log "Chon OCR rec model: $rec_model"
+  set_env_value "LOCAL_OCR_REC_MODEL_PATH" "$rec_model"
+  set_env_value "LOCAL_OCR_REC_KEYS_PATH" "$rec_keys"
 }
 
 install_systemd_services() {
