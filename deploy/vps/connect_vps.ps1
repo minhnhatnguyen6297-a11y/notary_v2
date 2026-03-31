@@ -20,7 +20,7 @@ function Read-KeyValueFile {
         $idx = $line.IndexOf("=")
         if ($idx -lt 1) { return }
 
-        $key = $line.Substring(0, $idx).Trim()
+        $key = $line.Substring(0, $idx).Trim().TrimStart([char]0xFEFF)
         $value = $line.Substring($idx + 1).Trim()
 
         if (
@@ -33,6 +33,21 @@ function Read-KeyValueFile {
         $result[$key] = $value
     }
     return $result
+}
+
+function Get-ConfigValue {
+    param(
+        [hashtable]$Config,
+        [string]$Key
+    )
+    if (-not $Config.ContainsKey($Key)) {
+        return ""
+    }
+    $value = $Config[$Key]
+    if ($null -eq $value) {
+        return ""
+    }
+    return $value.ToString().Trim()
 }
 
 try {
@@ -51,13 +66,13 @@ try {
     }
 
     $cfg = Read-KeyValueFile -Path $ConfigPath
-    $host = ($cfg["VPS_HOST"] | ForEach-Object { $_.ToString().Trim() })
-    $port = ($cfg["VPS_PORT"] | ForEach-Object { $_.ToString().Trim() })
-    $user = ($cfg["VPS_USER"] | ForEach-Object { $_.ToString().Trim() })
-    $password = ($cfg["VPS_PASSWORD"] | ForEach-Object { $_.ToString().Trim() })
-    $hostKey = ($cfg["VPS_HOSTKEY"] | ForEach-Object { $_.ToString().Trim() })
+    $vpsHost = Get-ConfigValue -Config $cfg -Key "VPS_HOST"
+    $port = Get-ConfigValue -Config $cfg -Key "VPS_PORT"
+    $user = Get-ConfigValue -Config $cfg -Key "VPS_USER"
+    $password = Get-ConfigValue -Config $cfg -Key "VPS_PASSWORD"
+    $hostKey = Get-ConfigValue -Config $cfg -Key "VPS_HOSTKEY"
 
-    if ([string]::IsNullOrWhiteSpace($host)) { throw "Thieu VPS_HOST trong $ConfigPath" }
+    if ([string]::IsNullOrWhiteSpace($vpsHost)) { throw "Thieu VPS_HOST trong $ConfigPath" }
     if ([string]::IsNullOrWhiteSpace($user)) { throw "Thieu VPS_USER trong $ConfigPath" }
     if ([string]::IsNullOrWhiteSpace($password)) { throw "Thieu VPS_PASSWORD trong $ConfigPath" }
     if ([string]::IsNullOrWhiteSpace($port)) { $port = "22" }
@@ -72,11 +87,22 @@ try {
             -OutFile $plinkPath
     }
 
-    $sshTarget = "$user@$host"
+    $sshTarget = "$user@$vpsHost"
+    $remoteCommand = "cd notary_v2 && (git pull --ff-only || true) && (bash deploy/vps/one_click_install.sh || bash install_vps.sh); exec bash"
     $plinkArgs = @("-ssh", $sshTarget, "-P", $port, "-pw", $password)
     if (-not [string]::IsNullOrWhiteSpace($hostKey)) {
-        $plinkArgs += @("-hostkey", $hostKey)
+        $plinkArgs += @("-batch")
+        $hostKeys = New-Object System.Collections.Generic.List[string]
+        $hostKeys.Add($hostKey) | Out-Null
+        if ($hostKey -match "(SHA256:[A-Za-z0-9+/=]+)") {
+            $hostKeys.Add($Matches[1]) | Out-Null
+        }
+        $uniqueHostKeys = $hostKeys | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+        foreach ($key in $uniqueHostKeys) {
+            $plinkArgs += @("-hostkey", $key)
+        }
     }
+    $plinkArgs += @("-t", $remoteCommand)
 
     Log-Info "Dang ket noi ${sshTarget}:$port ..."
     & $plinkPath @plinkArgs

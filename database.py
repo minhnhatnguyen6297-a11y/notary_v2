@@ -41,6 +41,13 @@ def migrate_customers_nullable():
 
 
 def _ensure_table_columns(cur, table_name: str, expected_columns: dict[str, str]):
+    cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    )
+    if cur.fetchone() is None:
+        return
+
     cur.execute(f"PRAGMA table_info({table_name})")
     existing_columns = {row[1] for row in cur.fetchall()}
     for column_name, column_sql in expected_columns.items():
