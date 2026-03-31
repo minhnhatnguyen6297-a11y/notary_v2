@@ -18,6 +18,7 @@ celery_app.conf.update(
     timezone="Asia/Ho_Chi_Minh",
     enable_utc=False,
     broker_connection_retry_on_startup=True,
+    worker_hijack_root_logger=False,
 )
 
 # Ensure tasks are registered (Windows-friendly)
