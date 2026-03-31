@@ -47,7 +47,7 @@ TEXT_LLM_MODEL = os.getenv("OCR_TEXT_LLM_MODEL", "gpt-4o-mini")
 LOCAL_OCR_REC_MODEL_PATH = os.getenv("LOCAL_OCR_REC_MODEL_PATH", "").strip()
 LOCAL_OCR_REC_KEYS_PATH = os.getenv("LOCAL_OCR_REC_KEYS_PATH", "").strip()
 LOCAL_OCR_SMART_CROP_MIN_CONF = float(os.getenv("LOCAL_OCR_SMART_CROP_MIN_CONF", "0.22"))
-LOCAL_OCR_MAX_SIDE_LEN = int(os.getenv("LOCAL_OCR_MAX_SIDE_LEN", "1200"))
+LOCAL_OCR_MAX_SIDE_LEN = int(os.getenv("LOCAL_OCR_MAX_SIDE_LEN", "1536"))
 LOCAL_OCR_TIMING_LOG = os.getenv("LOCAL_OCR_TIMING_LOG", "1").strip().lower() not in {"0", "false", "no", "off"}
 LOCAL_OCR_TIMING_SLOW_MS = float(os.getenv("LOCAL_OCR_TIMING_SLOW_MS", "1500"))
 LOCAL_OCR_TRIAGE_V2 = os.getenv("LOCAL_OCR_TRIAGE_V2", "1").strip().lower() not in {"0", "false", "no", "off"}
@@ -117,18 +117,7 @@ def _resolve_rec_assets() -> tuple[str, str]:
     selected_model_path = env_model_path if env_model_path and os.path.exists(env_model_path) else ""
     selected_keys_path = env_keys_path if env_keys_path and os.path.exists(env_keys_path) else ""
 
-    if selected_model_path:
-        current_mode = _describe_rec_model_path(selected_model_path)
-        if current_mode == "latin_rec" and vi_model_path:
-            _logger.info(
-                "Phat hien model tieng Viet, uu tien dung thay cho model Latin tu env: %s -> %s",
-                selected_model_path,
-                vi_model_path,
-            )
-            selected_model_path = vi_model_path
-            if not selected_keys_path or "latin" in os.path.basename(selected_keys_path).lower():
-                selected_keys_path = vi_keys_path or selected_keys_path
-    else:
+    if not selected_model_path:
         selected_model_path = vi_model_path or latin_model_path
 
     if not selected_keys_path:
@@ -422,7 +411,11 @@ def _resize_long_side(img_bgr: np.ndarray, max_side: int = LOCAL_OCR_MAX_SIDE_LE
 def _preprocess(img_bgr: np.ndarray) -> np.ndarray:
     """Light preprocessing for OCR."""
     img = img_bgr.copy()
-    # Keep a light sharpen pass for small text.
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+    img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    # Keep a light sharpen pass for small text after contrast enhancement.
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
     img = cv2.filter2D(img, -1, kernel)
     return img

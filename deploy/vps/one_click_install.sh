@@ -190,6 +190,7 @@ setup_env_and_dirs() {
   # Ensure queue config exists even when user starts from a custom env file.
   set_env_if_empty_or_missing "CELERY_BROKER_URL" "sqlalchemy+sqlite:///./ocr_jobs.db"
   set_env_if_empty_or_missing "CELERY_RESULT_BACKEND" "db+sqlite:///./ocr_jobs.db"
+  set_env_if_empty_or_missing "LOCAL_OCR_MAX_SIDE_LEN" "1536"
   set_env_if_empty_or_missing "LOCAL_OCR_TIMING_LOG" "1"
   set_env_if_empty_or_missing "LOCAL_OCR_TIMING_SLOW_MS" "1500"
 }
