@@ -98,11 +98,12 @@ def _log_timing(event: str, level: str = "info", **fields) -> None:
 
 def _ensure_local_ocr_dependencies() -> None:
     if _LOCAL_OCR_IMPORT_ERROR:
+        _logger.error("Local OCR dependencies missing: %s", _LOCAL_OCR_IMPORT_ERROR)
         raise HTTPException(
             status_code=503,
             detail=(
                 "Local OCR chua duoc cai dat day du. "
-                "Hay chay install_local_ocr.bat. "
+                "Hay cai dependency Local OCR (VPS: bash install_vps.sh). "
                 f"Chi tiet: {_LOCAL_OCR_IMPORT_ERROR}"
             ),
         )
@@ -223,13 +224,15 @@ def _get_rapidocr_engine():
     return _rapidocr_engine
 
 
-def warmup_local_ocr():
+def warmup_local_ocr() -> tuple[bool, str]:
     """Warmup for startup (optional)."""
     try:
         _ensure_local_ocr_dependencies()
         _get_rapidocr_engine()
-    except Exception:
-        pass
+        return True, ""
+    except Exception as e:
+        _logger.exception("Local OCR warmup failed: %s", e)
+        return False, str(e)
 
 
 def _needs_llm_fallback(data: dict) -> bool:

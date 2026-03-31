@@ -29,10 +29,11 @@ bash install_vps.sh
 Sau khi cai dat:
 - Quan ly service: `bash deploy/vps/manage_services.sh status|restart|logs`
 - Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
+- Log file tren VPS: `logs/web.log`, `logs/worker.log`
 
 ## SSH 1-click cho team Windows
 - Tao file `deploy/vps/ssh_credentials.env` tu mau `deploy/vps/ssh_credentials.example`
-- Double-click `connect_vps.bat` de vao VPS
+- Double-click `connect_vps.bat` de auto khoi dong app va mo trinh duyet
 - Tai lieu: `docs/VPS_CONNECT_ONE_CLICK.md`
 
 ## Local OCR - RapidOCR Only

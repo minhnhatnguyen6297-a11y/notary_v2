@@ -11,6 +11,7 @@ APP_PORT="8000"
 INSTALL_SYSTEM_PACKAGES="1"
 INSTALL_SYSTEMD="1"
 DOWNLOAD_OCR_MODEL="1"
+INSTALL_LOCAL_OCR_DEPS="1"
 
 APT_PACKAGES=(
   python3
@@ -47,6 +48,7 @@ Options:
   --skip-system-packages     Skip apt package installation.
   --without-systemd          Skip systemd service setup.
   --without-ocr-model        Skip OCR model auto download.
+  --without-local-ocr-deps   Skip Local OCR Python dependency installation.
   -h, --help                 Show this help.
 USAGE
 }
@@ -113,6 +115,10 @@ parse_args() {
         DOWNLOAD_OCR_MODEL="0"
         shift
         ;;
+      --without-local-ocr-deps)
+        INSTALL_LOCAL_OCR_DEPS="0"
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -148,6 +154,16 @@ setup_python_env() {
   "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 }
 
+install_local_ocr_python_deps() {
+  [[ "$INSTALL_LOCAL_OCR_DEPS" == "1" ]] || return 0
+  local req_file="$APP_DIR/requirements-local-ocr.txt"
+  if [[ ! -f "$req_file" ]]; then
+    die "Khong tim thay $req_file"
+  fi
+  log "Cai dependencies Local OCR..."
+  "$APP_DIR/venv/bin/pip" install -r "$req_file"
+}
+
 setup_env_and_dirs() {
   cd "$APP_DIR"
 
@@ -161,6 +177,8 @@ setup_env_and_dirs() {
   # Ensure queue config exists even when user starts from a custom env file.
   set_env_if_empty_or_missing "CELERY_BROKER_URL" "sqlalchemy+sqlite:///./ocr_jobs.db"
   set_env_if_empty_or_missing "CELERY_RESULT_BACKEND" "db+sqlite:///./ocr_jobs.db"
+  set_env_if_empty_or_missing "LOCAL_OCR_TIMING_LOG" "1"
+  set_env_if_empty_or_missing "LOCAL_OCR_TIMING_SLOW_MS" "1500"
 }
 
 download_default_ocr_model() {
@@ -238,6 +256,7 @@ main() {
 
   install_system_packages
   setup_python_env
+  install_local_ocr_python_deps
   setup_env_and_dirs
   download_default_ocr_model
   install_systemd_services

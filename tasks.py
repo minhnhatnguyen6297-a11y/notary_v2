@@ -9,11 +9,13 @@ import logging
 from celery_app import celery_app
 from database import SessionLocal
 from models import OCRJob
+from observability import configure_process_logging
 from routers.ocr_local import local_ocr_batch_from_inputs, local_ocr_from_bytes
 
 faulthandler.enable()
-logging.basicConfig(level=logging.INFO)
+WORKER_LOG_PATH = configure_process_logging("worker")
 _logger = logging.getLogger("ocr_worker")
+_logger.info("Worker logging initialized at %s", WORKER_LOG_PATH)
 
 
 def _ms(seconds: float) -> float:

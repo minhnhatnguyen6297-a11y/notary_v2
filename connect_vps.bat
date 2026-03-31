@@ -17,7 +17,7 @@ set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (
   echo.
-  echo [ERROR] Ket noi VPS that bai. Ma loi: %EXIT_CODE%
+  echo [ERROR] Khoi dong 1-click that bai. Ma loi: %EXIT_CODE%
   echo [INFO ] Kiem tra file deploy\vps\ssh_credentials.env
   pause
 )

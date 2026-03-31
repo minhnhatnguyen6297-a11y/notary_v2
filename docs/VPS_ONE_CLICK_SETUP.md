@@ -14,9 +14,10 @@ What this command does:
 
 1. Installs system packages (Ubuntu/Debian).
 2. Creates `venv` and installs Python dependencies.
-3. Creates `.env` from `.env.example` if missing.
-4. Downloads a default local OCR model (`models/rapidocr/*`) if missing.
-5. Creates and starts 2 `systemd` services:
+3. Installs Local OCR Python dependencies (`cv2`, `onnxruntime`, `rapidocr`).
+4. Creates `.env` from `.env.example` if missing.
+5. Downloads a default local OCR model (`models/rapidocr/*`) if missing.
+6. Creates and starts 2 `systemd` services:
    - `notary-web.service`
    - `notary-worker.service`
 
@@ -41,6 +42,11 @@ bash deploy/vps/manage_services.sh status
 bash deploy/vps/manage_services.sh logs
 bash deploy/vps/manage_services.sh restart
 ```
+
+App log files:
+
+- `logs/web.log` (FastAPI + OCR API timing)
+- `logs/worker.log` (Celery worker + OCR batch timing)
 
 ## 4) Optional installer flags
 

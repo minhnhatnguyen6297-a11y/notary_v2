@@ -1,6 +1,10 @@
-# One-Click SSH (Windows)
+# One-Click Launch (Windows)
 
-For internal team usage, this repo supports one-click VPS SSH access from Windows.
+For internal team usage, this repo supports true one-click launch from Windows:
+
+1. auto start/restart app on VPS
+2. wait until app is ready
+3. auto open browser to the app URL
 
 ## 1) Setup once
 
@@ -12,10 +16,16 @@ For internal team usage, this repo supports one-click VPS SSH access from Window
    - `VPS_PORT`
    - `VPS_USER`
    - `VPS_PASSWORD`
+   - `VPS_HOSTKEY` (required for no-prompt mode)
+   - optional app fields:
+     - `VPS_APP_SCHEME` (default `http`)
+     - `VPS_APP_PORT` (default `8000`)
+     - `VPS_APP_PATH` (default `/`)
+     - `VPS_REPO_DIR` (default `~/notary_v2`)
 
 `ssh_credentials.env` is ignored by git by default.
 
-## 2) One click connect
+## 2) One click launch
 
 Double-click:
 
@@ -28,6 +38,7 @@ connect_vps.bat
 ```
 
 On first run, script auto-downloads `plink.exe` to `deploy/vps/bin/`.
+No manual SSH typing is needed.
 
 ## 3) Notes
 
