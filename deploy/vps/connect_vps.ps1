@@ -1,5 +1,6 @@
 param(
-    [string]$ConfigPath = ""
+    [string]$ConfigPath = "",
+    [switch]$Interactive
 )
 
 $ErrorActionPreference = "Stop"
@@ -132,7 +133,7 @@ exit 1
 '@
     $remoteCommand = $remoteTemplate.Replace("__REPO_DIR__", $repoDir).Replace("__APP_PORT__", $appPort)
 
-    $plinkArgs = @("-ssh", $sshTarget, "-P", $port, "-pw", $password, "-batch")
+    $plinkArgs = @("-ssh", $sshTarget, "-P", $port, "-pw", $password)
     if (-not [string]::IsNullOrWhiteSpace($hostKey)) {
         $hostKeys = New-Object System.Collections.Generic.List[string]
         $hostKeys.Add($hostKey) | Out-Null
@@ -145,8 +146,16 @@ exit 1
         }
     }
 
+    if ($Interactive) {
+        Log-Info "Dang mo SSH shell toi ${sshTarget}:$port ..."
+        & $plinkPath @plinkArgs
+        exit $LASTEXITCODE
+    }
+
+    $batchPlinkArgs = @($plinkArgs + @("-batch"))
+
     Log-Info "Dang khoi dong app tren ${sshTarget}:$port ..."
-    & $plinkPath @plinkArgs $remoteCommand
+    & $plinkPath @batchPlinkArgs $remoteCommand
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
         throw "Khong the khoi dong app tu xa (plink exit code $exitCode)."
