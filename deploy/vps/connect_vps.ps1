@@ -1,6 +1,7 @@
 param(
     [string]$ConfigPath = "",
-    [switch]$Interactive
+    [switch]$Interactive,
+    [switch]$RawTerminal
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +52,25 @@ function Get-ConfigValue {
     return $value.ToString().Trim()
 }
 
+function Get-ConfigBoolean {
+    param(
+        [hashtable]$Config,
+        [string]$Key,
+        [bool]$DefaultValue = $true
+    )
+
+    $rawValue = Get-ConfigValue -Config $Config -Key $Key
+    if ([string]::IsNullOrWhiteSpace($rawValue)) {
+        return $DefaultValue
+    }
+
+    switch -Regex ($rawValue.Trim()) {
+        '^(?i:1|true|yes|on)$' { return $true }
+        '^(?i:0|false|no|off)$' { return $false }
+        default { return $DefaultValue }
+    }
+}
+
 try {
     $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -75,6 +95,7 @@ try {
     $appScheme = Get-ConfigValue -Config $cfg -Key "VPS_APP_SCHEME"
     $appPort = Get-ConfigValue -Config $cfg -Key "VPS_APP_PORT"
     $appPath = Get-ConfigValue -Config $cfg -Key "VPS_APP_PATH"
+    $autoOpenBrowser = Get-ConfigBoolean -Config $cfg -Key "VPS_AUTO_OPEN_BROWSER" -DefaultValue $true
     $repoDir = Get-ConfigValue -Config $cfg -Key "VPS_REPO_DIR"
 
     if ([string]::IsNullOrWhiteSpace($vpsHost)) { throw "Thieu VPS_HOST trong $ConfigPath" }
@@ -147,8 +168,18 @@ exit 1
     }
 
     if ($Interactive) {
-        Log-Info "Dang mo SSH shell toi ${sshTarget}:$port ..."
-        & $plinkPath @plinkArgs
+        if ($autoOpenBrowser) {
+            Log-Info "Dang mo trinh duyet: $appUrl"
+            Start-Process $appUrl | Out-Null
+        }
+        $interactivePlinkArgs = @($plinkArgs + @("-t", "-no-antispoof"))
+        if ($RawTerminal) {
+            Log-Info "Dang mo SSH shell toi ${sshTarget}:$port (raw terminal) ..."
+            & $plinkPath @interactivePlinkArgs
+        } else {
+            Log-Info "Dang mo SSH shell toi ${sshTarget}:$port (clean shell) ..."
+            & $plinkPath @interactivePlinkArgs "env TERM=dumb bash -li"
+        }
         exit $LASTEXITCODE
     }
 
@@ -161,8 +192,12 @@ exit 1
         throw "Khong the khoi dong app tu xa (plink exit code $exitCode)."
     }
 
-    Log-Info "App san sang. Dang mo trinh duyet: $appUrl"
-    Start-Process $appUrl | Out-Null
+    if ($autoOpenBrowser) {
+        Log-Info "App san sang. Dang mo trinh duyet: $appUrl"
+        Start-Process $appUrl | Out-Null
+    } else {
+        Log-Info "App san sang. Bo qua mo trinh duyet theo cau hinh."
+    }
 }
 catch {
     Write-Host "[VPS-Connect][ERROR] $($_.Exception.Message)" -ForegroundColor Red

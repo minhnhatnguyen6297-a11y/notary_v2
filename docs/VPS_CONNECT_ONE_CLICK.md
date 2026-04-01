@@ -18,6 +18,7 @@ For internal team usage, this repo supports true one-click launch from Windows:
    - `VPS_PASSWORD`
    - `VPS_HOSTKEY` (required for no-prompt mode)
    - optional app fields:
+     - `VPS_AUTO_OPEN_BROWSER` (default `1`)
      - `VPS_APP_SCHEME` (default `http`)
      - `VPS_APP_PORT` (default `8000`)
      - `VPS_APP_PATH` (default `/`)
@@ -40,6 +41,20 @@ connect_vps.bat
 
 On first run, script auto-downloads `plink.exe` to `deploy/vps/bin/`.
 No manual SSH typing is needed.
+`connect_vps.bat` now also opens the configured app URL automatically before handing you the SSH shell.
+By default, interactive SSH uses a clean shell mode (`TERM=dumb`) so Windows console does not show garbled sequences like `[?2004h`.
+
+If you need the VPS default terminal behavior instead, run:
+
+```bat
+connect_vps.bat --raw
+```
+
+If you want SSH only and do not want the browser to open, set this in `deploy/vps/ssh_credentials.env`:
+
+```env
+VPS_AUTO_OPEN_BROWSER=0
+```
 
 ## 2.1) View logs live
 

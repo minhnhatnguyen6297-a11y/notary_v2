@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -94,6 +95,32 @@ class ParseFullTextTests(unittest.TestCase):
         self.assertEqual(data["ngay_cap"], "03/04/2021")
         self.assertEqual(data["ngay_het_han"], "03/04/2031")
         self.assertIn("25 NGUYEN TRAI", data["dia_chi"])
+
+
+class DetectorAndCropTests(unittest.TestCase):
+    def test_rapidocr_detect_boxes_handles_numpy_array_output(self):
+        detector_output = np.array(
+            [
+                [[10, 20], [30, 20], [30, 40], [10, 40]],
+                [[50, 60], [70, 60], [70, 90], [50, 90]],
+            ],
+            dtype=np.float32,
+        )
+
+        with mock.patch.object(ocr_local, "_get_rapidocr_engine", return_value=lambda img: (detector_output, 12.34)):
+            boxes, elapsed = ocr_local._rapidocr_detect_boxes(np.zeros((100, 100, 3), dtype=np.uint8))
+
+        self.assertEqual(len(boxes), 2)
+        self.assertEqual(elapsed, 12340.0)
+
+    def test_crop_box_image_upscales_small_text_line(self):
+        img = np.full((80, 160, 3), 255, dtype=np.uint8)
+        box = np.array([[20, 20], [120, 20], [120, 34], [20, 34]], dtype=np.float32)
+
+        crop = ocr_local._crop_box_image(img, box)
+
+        self.assertIsNotNone(crop)
+        self.assertGreaterEqual(crop.shape[0], ocr_local.LOCAL_OCR_REC_MIN_HEIGHT)
 
 
 class MergeFlowTests(unittest.TestCase):

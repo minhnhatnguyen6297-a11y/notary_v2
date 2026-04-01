@@ -54,6 +54,8 @@ _logger = logging.getLogger("ocr_local")
 LOCAL_OCR_SMART_CROP_MIN_CONF = float(os.getenv("LOCAL_OCR_SMART_CROP_MIN_CONF", "0.22"))
 LOCAL_OCR_TIMING_LOG = os.getenv("LOCAL_OCR_TIMING_LOG", "1").strip().lower() not in {"0", "false", "no", "off"}
 LOCAL_OCR_TIMING_SLOW_MS = float(os.getenv("LOCAL_OCR_TIMING_SLOW_MS", "1500"))
+LOCAL_OCR_DEBUG_LOG = os.getenv("LOCAL_OCR_DEBUG_LOG", "1").strip().lower() not in {"0", "false", "no", "off"}
+LOCAL_OCR_DEBUG_MAX_BOX_LOG = max(1, int(os.getenv("LOCAL_OCR_DEBUG_MAX_BOX_LOG", "8")))
 LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE = int(os.getenv("LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE", "720"))
 LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE = float(os.getenv("LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE", "0.20"))
 LOCAL_OCR_DET_MAX_SIDE_LEN = int(os.getenv("LOCAL_OCR_DET_MAX_SIDE_LEN", "3000"))
@@ -61,6 +63,9 @@ LOCAL_OCR_VIETOCR_MODEL = os.getenv("LOCAL_OCR_VIETOCR_MODEL", "vgg_transformer"
 LOCAL_OCR_VIETOCR_BATCH_SIZE = max(1, int(os.getenv("LOCAL_OCR_VIETOCR_BATCH_SIZE", "24")))
 LOCAL_OCR_TORCH_THREADS = max(1, int(os.getenv("LOCAL_OCR_TORCH_THREADS", "2")))
 LOCAL_OCR_DENOISE = os.getenv("LOCAL_OCR_DENOISE", "1").strip().lower() not in {"0", "false", "no", "off"}
+LOCAL_OCR_REC_PAD_RATIO = max(0.0, float(os.getenv("LOCAL_OCR_REC_PAD_RATIO", "0.10")))
+LOCAL_OCR_REC_MIN_HEIGHT = max(16, int(os.getenv("LOCAL_OCR_REC_MIN_HEIGHT", "48")))
+LOCAL_OCR_REC_MAX_SCALE = max(1.0, float(os.getenv("LOCAL_OCR_REC_MAX_SCALE", "3.0")))
 
 _rapidocr_detector = None
 _vietocr_engine = None
@@ -68,6 +73,7 @@ _rapidocr_runtime_label = "RapidOCR det + VietOCR rec (CPU)"
 _vietocr_rec_mode = LOCAL_OCR_VIETOCR_MODEL
 _face_cascade = None
 _qr_detector = None
+_legacy_local_ocr_env_warned = False
 
 DOC_PROFILE_FRONT_OLD = "cccd_front_old"
 DOC_PROFILE_BACK_OLD = "cccd_back_old"
@@ -135,6 +141,20 @@ def _log_timing(event: str, level: str = "info", **fields) -> None:
         _logger.info("[OCR_LOCAL_TIMING] %s", message)
 
 
+def _log_debug(event: str, level: str = "info", **fields) -> None:
+    if not LOCAL_OCR_DEBUG_LOG:
+        return
+    payload = {"event": event, **fields}
+    try:
+        message = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        message = str(payload)
+    if level == "warning":
+        _logger.warning("[OCR_LOCAL_DEBUG] %s", message)
+    else:
+        _logger.info("[OCR_LOCAL_DEBUG] %s", message)
+
+
 def _ensure_local_ocr_dependencies() -> None:
     if _LOCAL_OCR_IMPORT_ERROR:
         raise HTTPException(
@@ -145,6 +165,21 @@ def _ensure_local_ocr_dependencies() -> None:
                 f"Chi tiet: {_LOCAL_OCR_IMPORT_ERROR}"
             ),
         )
+
+
+def _warn_legacy_local_ocr_env() -> None:
+    global _legacy_local_ocr_env_warned
+    if _legacy_local_ocr_env_warned:
+        return
+    legacy_keys = [key for key in ("LOCAL_OCR_REC_MODEL_PATH", "LOCAL_OCR_REC_KEYS_PATH") if os.getenv(key)]
+    if not legacy_keys:
+        return
+    _legacy_local_ocr_env_warned = True
+    _logger.warning(
+        "Legacy RapidOCR recognition env vars are set but ignored by OCR V4 pipeline: %s. Current recognizer uses VietOCR model '%s'.",
+        ", ".join(legacy_keys),
+        LOCAL_OCR_VIETOCR_MODEL,
+    )
 
 
 def _ascii_fold(text: str) -> str:
@@ -218,14 +253,38 @@ def _build_raw_text(lines: List[str]) -> str:
     return "\n".join([line for line in lines if line])
 
 
+def _preview_text(text: str, limit: int = 180) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[: max(0, limit - 3)]}..."
+
+
+def _numeric_stats(values: Iterable[float], digits: int = 2) -> dict:
+    nums = sorted(float(value) for value in values if value is not None)
+    if not nums:
+        return {}
+    mid = len(nums) // 2
+    median = nums[mid] if len(nums) % 2 else (nums[mid - 1] + nums[mid]) / 2.0
+    return {
+        "count": len(nums),
+        "min": round(nums[0], digits),
+        "median": round(median, digits),
+        "max": round(nums[-1], digits),
+    }
+
+
 def _print_rapidocr_raw_text(raw_text: str, context: str = "") -> None:
     text = (raw_text or "").strip()
     if not text:
         return
-    header = " RAW TEXT V4 "
-    if context:
-        header = f" RAW TEXT V4 ({context}) "
-    print(f"\n{'=' * 20}{header}{'=' * 20}\n{text}\n{'=' * 80}\n")
+    _log_debug(
+        "raw_text",
+        context=context,
+        line_count=len([line for line in text.splitlines() if line.strip()]),
+        raw_text=text,
+        preview=_preview_text(text, limit=320),
+    )
 
 
 def _safe_filename(filename: str, index: int) -> str:
@@ -495,6 +554,7 @@ def _get_rapidocr_engine():
 
 def _get_vietocr_engine():
     _ensure_local_ocr_dependencies()
+    _warn_legacy_local_ocr_env()
     global _vietocr_engine
     if _vietocr_engine is not None:
         return _vietocr_engine
@@ -524,6 +584,40 @@ def _get_vietocr_engine():
         return _vietocr_engine
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Khong the khoi dong VietOCR: {exc}")
+
+
+_rapidocr_recognizer = None
+
+def _get_rapidocr_recognizer():
+    _ensure_local_ocr_dependencies()
+    global _rapidocr_recognizer
+    if _rapidocr_recognizer is not None:
+        return _rapidocr_recognizer
+
+    t_start = perf_counter()
+    try:
+        import yaml
+        import rapidocr_onnxruntime
+        from rapidocr_onnxruntime.ch_ppocr_rec import TextRecognizer
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Chua cai RapidOCR recognizer")
+
+    try:
+        cfg_path = Path(rapidocr_onnxruntime.__file__).with_name("config.yaml")
+        config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        rec_cfg = dict(config.get("Rec", {}))
+        model_path = Path(str(rec_cfg.get("model_path", "")))
+        if model_path and not model_path.is_absolute():
+            rec_cfg["model_path"] = str((cfg_path.parent / model_path).resolve())
+        rec_cfg["use_cuda"] = False
+        rec_cfg["use_dml"] = False
+        rec_cfg["intra_op_num_threads"] = LOCAL_OCR_TORCH_THREADS
+        rec_cfg["inter_op_num_threads"] = 1
+        _rapidocr_recognizer = TextRecognizer(rec_cfg)
+        _log_timing("engine_init_rec", ms=_ms(perf_counter() - t_start))
+        return _rapidocr_recognizer
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Khong khoi dong duoc RapidOCR recognizer: {exc}")
 
 
 def warmup_local_ocr() -> tuple[bool, str]:
@@ -656,6 +750,23 @@ def _normalize_box_points(box) -> np.ndarray | None:
     return arr
 
 
+def _iter_detected_boxes(raw_boxes) -> List[Any]:
+    if raw_boxes is None:
+        return []
+    if isinstance(raw_boxes, np.ndarray):
+        if raw_boxes.ndim == 2 and raw_boxes.shape[1] == 2:
+            return [raw_boxes]
+        if raw_boxes.ndim >= 3:
+            return [raw_boxes[i] for i in range(raw_boxes.shape[0])]
+        return []
+    if isinstance(raw_boxes, (list, tuple)):
+        return list(raw_boxes)
+    try:
+        return list(raw_boxes)
+    except TypeError:
+        return []
+
+
 def _box_bounds(box: np.ndarray) -> Tuple[float, float, float, float]:
     xs = box[:, 0]
     ys = box[:, 1]
@@ -736,7 +847,58 @@ def _group_lines(items: List[dict]) -> List[str]:
     return [line for line in lines if line]
 
 
-def _crop_box_image(img_bgr: np.ndarray, box: np.ndarray, pad_ratio: float = 0.06) -> np.ndarray | None:
+def _order_box_points(box: np.ndarray) -> np.ndarray:
+    points = np.array(box, dtype=np.float32)
+    sums = points.sum(axis=1)
+    diffs = np.diff(points, axis=1).reshape(-1)
+    top_left = points[np.argmin(sums)]
+    bottom_right = points[np.argmax(sums)]
+    top_right = points[np.argmin(diffs)]
+    bottom_left = points[np.argmax(diffs)]
+    return np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
+
+
+def _prepare_recognition_crop(crop: np.ndarray) -> np.ndarray | None:
+    if crop is None or crop.size == 0:
+        return None
+    h, w = crop.shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+    scale = min(LOCAL_OCR_REC_MAX_SCALE, max(1.0, LOCAL_OCR_REC_MIN_HEIGHT / float(max(1, h))))
+    if scale > 1.01:
+        crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    return crop
+
+
+def _crop_box_image(img_bgr: np.ndarray, box: np.ndarray, pad_ratio: float = LOCAL_OCR_REC_PAD_RATIO) -> np.ndarray | None:
+    box = _normalize_box_points(box)
+    if box is None:
+        return None
+    ordered = _order_box_points(box)
+    width_top = np.linalg.norm(ordered[1] - ordered[0])
+    width_bottom = np.linalg.norm(ordered[2] - ordered[3])
+    height_right = np.linalg.norm(ordered[2] - ordered[1])
+    height_left = np.linalg.norm(ordered[3] - ordered[0])
+    warp_w = int(round(max(width_top, width_bottom)))
+    warp_h = int(round(max(height_right, height_left)))
+    if warp_w >= 4 and warp_h >= 4:
+        pad_x = int(round(warp_w * max(0.0, pad_ratio)))
+        pad_y = int(round(warp_h * max(0.0, pad_ratio)))
+        dst = np.array(
+            [
+                [pad_x, pad_y],
+                [pad_x + warp_w - 1, pad_y],
+                [pad_x + warp_w - 1, pad_y + warp_h - 1],
+                [pad_x, pad_y + warp_h - 1],
+            ],
+            dtype=np.float32,
+        )
+        matrix = cv2.getPerspectiveTransform(ordered, dst)
+        out_w = max(1, warp_w + pad_x * 2)
+        out_h = max(1, warp_h + pad_y * 2)
+        warped = cv2.warpPerspective(img_bgr, matrix, (out_w, out_h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        return _prepare_recognition_crop(warped)
+
     x1, y1, x2, y2 = _box_bounds(box)
     pad_x = int((x2 - x1) * pad_ratio)
     pad_y = int((y2 - y1) * pad_ratio)
@@ -749,10 +911,10 @@ def _crop_box_image(img_bgr: np.ndarray, box: np.ndarray, pad_ratio: float = 0.0
     crop = img_bgr[y1:y2, x1:x2]
     if crop is None or crop.size == 0:
         return None
-    return crop
+    return _prepare_recognition_crop(crop)
 
 
-def _vietocr_predict_batch(images: List[np.ndarray]) -> List[str]:
+def _vietocr_predict_batch(images: List[np.ndarray]) -> List[dict]:
     if not images:
         return []
     predictor = _get_vietocr_engine()
@@ -760,9 +922,10 @@ def _vietocr_predict_batch(images: List[np.ndarray]) -> List[str]:
 
     if hasattr(predictor, "predict_batch"):
         attempts = [
+            {"batch_size": LOCAL_OCR_VIETOCR_BATCH_SIZE, "return_prob": True},
+            {"return_prob": True},
             {"batch_size": LOCAL_OCR_VIETOCR_BATCH_SIZE, "return_prob": False},
             {"return_prob": False},
-            {"batch_size": LOCAL_OCR_VIETOCR_BATCH_SIZE},
             {},
         ]
         raw_result = None
@@ -775,26 +938,37 @@ def _vietocr_predict_batch(images: List[np.ndarray]) -> List[str]:
         if raw_result is None:
             raise HTTPException(status_code=500, detail="Khong goi duoc VietOCR predict_batch")
     else:
-        raw_result = [predictor.predict(image) for image in pil_images]
+        raw_result = [predictor.predict(image, return_prob=True) for image in pil_images]
 
-    if isinstance(raw_result, tuple) and raw_result:
-        raw_result = raw_result[0]
+    raw_texts = raw_result
+    raw_probs: List[Any] = []
+    if isinstance(raw_result, tuple):
+        raw_texts = raw_result[0] if len(raw_result) >= 1 else []
+        raw_probs = list(raw_result[1]) if len(raw_result) >= 2 and isinstance(raw_result[1], (list, tuple)) else []
 
-    texts: List[str] = []
-    for item in raw_result or []:
+    outputs: List[dict] = []
+    for index, item in enumerate(raw_texts or []):
+        score = raw_probs[index] if index < len(raw_probs) else None
         if isinstance(item, (list, tuple)) and item:
             text = item[0]
+            if score is None and len(item) >= 2 and isinstance(item[1], (int, float)):
+                score = item[1]
         else:
             text = item
-        texts.append(str(text or "").strip())
-    return texts
+        outputs.append(
+            {
+                "text": str(text or "").strip(),
+                "score": round(float(score), 4) if isinstance(score, (int, float)) else None,
+            }
+        )
+    return outputs
 
 
 def _rapidocr_detect_boxes(img_bgr: np.ndarray) -> tuple[List[dict], float]:
     detector = _get_rapidocr_engine()
     boxes, elapsed = detector(img_bgr)
     out: List[dict] = []
-    for box in boxes or []:
+    for box in _iter_detected_boxes(boxes):
         norm_box = _normalize_box_points(box)
         if norm_box is not None:
             out.append({"box": norm_box})
@@ -830,31 +1004,89 @@ def filter_target_boxes(boxes: List[dict], img_shape: Tuple[int, int], triage_st
     return _sort_box_dicts(filtered)
 
 
-def _recognize_target_boxes(img_ocr: np.ndarray, boxes: List[dict]) -> tuple[List[dict], float]:
+def _recognize_target_boxes(img_ocr: np.ndarray, boxes: List[dict], context: str = "") -> tuple[List[dict], float]:
     if not boxes:
         return [], 0.0
 
     t_start = perf_counter()
     crops: List[np.ndarray] = []
     valid_boxes: List[dict] = []
+    crop_shapes: List[Tuple[int, int]] = []
     for item in boxes:
         crop = _crop_box_image(img_ocr, item["box"])
         if crop is None:
             continue
         valid_boxes.append(item)
         crops.append(crop)
+        crop_shapes.append((int(crop.shape[1]), int(crop.shape[0])))
 
-    texts: List[str] = []
+    texts: List[dict] = []
     for start in range(0, len(crops), LOCAL_OCR_VIETOCR_BATCH_SIZE):
         texts.extend(_vietocr_predict_batch(crops[start:start + LOCAL_OCR_VIETOCR_BATCH_SIZE]))
 
     recognized: List[dict] = []
-    for item, text in zip(valid_boxes, texts):
-        text = str(text or "").strip()
+    debug_samples: List[dict] = []
+    for index, (item, output) in enumerate(zip(valid_boxes, texts)):
+        text = str((output or {}).get("text") or "").strip()
+        score = (output or {}).get("score")
         if text:
-            recognized.append({"box": item["box"], "text": text, "score": 1.0})
+            recognized.append({"box": item["box"], "text": text, "score": 0.0 if score is None else float(score)})
+        if index < LOCAL_OCR_DEBUG_MAX_BOX_LOG:
+            width, height = crop_shapes[index] if index < len(crop_shapes) else (0, 0)
+            debug_samples.append(
+                {
+                    "index": index,
+                    "crop_size": f"{width}x{height}",
+                    "score": score,
+                    "diacritics": _count_vietnamese_diacritics(text),
+                    "text": _preview_text(text, limit=140),
+                }
+            )
 
-    return recognized, _ms(perf_counter() - t_start)
+    elapsed_ms = _ms(perf_counter() - t_start)
+    _log_debug(
+        "recognize_boxes",
+        context=context,
+        requested_box_count=len(boxes),
+        valid_crop_count=len(crops),
+        recognized_count=len(recognized),
+        crop_width_stats=_numeric_stats(width for width, _ in crop_shapes),
+        crop_height_stats=_numeric_stats(height for _, height in crop_shapes),
+        score_stats=_numeric_stats(item.get("score") for item in texts if isinstance(item.get("score"), (int, float))),
+        elapsed_ms=elapsed_ms,
+        samples=debug_samples,
+    )
+    return recognized, elapsed_ms
+
+def _recognize_target_boxes_rapidocr(img_ocr: np.ndarray, boxes: List[dict], context: str = "") -> tuple[List[dict], float]:
+    if not boxes:
+        return [], 0.0
+
+    t_start = perf_counter()
+    recognizer = _get_rapidocr_recognizer()
+    valid_boxes = []
+    crops = []
+    for item in boxes:
+        crop = _crop_box_image(img_ocr, item["box"])
+        if crop is not None:
+            valid_boxes.append(item)
+            crops.append(crop)
+
+    recognized = []
+    if crops:
+        for idx, crop in enumerate(crops):
+            try:
+                res, _ = recognizer(crop)
+                if res and res[0] and res[0][0]:
+                    text, score = res[0][0], res[0][1]
+                    if str(text).strip():
+                        recognized.append({"box": valid_boxes[idx]["box"], "text": str(text).strip(), "score": float(score)})
+            except Exception:
+                pass
+
+    elapsed_ms = _ms(perf_counter() - t_start)
+    return recognized, elapsed_ms
+
 
 
 def _extract_id_12_from_text(text: str) -> str:
@@ -1335,9 +1567,10 @@ def _try_qr_data_from_crop(
 
 
 def _extract_primary_id(
-    img_ocr: np.ndarray,
+    img_rec: np.ndarray,
     boxes: List[dict],
     triage_state: str,
+    context: str = "",
 ) -> tuple[str, str, str, float, int, int]:
     attempts: List[tuple[str, str]] = []
     if triage_state in {TRIAGE_STATE_FRONT_OLD, TRIAGE_STATE_FRONT_NEW}:
@@ -1351,10 +1584,11 @@ def _extract_primary_id(
     total_box_count = 0
     total_line_count = 0
     for phase, source in attempts:
-        selected = filter_target_boxes(boxes, img_ocr.shape[:2], triage_state, phase)
+        selected = filter_target_boxes(boxes, img_rec.shape[:2], triage_state, phase)
         if not selected:
+            _log_debug("primary_id_attempt", context=context, phase=phase, source=source, selected_box_count=0)
             continue
-        recognized, rec_ms = _recognize_target_boxes(img_ocr, selected)
+        recognized, rec_ms = _recognize_target_boxes_rapidocr(img_rec, selected, context=f"{context}:{phase}" if context else phase)
         total_ms += rec_ms
         total_box_count += len(selected)
         lines = _group_lines(recognized)
@@ -1365,6 +1599,17 @@ def _extract_primary_id(
             id_12 = _extract_id_12_from_mrz_text(raw_text) or _extract_id_12_from_text(raw_text)
         else:
             id_12 = _extract_id_12_from_text(raw_text)
+        _log_debug(
+            "primary_id_attempt",
+            context=context,
+            phase=phase,
+            source=source,
+            selected_box_count=len(selected),
+            line_count=len(lines),
+            elapsed_ms=rec_ms,
+            extracted_id=id_12,
+            raw_text_preview=_preview_text(raw_text),
+        )
         if id_12:
             return id_12, source, raw_text, total_ms, total_box_count, total_line_count
     return "", "none", "", total_ms, total_box_count, total_line_count
@@ -1429,6 +1674,7 @@ def _analyze_image_prepare(
     raw_bytes: bytes,
     seeded_qr_text: str,
     client_qr_failed: bool,
+    trace_id: str | None = None,
 ) -> dict:
     t_total = perf_counter()
     t_decode = perf_counter()
@@ -1482,11 +1728,52 @@ def _analyze_image_prepare(
     if source_type != "QR":
         det_boxes, rapidocr_det_ms = _rapidocr_detect_boxes(oriented_ocr)
         ocr_box_count = len(det_boxes)
-        id_12, id_source, raw_text, id_extract_ms, _, line_count = _extract_primary_id(oriented_ocr, det_boxes, triage_state)
+        id_12, id_source, raw_text, id_extract_ms, _, line_count = _extract_primary_id(
+            oriented_native,
+            det_boxes,
+            triage_state,
+            context=f"{filename}:{index}",
+        )
         if id_12:
             data["so_giay_to"] = id_12
 
     total_ms = _ms(perf_counter() - t_total)
+    _log_debug(
+        "image_prepare",
+        trace_id=trace_id,
+        index=index,
+        filename=filename,
+        image_shape=f"{img_native.shape[1]}x{img_native.shape[0]}",
+        crop_bbox=list(crop.bbox),
+        crop_confidence=round(float(crop.confidence or 0.0), 4),
+        triage_state=triage_state,
+        orientation_angle=int(triage.get("orientation_angle", 0)),
+        triage_confidence=round(float(triage.get("triage_confidence", 0.0) or 0.0), 4),
+        face_detected=bool(triage.get("face_detected", False)),
+        qr_detected=bool(triage.get("qr_detected", False)),
+        mrz_score=round(float(triage.get("mrz_score", 0.0) or 0.0), 4),
+        angle_candidates=triage.get("angle_candidates", []),
+        qr_seeded=bool(seeded_qr_text.strip()),
+        qr_text_preview=_preview_text(qr_text, limit=120),
+        source_type=source_type,
+        det_box_count=len(det_boxes),
+        det_box_width_stats=_numeric_stats(_box_bounds(item["box"])[2] - _box_bounds(item["box"])[0] for item in det_boxes),
+        det_box_height_stats=_numeric_stats(_box_bounds(item["box"])[3] - _box_bounds(item["box"])[1] for item in det_boxes),
+        id_source=id_source,
+        id_12=id_12,
+        raw_text_preview=_preview_text(raw_text),
+        timing_ms={
+            "decode_ms": decode_ms,
+            "preprocess_ms": preprocess_ms,
+            "detect_ms": detect_ms,
+            "triage_ms": triage.get("triage_ms", 0.0),
+            "qr_detect_ms": triage.get("qr_detect_ms", 0.0),
+            "qr_decode_ms": qr_timing.get("total_ms", 0.0),
+            "rapidocr_det_ms": rapidocr_det_ms,
+            "id_extract_ms": id_extract_ms,
+            "total_ms": total_ms,
+        },
+    )
     return {
         "index": index,
         "filename": filename,
@@ -1540,14 +1827,53 @@ def _run_detail_phase(prepared: dict, record: dict) -> tuple[dict, str, float]:
     _ensure_detection(prepared)
     selected = filter_target_boxes(prepared.get("det_boxes", []), prepared["img_ocr"].shape[:2], prepared["triage_state"], "detail")
     if not selected:
+        _log_debug("detail_phase", context=prepared.get("filename", ""), selected_box_count=0, result="no_boxes")
         return _empty_person_data(), "", 0.0
 
-    recognized, detail_ms = _recognize_target_boxes(prepared["img_ocr"], selected)
-    raw_text = _build_raw_text(_group_lines(recognized))
+    recognized, detail_ms = _recognize_target_boxes_rapidocr(
+        prepared["img_native"],
+        selected,
+        context=f"{prepared.get('filename', '')}:detail_fast",
+    )
+    
+    vietocr_boxes = []
+    for item in recognized:
+        text = item["text"]
+        folded = _ascii_fold(text).lower()
+        if re.fullmatch(r"[\d\W]+", text): continue
+        if len(folded) < 3: continue
+        skip_labels = r"^(ho va ten|ho ten|full name|gioi tinh|sex|ngay sinh|date of birth|quoc tich|nationality|que quan|place of origin|noi thuong tru|noi cu tru|place of residence|ngay cap|date of issue|co gia tri|date of expiry|idvnm|can cuoc|cong dan|socialist|republic|independence|freedom|happiness|bo cong an|director|public security)"
+        if re.search(skip_labels, folded):
+            continue
+        vietocr_boxes.append(item)
+        
+    if vietocr_boxes:
+        refined, refined_ms = _recognize_target_boxes(prepared["img_native"], vietocr_boxes, context=f"{prepared.get('filename', '')}:detail_refine")
+        detail_ms += refined_ms
+        ref_map = { str(_box_bounds(r["box"])): r["text"] for r in refined }
+        for item in recognized:
+            bnd_str = str(_box_bounds(item["box"]))
+            if bnd_str in ref_map:
+                item["text"] = ref_map[bnd_str]
+
+    lines = _group_lines(recognized)
+    raw_text = _build_raw_text(lines)
     _print_rapidocr_raw_text(raw_text, context=f"detail_{prepared['triage_state']}")
     parsed = _parse_cccd_fulltext(raw_text, prepared["profile"])
+    inferred_profile = _infer_doc_profile(_normalize_ocr_lines(lines), prepared.get("doc_type", "unknown"))
     if not parsed.get("so_giay_to") and prepared.get("id_12"):
         parsed["so_giay_to"] = prepared["id_12"]
+    _log_debug(
+        "detail_phase",
+        context=prepared.get("filename", ""),
+        selected_box_count=len(selected),
+        recognized_count=len(recognized),
+        elapsed_ms=detail_ms,
+        current_profile=prepared.get("profile"),
+        inferred_profile=inferred_profile,
+        parsed_fields=[key for key, value in parsed.items() if (value or "").strip()],
+        raw_text_preview=_preview_text(raw_text),
+    )
     return parsed, raw_text, detail_ms
 
 
@@ -1686,6 +2012,7 @@ def _local_ocr_batch_from_inputs_triage_v2(
                 raw_bytes=item.get("bytes") or b"",
                 seeded_qr_text=qr_text_values[index],
                 client_qr_failed=qr_failed_flags[index],
+                trace_id=trace_id,
             )
             state_counts[prepared["triage_state"]] = state_counts.get(prepared["triage_state"], 0) + 1
             prepared_rows.append(prepared)

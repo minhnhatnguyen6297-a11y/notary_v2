@@ -107,10 +107,24 @@ def _qr_variants(file_bytes: bytes):
         img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img_bgr is None:
             return variants
+        
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        
+        # Tạo 2 biến thể xịn nhất: Upscale x2 (mịn hơn) và Adaptive Threshold (bao vùng mờ/bóng)
+        h, w = gray.shape[:2]
+        scale = 2.0
+        nw, nh = int(w * scale), int(h * scale)
+        if nw <= 2600 and nh <= 2600:
+            upscaled = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_CUBIC)
+            base_for_thresh = upscaled
+            pil_var = _cv_to_pil_gray(upscaled)
+            if pil_var is not None:
+                variants.append(pil_var)
+        else:
+            base_for_thresh = gray
+            
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(base_for_thresh)
         sharpen = cv2.filter2D(clahe, -1, np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32))
-        otsu = cv2.threshold(sharpen, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
         adaptive = cv2.adaptiveThreshold(
             sharpen,
             255,
@@ -119,29 +133,17 @@ def _qr_variants(file_bytes: bytes):
             31,
             7,
         )
-        base_variants = [gray, clahe, sharpen, otsu, adaptive]
-        for base in base_variants:
-            for angle in (0, 90, 180, 270):
-                rotated = _rotate_gray(base, angle)
-                scale_variants = [rotated]
-                h, w = rotated.shape[:2]
-                for scale in (1.6, 2.0):
-                    nw = int(w * scale)
-                    nh = int(h * scale)
-                    if nw > 2600 or nh > 2600:
-                        continue
-                    scale_variants.append(cv2.resize(rotated, (nw, nh), interpolation=cv2.INTER_CUBIC))
-                for var in scale_variants:
-                    pil_var = _cv_to_pil_gray(var)
-                    if pil_var is not None:
-                        variants.append(pil_var)
+        pil_var = _cv_to_pil_gray(adaptive)
+        if pil_var is not None:
+            variants.append(pil_var)
+
     except Exception:
         pass
     return variants
 
 
 def try_decode_qr(file_bytes: bytes) -> str | None:
-    """Thử giải mã QR code đa bước (grayscale/CLAHE/sharpen/threshold/rotate)."""
+    """Thử giải mã QR code đa bước (nhưng đã rút gọn còn 3-4 variants cực nhanh)."""
     for candidate in _qr_variants(file_bytes):
         decoded = _zxing_decode_qr(candidate)
         if decoded:
@@ -155,11 +157,11 @@ def try_decode_qr(file_bytes: bytes) -> str | None:
         if img is None:
             return None
         detector = cv2.QRCodeDetector()
-        for angle in (0, 90, 180, 270):
-            rotated = _rotate_gray(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), angle)
-            decoded, _, _ = detector.detectAndDecode(rotated)
-            if decoded:
-                return decoded.strip()
+        
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        decoded, _, _ = detector.detectAndDecode(gray)
+        if decoded:
+            return decoded.strip()
     except Exception:
         pass
     return None

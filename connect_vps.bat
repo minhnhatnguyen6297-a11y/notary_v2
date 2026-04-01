@@ -9,9 +9,18 @@ set "CONFIG_FILE=%SCRIPT_DIR%\ssh_credentials.env"
 set "BIN_DIR=%SCRIPT_DIR%\bin"
 set "PLINK_PATH=%BIN_DIR%\plink.exe"
 set "MODE=interactive"
+set "RAW_TERMINAL=0"
+set "OPEN_BROWSER=1"
+set "CLEAN_SHELL_CMD=env TERM=dumb bash -li"
+set "VPS_APP_SCHEME=http"
+set "VPS_APP_PORT=8000"
+set "VPS_APP_PATH=/"
 
 if /I "%~1"=="--app" (
   set "MODE=app"
+  if not "%~2"=="" set "CONFIG_FILE=%~f2"
+) else if /I "%~1"=="--raw" (
+  set "RAW_TERMINAL=1"
   if not "%~2"=="" set "CONFIG_FILE=%~f2"
 ) else if not "%~1"=="" (
   set "CONFIG_FILE=%~f1"
@@ -29,6 +38,12 @@ if "%VPS_HOST%"=="" goto BAD_CONFIG
 if "%VPS_USER%"=="" goto BAD_CONFIG
 if "%VPS_PASSWORD%"=="" goto BAD_CONFIG
 if "%VPS_PORT%"=="" set "VPS_PORT=22"
+if "%VPS_APP_SCHEME%"=="" set "VPS_APP_SCHEME=http"
+if "%VPS_APP_PORT%"=="" set "VPS_APP_PORT=8000"
+if "%VPS_APP_PATH%"=="" set "VPS_APP_PATH=/"
+if not "%VPS_APP_PATH:~0,1%"=="/" set "VPS_APP_PATH=/%VPS_APP_PATH%"
+call :APPLY_BROWSER_FLAG "%VPS_AUTO_OPEN_BROWSER%"
+set "APP_URL=%VPS_APP_SCHEME%://%VPS_HOST%:%VPS_APP_PORT%%VPS_APP_PATH%"
 
 if not exist "%PLINK_PATH%" (
   echo [RUN] Dang tai plink.exe...
@@ -42,10 +57,27 @@ if not exist "%PLINK_PATH%" (
 )
 
 echo [RUN] Dang ket noi toi %VPS_USER%@%VPS_HOST%:%VPS_PORT% ...
-if "%VPS_HOSTKEY%"=="" (
-  "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%"
+if "%RAW_TERMINAL%"=="1" (
+  echo [RUN] Raw terminal mode: giu shell mac dinh cua VPS.
 ) else (
-  "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%" -hostkey "%VPS_HOSTKEY%"
+  echo [RUN] Clean shell mode: an xterm control sequence tren Windows console.
+)
+if not "%OPEN_BROWSER%"=="0" (
+  echo [RUN] Dang mo trinh duyet: %APP_URL%
+  start "" "%APP_URL%" >nul 2>&1
+)
+if "%VPS_HOSTKEY%"=="" (
+  if "%RAW_TERMINAL%"=="1" (
+    "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%" -t -no-antispoof
+  ) else (
+    "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%" -t -no-antispoof "%CLEAN_SHELL_CMD%"
+  )
+) else (
+  if "%RAW_TERMINAL%"=="1" (
+    "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%" -hostkey "%VPS_HOSTKEY%" -t -no-antispoof
+  ) else (
+    "%PLINK_PATH%" -ssh "%VPS_USER%@%VPS_HOST%" -P "%VPS_PORT%" -pw "%VPS_PASSWORD%" -hostkey "%VPS_HOSTKEY%" -t -no-antispoof "%CLEAN_SHELL_CMD%"
+  )
 )
 
 set "EXIT_CODE=%ERRORLEVEL%"
@@ -101,4 +133,15 @@ if /I "%~1"=="VPS_PORT" set "VPS_PORT=%~2"
 if /I "%~1"=="VPS_USER" set "VPS_USER=%~2"
 if /I "%~1"=="VPS_PASSWORD" set "VPS_PASSWORD=%~2"
 if /I "%~1"=="VPS_HOSTKEY" set "VPS_HOSTKEY=%~2"
+if /I "%~1"=="VPS_APP_SCHEME" set "VPS_APP_SCHEME=%~2"
+if /I "%~1"=="VPS_APP_PORT" set "VPS_APP_PORT=%~2"
+if /I "%~1"=="VPS_APP_PATH" set "VPS_APP_PATH=%~2"
+if /I "%~1"=="VPS_AUTO_OPEN_BROWSER" set "VPS_AUTO_OPEN_BROWSER=%~2"
+goto :eof
+
+:APPLY_BROWSER_FLAG
+if /I "%~1"=="0" set "OPEN_BROWSER=0"
+if /I "%~1"=="false" set "OPEN_BROWSER=0"
+if /I "%~1"=="no" set "OPEN_BROWSER=0"
+if /I "%~1"=="off" set "OPEN_BROWSER=0"
 goto :eof
