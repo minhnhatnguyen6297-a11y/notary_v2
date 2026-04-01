@@ -43,7 +43,7 @@ if not defined PYTHON_CMD (
   exit /b 1
 )
 
-:: 2. Tao venv neu chua co
+:: 2. Tao venv neu chua co + cai dependency nen
 if not exist "%VENV_PYTHON%" (
   echo [SETUP] Tao moi truong ao (venv^)...
   %PYTHON_CMD% -m venv "%VENV%"
@@ -52,6 +52,11 @@ if not exist "%VENV_PYTHON%" (
     pause & exit /b 1
   )
   echo [SETUP] Cai dat thu vien tu requirements.txt...
+  "%VENV_PYTHON%" -m pip install --upgrade pip --quiet
+  if errorlevel 1 (
+    echo [LOI] Nang cap pip that bai.
+    pause & exit /b 1
+  )
   "%VENV_PIP%" install -r requirements.txt --quiet
   if errorlevel 1 (
     echo [LOI] Cai dat thu vien that bai.
@@ -60,96 +65,44 @@ if not exist "%VENV_PYTHON%" (
   echo [SETUP] Hoan tat.
 )
 
-:: 3. Kiem tra Local OCR dependency
+:: 2.1 Tao .env neu chua co
+if not exist ".env" (
+  if exist ".env.example" (
+    echo [SETUP] Tao .env tu .env.example...
+    copy ".env.example" ".env" >nul
+    if errorlevel 1 (
+      echo [LOI] Khong tao duoc file .env.
+      pause & exit /b 1
+    )
+  ) else (
+    echo [WARN] Khong tim thay .env.example de tao .env.
+  )
+)
+
+:: 3. Kiem tra Local OCR dependency (RapidOCR det + VietOCR rec)
 echo [RUN] Kiem tra Local OCR...
-"%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
+"%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, vietocr, rapidocr_onnxruntime; assert int(numpy.__version__.split('.')[0]) < 2"
 if errorlevel 1 (
-  echo [RUN] Thieu hoac lech dependency Local OCR. Dang tu cai dat...
-  call "%PROJECT_DIR%install_local_ocr.bat" --auto
+  echo [RUN] Thieu hoac lech dependency Local OCR. Dang tu cai dat CPU-only stack...
+  "%VENV_PIP%" uninstall -y easyocr torch torchvision torchaudio vietocr opencv-python opencv-python-headless >nul 2>&1
+  "%VENV_PIP%" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
   if errorlevel 1 (
-    echo [LOI] Khong the cai dat Local OCR tu dong.
+    echo [LOI] Khong the cai dat PyTorch CPU-only.
     pause & exit /b 1
   )
-  "%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime; from rapidocr_onnxruntime import RapidOCR; assert int(numpy.__version__.split('.')[0]) < 2"
+  "%VENV_PIP%" install -r requirements-local-ocr.txt
+  if errorlevel 1 (
+    echo [LOI] Khong the cai dat stack OCR Local moi.
+    pause & exit /b 1
+  )
+  "%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, vietocr, rapidocr_onnxruntime; assert int(numpy.__version__.split('.')[0]) < 2"
   if errorlevel 1 (
     echo [LOI] Local OCR van chua san sang sau khi cai dat.
     pause & exit /b 1
   )
 )
 echo [RUN] Local OCR san sang.
-
-:: 3.1 Tu dong bat model OCR rec tieng Viet/Latin neu co san local
-set "OCR_MODEL_DIR=%PROJECT_DIR%models\rapidocr"
-if not exist "%OCR_MODEL_DIR%" mkdir "%OCR_MODEL_DIR%"
-set "OCR_REC_MODEL="
-set "OCR_REC_KEYS="
-
-if defined LOCAL_OCR_REC_MODEL_PATH (
-  if exist "%LOCAL_OCR_REC_MODEL_PATH%" set "OCR_REC_MODEL=%LOCAL_OCR_REC_MODEL_PATH%"
-)
-if defined LOCAL_OCR_REC_KEYS_PATH (
-  if exist "%LOCAL_OCR_REC_KEYS_PATH%" set "OCR_REC_KEYS=%LOCAL_OCR_REC_KEYS_PATH%"
-)
-
-if not defined OCR_REC_MODEL (
-  for %%f in (
-    "%OCR_MODEL_DIR%\vi_PP-OCRv4_rec_infer.onnx"
-    "%OCR_MODEL_DIR%\vi_PP-OCRv3_rec_infer.onnx"
-    "%OCR_MODEL_DIR%\latin_PP-OCRv5_mobile_rec.onnx"
-    "%OCR_MODEL_DIR%\latin_PP-OCRv4_mobile_rec.onnx"
-    "%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx"
-    "%OCR_MODEL_DIR%\latin_PP-OCRv3_mobile_rec.onnx"
-  ) do (
-    if not defined OCR_REC_MODEL if exist "%%~f" set "OCR_REC_MODEL=%%~f"
-  )
-)
-
-if not defined OCR_REC_MODEL (
-  echo [RUN] Chua co OCR rec model local. Dang thu tai tu dong Latin model...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ProgressPreference='SilentlyContinue'; $ErrorActionPreference='Stop';" ^
-    "$dir='%OCR_MODEL_DIR%'; New-Item -ItemType Directory -Force -Path $dir | Out-Null;" ^
-    "Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/breezedeus/cnocr-ppocr-latin_PP-OCRv3/resolve/main/latin_PP-OCRv3_rec_infer.onnx' -OutFile (Join-Path $dir 'latin_PP-OCRv3_rec_infer.onnx');" ^
-    "Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/latin_dict.txt' -OutFile (Join-Path $dir 'latin_dict.txt');"
-  if not errorlevel 1 (
-    if exist "%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx" set "OCR_REC_MODEL=%OCR_MODEL_DIR%\latin_PP-OCRv3_rec_infer.onnx"
-    if exist "%OCR_MODEL_DIR%\latin_dict.txt" set "OCR_REC_KEYS=%OCR_MODEL_DIR%\latin_dict.txt"
-    echo [RUN] Da tai xong OCR rec model vao %OCR_MODEL_DIR%.
-  ) else (
-    echo [WARN] Tai model OCR tu dong that bai. Se fallback model mac dinh.
-  )
-)
-
-if not defined OCR_REC_KEYS (
-  for %%f in (
-    "%OCR_MODEL_DIR%\vi_dict.txt"
-    "%OCR_MODEL_DIR%\latin_dict.txt"
-    "%OCR_MODEL_DIR%\ppocr_keys_v1.txt"
-  ) do (
-    if not defined OCR_REC_KEYS if exist "%%~f" set "OCR_REC_KEYS=%%~f"
-  )
-)
-
-if defined OCR_REC_MODEL (
-  set "LOCAL_OCR_REC_MODEL_PATH=%OCR_REC_MODEL%"
-  if defined OCR_REC_KEYS (
-    set "LOCAL_OCR_REC_KEYS_PATH=%OCR_REC_KEYS%"
-  ) else (
-    set "LOCAL_OCR_REC_KEYS_PATH="
-  )
-  echo [RUN] Bat OCR rec model: %LOCAL_OCR_REC_MODEL_PATH%
-  if defined LOCAL_OCR_REC_KEYS_PATH (
-    echo [RUN] OCR rec keys      : %LOCAL_OCR_REC_KEYS_PATH%
-  ) else (
-    echo [RUN] OCR rec keys      : ^<khong can/khong tim thay^>
-  )
-) else (
-  set "LOCAL_OCR_REC_MODEL_PATH="
-  set "LOCAL_OCR_REC_KEYS_PATH="
-  echo [WARN] Chua tim thay model rec tieng Viet/Latin trong:
-  echo [WARN]   %OCR_MODEL_DIR%
-  echo [WARN] He thong se fallback model mac dinh - de mat dau tieng Viet.
-)
+echo [RUN] OCR engine: RapidOCR detection + VietOCR recognition (CPU-only).
 
 :: 4. Dong tat ca process cu (server + worker)
 echo [RUN] Dong cac process cu...

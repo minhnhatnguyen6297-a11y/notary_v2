@@ -10,7 +10,6 @@ APP_HOST="0.0.0.0"
 APP_PORT="8000"
 INSTALL_SYSTEM_PACKAGES="1"
 INSTALL_SYSTEMD="1"
-DOWNLOAD_OCR_MODEL="1"
 INSTALL_LOCAL_OCR_DEPS="1"
 
 APT_PACKAGES=(
@@ -47,7 +46,6 @@ Options:
   --port <port>              Uvicorn bind port (default: 8000).
   --skip-system-packages     Skip apt package installation.
   --without-systemd          Skip systemd service setup.
-  --without-ocr-model        Skip OCR model auto download.
   --without-local-ocr-deps   Skip Local OCR Python dependency installation.
   -h, --help                 Show this help.
 USAGE
@@ -124,10 +122,6 @@ parse_args() {
         INSTALL_SYSTEMD="0"
         shift
         ;;
-      --without-ocr-model)
-        DOWNLOAD_OCR_MODEL="0"
-        shift
-        ;;
       --without-local-ocr-deps)
         INSTALL_LOCAL_OCR_DEPS="0"
         shift
@@ -173,6 +167,9 @@ install_local_ocr_python_deps() {
   if [[ ! -f "$req_file" ]]; then
     die "Khong tim thay $req_file"
   fi
+  log "Cai PyTorch CPU-only cho VietOCR..."
+  "$APP_DIR/venv/bin/pip" uninstall -y torch torchvision torchaudio >/dev/null 2>&1 || true
+  "$APP_DIR/venv/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
   log "Cai dependencies Local OCR..."
   "$APP_DIR/venv/bin/pip" install -r "$req_file"
 }
@@ -190,54 +187,13 @@ setup_env_and_dirs() {
   # Ensure queue config exists even when user starts from a custom env file.
   set_env_if_empty_or_missing "CELERY_BROKER_URL" "sqlalchemy+sqlite:///./ocr_jobs.db"
   set_env_if_empty_or_missing "CELERY_RESULT_BACKEND" "db+sqlite:///./ocr_jobs.db"
-  set_env_if_empty_or_missing "LOCAL_OCR_MAX_SIDE_LEN" "1536"
+  set_env_if_empty_or_missing "LOCAL_OCR_DET_MAX_SIDE_LEN" "3000"
+  set_env_if_empty_or_missing "LOCAL_OCR_VIETOCR_MODEL" "vgg_transformer"
+  set_env_if_empty_or_missing "LOCAL_OCR_VIETOCR_BATCH_SIZE" "24"
+  set_env_if_empty_or_missing "LOCAL_OCR_TORCH_THREADS" "2"
+  set_env_if_empty_or_missing "LOCAL_OCR_DENOISE" "1"
   set_env_if_empty_or_missing "LOCAL_OCR_TIMING_LOG" "1"
   set_env_if_empty_or_missing "LOCAL_OCR_TIMING_SLOW_MS" "1500"
-}
-
-download_default_ocr_model() {
-  [[ "$DOWNLOAD_OCR_MODEL" == "1" ]] || return 0
-
-  local model_dir="$APP_DIR/models/rapidocr"
-  local vi_model_v4="$model_dir/vi_PP-OCRv4_rec_infer.onnx"
-  local vi_model_v3="$model_dir/vi_PP-OCRv3_rec_infer.onnx"
-  local vi_keys="$model_dir/vi_dict.txt"
-  local latin_model="$model_dir/latin_PP-OCRv3_rec_infer.onnx"
-  local latin_keys="$model_dir/latin_dict.txt"
-  local rec_model=""
-  local rec_keys=""
-
-  if [[ ! -f "$latin_model" ]]; then
-    log "Tai OCR rec model mac dinh (latin)..."
-    curl -fL "https://huggingface.co/breezedeus/cnocr-ppocr-latin_PP-OCRv3/resolve/main/latin_PP-OCRv3_rec_infer.onnx" -o "$latin_model"
-  fi
-
-  if [[ ! -f "$latin_keys" ]]; then
-    log "Tai OCR rec dictionary..."
-    curl -fL "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/main/ppocr/utils/dict/latin_dict.txt" -o "$latin_keys"
-  fi
-
-  if [[ -f "$vi_model_v4" ]]; then
-    rec_model="$vi_model_v4"
-  elif [[ -f "$vi_model_v3" ]]; then
-    rec_model="$vi_model_v3"
-  else
-    rec_model="$latin_model"
-  fi
-
-  if [[ "$rec_model" == "$vi_model_v4" || "$rec_model" == "$vi_model_v3" ]]; then
-    if [[ -f "$vi_keys" ]]; then
-      rec_keys="$vi_keys"
-    else
-      rec_keys="$latin_keys"
-    fi
-  else
-    rec_keys="$latin_keys"
-  fi
-
-  log "Chon OCR rec model: $rec_model"
-  set_env_value "LOCAL_OCR_REC_MODEL_PATH" "$rec_model"
-  set_env_value "LOCAL_OCR_REC_KEYS_PATH" "$rec_keys"
 }
 
 install_systemd_services() {
@@ -272,11 +228,11 @@ EOF
    bash $APP_DIR/deploy/vps/manage_services.sh logs
 3) Open firewall port if needed (default 8000).
 EOF
-  else
+ else
     cat <<EOF
 2) Start manually (without systemd):
    cd $APP_DIR
-   ./venv/bin/python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO
+   ./venv/bin/python -m celery -A celery_app.celery_app worker --pool=prefork --concurrency=3 --loglevel=INFO
    ./venv/bin/python -m uvicorn main:app --host $APP_HOST --port $APP_PORT
 EOF
   fi
@@ -296,7 +252,6 @@ main() {
   setup_python_env
   install_local_ocr_python_deps
   setup_env_and_dirs
-  download_default_ocr_model
   install_systemd_services
   print_summary
 }

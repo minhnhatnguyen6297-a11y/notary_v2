@@ -1,13 +1,13 @@
 # CLAUDE.md - notary_v2
 
 Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
-Cap nhat: 31/03/2026.
+Cap nhat: 01/04/2026.
 
 ## Tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
 - Frontend: Jinja2 + Bootstrap + Vanilla JS.
-- Local OCR: RapidOCR-only (khong dung stack deep-learning cu trong runtime).
+- Local OCR: RapidOCR detection + VietOCR recognition (CPU-only).
 
 ## Chay du an
 ```bash
@@ -31,11 +31,6 @@ Sau khi cai dat:
 - Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
 - Log file tren VPS: `logs/web.log`, `logs/worker.log`
 
-## SSH 1-click cho team Windows
-- Tao file `deploy/vps/ssh_credentials.env` tu mau `deploy/vps/ssh_credentials.example`
-- Double-click `connect_vps.bat` de auto khoi dong app va mo trinh duyet
-- Tai lieu: `docs/VPS_CONNECT_ONE_CLICK.md`
-
 ## Local OCR - RapidOCR Only
 
 ### Muc tieu
@@ -57,23 +52,29 @@ Sau khi cai dat:
    - Gan state: `front_old`, `front_new`, `back_new`, `back_old` (hoac `unknown`).
    - Xoay anh goc high-res theo huong da chon.
 5. Targeted extraction:
-   - Front ROI `0..55%` de lay ID/field mat truoc.
-   - Back ROI `70..100%` de uu tien MRZ mat sau.
+   - RapidOCR chi dung cho text detection, khong dung recognition.
+   - VietOCR `vgg_transformer` doc batch cac dong chu da cat tu bounding boxes.
+   - ROI loc theo `triage_state` (`front_old`, `front_new`, `back_new`, `back_old`, `unknown`) thay vi crop cung.
    - Regex MRZ: `IDVNM\\d{10}(\\d{12})`.
 6. Deterministic merge:
    - Ghep cap tuyet doi theo CCCD 12 so.
    - Anh khong co ID dua vao `unpaired` + warning.
    - Delta merge bo sung field thieu theo side/profile.
-7. Hybrid fallback:
-   - Neu triage/extract V2 thieu tin cay, fallback legacy khi `LOCAL_OCR_TRIAGE_FALLBACK_LEGACY=1`.
+7. Wide fallback:
+   - Neu triage `unknown`, he thong thu `id_front` -> `id_back` -> `detail` ROI rong.
+   - Khong con legacy fallback va khong con score rollback.
 8. Tra ket qua + warnings cho frontend de human-in-the-loop.
 9. Co log timing/telemetry chi tiet theo stage.
 
 ### Engine / nhan dang
-- `summary.local_engine`: `RapidOCR (CPU)` hoac `RapidOCR (GPU)`
-- Co ho tro custom rec model qua env:
-  - `LOCAL_OCR_REC_MODEL_PATH`
-  - `LOCAL_OCR_REC_KEYS_PATH`
+- `summary.local_engine`: `RapidOCR det + VietOCR rec (CPU)`
+- `summary.rec_model_mode`: `vgg_transformer`
+- Bien moi truong Local OCR chinh:
+  - `LOCAL_OCR_DET_MAX_SIDE_LEN`
+  - `LOCAL_OCR_VIETOCR_MODEL`
+  - `LOCAL_OCR_VIETOCR_BATCH_SIZE`
+  - `LOCAL_OCR_TORCH_THREADS`
+  - `LOCAL_OCR_DENOISE`
 
 ### Luat du lieu quan trong
 - Ten: uu tien QR > mat truoc > MRZ (MRZ chi fallback).
@@ -96,24 +97,24 @@ Sau khi cai dat:
   - `process_ocr_job`
   - `process_ocr_batch_job`
 - Worker startup chuan:
-  - `python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
+  - Local Windows qua `run.bat`: `python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
+  - VPS Linux/systemd: `python -m celery -A celery_app.celery_app worker --pool=prefork --concurrency=3 --loglevel=INFO`
 
 ## Script setup/run
-- `setup.bat`: tao venv + cai dependency chinh + tao `.env`.
-- `run.bat`: check dependency Local OCR RapidOCR stack.
-- `install_local_ocr.bat`: cai RapidOCR stack toi gian cho local.
+- `run.bat`: script local duy nhat. Tu tao venv, tao `.env`, cai dependency app + PyTorch CPU + VietOCR/RapidOCR, khoi dong worker/server.
+- `install_vps.sh`: script VPS duy nhat cho one-click install/start service.
 - `requirements-gpu.txt`: optional cho may NVIDIA (onnxruntime-gpu).
 
 ## Bien moi truong lien quan Local OCR
-- `LOCAL_OCR_MIN_BOX_SCORE`
-- `LOCAL_OCR_REC_MODEL_PATH`
-- `LOCAL_OCR_REC_KEYS_PATH`
 - `LOCAL_OCR_SMART_CROP_MIN_CONF`
-- `LOCAL_OCR_MAX_SIDE_LEN`
+- `LOCAL_OCR_DET_MAX_SIDE_LEN`
+- `LOCAL_OCR_VIETOCR_MODEL`
+- `LOCAL_OCR_VIETOCR_BATCH_SIZE`
+- `LOCAL_OCR_TORCH_THREADS`
+- `LOCAL_OCR_DENOISE`
 - `LOCAL_OCR_TIMING_LOG`
 - `LOCAL_OCR_TIMING_SLOW_MS`
 - `LOCAL_OCR_TRIAGE_V2`
-- `LOCAL_OCR_TRIAGE_FALLBACK_LEGACY`
 - `LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE`
 - `LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE`
 - `OCR_TEXT_LLM_MODEL`
@@ -132,5 +133,5 @@ Sau khi cai dat:
 ## Kiem tra nhanh truoc khi ban giao
 ```bash
 python -m py_compile routers/ocr_local.py tasks.py
-rg -n "rapidocr|onnxruntime|opencv-python|LOCAL_OCR_TRIAGE" .env.example CLAUDE.md run.bat install_local_ocr.bat
+rg -n "rapidocr|onnxruntime|opencv-python|LOCAL_OCR_TRIAGE" .env.example CLAUDE.md run.bat
 ```
