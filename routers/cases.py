@@ -41,11 +41,13 @@ def _build_temp_participants(
     participant_role: Optional[Union[List[str], str]],
     participant_share: Optional[Union[List[str], str]],
     participant_receive: Optional[Union[List[str], str]],
+    participant_parent_id: Optional[Union[List[str], str]] = None,
 ):
     id_list = _to_list(participant_id)
     role_list = _to_list(participant_role)
     share_list = _to_list(participant_share)
     receive_list = _to_list(participant_receive)
+    parent_list = _to_list(participant_parent_id)
     customers_by_id = {str(c.id): c for c in all_customers}
     participants = []
 
@@ -59,17 +61,24 @@ def _build_temp_participants(
         role = (role_list[idx] if idx < len(role_list) else "") or "Khac"
         share_raw = share_list[idx] if idx < len(share_list) else "0"
         receive_raw = receive_list[idx] if idx < len(receive_list) else "1"
+        parent_raw = parent_list[idx] if idx < len(parent_list) else ""
         try:
             share_val = float(share_raw)
         except Exception:
             share_val = 0.0
         co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+
+        parent_cid = None
+        if parent_raw and str(parent_raw).isdigit():
+            parent_cid = int(parent_raw)
+
         participants.append(SimpleNamespace(
             customer_id=customer.id,
             customer=customer,
             vai_tro=role,
             ty_le=share_val,
-            co_nhan_tai_san=co_nhan
+            co_nhan_tai_san=co_nhan,
+            parent_customer_id=parent_cid
         ))
     participant_ids = {p.customer_id for p in participants}
     return participants, participant_ids
@@ -112,6 +121,7 @@ def create(
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
+    participant_parent_id: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
     from datetime import date as _date
@@ -130,7 +140,7 @@ def create(
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
     posted_participants, posted_participant_ids = _build_temp_participants(
-        all_customers, participant_id, participant_role, participant_share, participant_receive
+        all_customers, participant_id, participant_role, participant_share, participant_receive, participant_parent_id
     )
 
     if field_errors:
@@ -154,6 +164,7 @@ def create(
         role_list = _to_list(participant_role)
         share_list = _to_list(participant_share)
         recv_list = _to_list(participant_receive)
+        parent_list = _to_list(participant_parent_id)
         if pid_list and role_list:
             for idx, cid in enumerate(pid_list):
                 if not cid:
@@ -163,15 +174,22 @@ def create(
                 role = role_list[idx] if idx < len(role_list) else ""
                 share_raw = share_list[idx] if idx < len(share_list) else "0"
                 receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
+                parent_raw = parent_list[idx] if idx < len(parent_list) else ""
                 try:
                     share_val = float(share_raw)
                 except Exception:
                     share_val = 0.0
                 co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+
+                parent_cid = None
+                if parent_raw and str(parent_raw).isdigit():
+                    parent_cid = int(parent_raw)
+
                 p = InheritanceParticipant(
                     ho_so_id=c.id, customer_id=int(cid),
                     vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                    ty_le=share_val, co_nhan_tai_san=co_nhan
+                    ty_le=share_val, co_nhan_tai_san=co_nhan,
+                    parent_customer_id=parent_cid
                 )
                 db.add(p)
             db.commit()
@@ -238,6 +256,7 @@ def edit(
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
+    participant_parent_id: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
@@ -258,7 +277,7 @@ def edit(
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
     posted_participants, posted_participant_ids = _build_temp_participants(
-        all_customers, participant_id, participant_role, participant_share, participant_receive
+        all_customers, participant_id, participant_role, participant_share, participant_receive, participant_parent_id
     )
     if field_errors:
         return templates.TemplateResponse("cases/form.html", {
@@ -280,6 +299,7 @@ def edit(
         role_list = _to_list(participant_role)
         share_list = _to_list(participant_share)
         recv_list = _to_list(participant_receive)
+        parent_list = _to_list(participant_parent_id)
         if pid_list and role_list:
             for idx, participant_customer_id in enumerate(pid_list):
                 if not participant_customer_id:
@@ -289,15 +309,22 @@ def edit(
                 role = role_list[idx] if idx < len(role_list) else ""
                 share_raw = share_list[idx] if idx < len(share_list) else "0"
                 receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
+                parent_raw = parent_list[idx] if idx < len(parent_list) else ""
                 try:
                     share_val = float(share_raw)
                 except Exception:
                     share_val = 0.0
                 co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
+
+                parent_cid = None
+                if parent_raw and str(parent_raw).isdigit():
+                    parent_cid = int(parent_raw)
+
                 p = InheritanceParticipant(
                     ho_so_id=case.id, customer_id=int(participant_customer_id),
                     vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                    ty_le=share_val, co_nhan_tai_san=co_nhan
+                    ty_le=share_val, co_nhan_tai_san=co_nhan,
+                    parent_customer_id=parent_cid
                 )
                 db.add(p)
             db.commit()
@@ -1009,6 +1036,7 @@ def create_live_preview(
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
+    participant_parent_id: Optional[Union[List[str], str]] = Form(None),
     db: Session = Depends(get_db)
 ):
     # Dummy case to use existing mapping logic
@@ -1042,6 +1070,7 @@ def create_live_preview(
     role_list = _to_list(participant_role)
     share_list = _to_list(participant_share)
     receive_list = _to_list(participant_receive)
+    parent_list = _to_list(participant_parent_id)
     
     participants = []
     owner = None
@@ -1055,11 +1084,13 @@ def create_live_preview(
         if not c: continue
         role = role_list[idx] if idx < len(role_list) else ""
         recv = str(receive_list[idx]).lower() in ("1", "true") if idx < len(receive_list) else True
+        parent_raw = parent_list[idx] if idx < len(parent_list) else ""
+        parent_cid = int(parent_raw) if parent_raw and str(parent_raw).isdigit() else None
         
         # In fix_html.py we didn't map owner. The form hidden inputs do not include owner.
         # Wait, the owner IS in the form because owner card has data-role="Owner" (but roleMap in form didn't map it. Let me just use standard list)
         
-        p = SimpleNamespace(customer=c, vai_tro=role, co_nhan_tai_san=recv)
+        p = SimpleNamespace(customer=c, vai_tro=role, co_nhan_tai_san=recv, parent_customer_id=parent_cid)
         participants.append(p)
         
         if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc"): parents.append(p)

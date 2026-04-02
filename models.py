@@ -20,7 +20,12 @@ class Customer(Base):
     created_at   = Column(DateTime,    server_default=func.now())
 
     # Quan hệ
-    participations   = relationship("InheritanceParticipant", back_populates="customer", cascade="all, delete-orphan")
+    participations   = relationship(
+        "InheritanceParticipant",
+        back_populates="customer",
+        cascade="all, delete-orphan",
+        foreign_keys="InheritanceParticipant.customer_id",
+    )
     inheritance_cases = relationship("InheritanceCase", back_populates="nguoi_chet", foreign_keys="InheritanceCase.nguoi_chet_id")
 
     @property
@@ -114,10 +119,12 @@ class InheritanceParticipant(Base):
     co_nhan_tai_san  = Column(Boolean,     default=True)     # True = nhận, False = từ chối
     ty_le            = Column(Float,       default=0.0)      # Tỷ lệ % sở hữu sau phân chia
     ghi_chu          = Column(Text,        nullable=True)
+    parent_customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
 
     # Quan hệ
     ho_so    = relationship("InheritanceCase", back_populates="participants")
-    customer = relationship("Customer",        back_populates="participations")
+    customer = relationship("Customer",        foreign_keys=[customer_id], back_populates="participations")
+    parent_customer = relationship("Customer", foreign_keys=[parent_customer_id])
 
 
 class WordTemplate(Base):

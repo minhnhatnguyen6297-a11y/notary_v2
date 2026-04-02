@@ -56,11 +56,14 @@ def _ensure_table_columns(cur, table_name: str, expected_columns: dict[str, str]
 
 
 def migrate_inheritance_cases_schema():
-    """Them cac cot moi cho bang inheritance_cases tren DB cu."""
+    """Them cac cot moi cho cac bang thua ke tren DB cu."""
     con = sqlite3.connect("notary.db")
     cur = con.cursor()
     _ensure_table_columns(cur, "inheritance_cases", {
         "noi_niem_yet": "VARCHAR(200)",
+    })
+    _ensure_table_columns(cur, "inheritance_participants", {
+        "parent_customer_id": "INTEGER",
     })
     con.commit()
     con.close()

@@ -859,6 +859,20 @@ endif %}
     .tox-statusbar__branding {
       display: none !important;
     }
+
+    #react-flow-root {
+      min-height: 55vh;
+      height: clamp(540px, 62vh, 860px);
+      border-top: 1px solid #e5e7eb;
+      background:
+        radial-gradient(circle at top left, rgba(37, 99, 235, .08), transparent 28%),
+        radial-gradient(circle at bottom right, rgba(217, 119, 6, .1), transparent 26%),
+        linear-gradient(180deg, #fffdf8 0%, #fff 100%);
+    }
+
+    #legacy-tree-wrap {
+      display: none;
+    }
   </style>
 
   <div class="case-layout-wrap" style="display: flex; flex-direction: column; gap: 8px; padding: 0 8px 10px 8px;">
@@ -1020,6 +1034,8 @@ endif %}
               <div class="title">Cảnh báo nghiệp vụ</div>
               <ul id="tree-warnings-list"></ul>
             </div>
+            <div id="react-flow-root"></div>
+            <div id="legacy-tree-wrap">
             <div class="tree-wrap" style="overflow-y: auto; min-height: 55vh;">
               <div class="tree-tier">
                 <div class="tier-title">Tầng 1 - Cha mẹ</div>
@@ -1094,6 +1110,7 @@ endif %}
                   </div>
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </div>
@@ -1632,10 +1649,12 @@ endif %}
         name: "{{ p.customer.ho_ten|e }}",
           doc: "{{ p.customer.so_giay_to|e }}",
             gender: "{{ p.customer.gioi_tinh|default('', true)|e }}",
+              birth: "{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}",
               death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
                 role: "{{ p.vai_tro|e }}",
                   share: "{{ p.ty_le }}",
-                    receive: "{{ '1' if p.co_nhan_tai_san else '0' }}"
+                    receive: "{{ '1' if p.co_nhan_tai_san else '0' }}",
+                      parent_id: "{{ p.parent_customer_id if p.parent_customer_id else '' }}"
     } {% if not loop.last %}, {% endif %}
     {% endfor %}
   ];
@@ -1653,6 +1672,7 @@ endif %}
     } {% if not loop.last %}, {% endif %}
     {% endfor %}
   ];
+    window.__ALL_CUSTOMERS_DATA__ = allCustomersData;
     const pool = document.getElementById('people-pool');
     const slots = document.querySelectorAll('.slot');
     const childrenZone = document.getElementById('children-zone');
@@ -1661,6 +1681,54 @@ endif %}
     const warningBox = document.getElementById('tree-warnings');
     const warningList = document.getElementById('tree-warnings-list');
     const ownerInput = document.getElementById('case-nguoi-chet');
+
+    window.__FAMILY_TREE_STATE__ = window.__FAMILY_TREE_STATE__ || {
+      participants: [],
+      warnings: [],
+      shareMode: 'auto',
+      updatedAt: ''
+    };
+
+    function getFamilyTreeState() {
+      const state = window.__FAMILY_TREE_STATE__ || {};
+      return {
+        participants: Array.isArray(state.participants) ? state.participants : [],
+        warnings: Array.isArray(state.warnings) ? state.warnings : [],
+        shareMode: state.shareMode || 'auto',
+        updatedAt: state.updatedAt || ''
+      };
+    }
+
+    function renderFamilyTreeWarnings(warnings) {
+      if (!warningBox || !warningList) return;
+      warningList.innerHTML = '';
+      if (!warnings || !warnings.length) {
+        warningBox.classList.add('d-none');
+        return;
+      }
+      warnings.forEach(msg => {
+        const li = document.createElement('li');
+        li.textContent = msg;
+        warningList.appendChild(li);
+      });
+      warningBox.classList.remove('d-none');
+    }
+
+    window.addEventListener('onFamilyTreeUpdate', (evt) => {
+      const detail = evt.detail || {};
+      const participants = Array.isArray(detail.participants) ? detail.participants : [];
+      window.__FAMILY_TREE_STATE__ = {
+        participants,
+        warnings: Array.isArray(detail.warnings) ? detail.warnings : [],
+        shareMode: detail.shareMode || 'auto',
+        updatedAt: detail.updatedAt || ''
+      };
+      window.__CURRENT_TREE_PAYLOAD__ = participants;
+
+      const owner = participants.find(p => p.role === 'Owner');
+      if (ownerInput) ownerInput.value = owner ? owner.id : '';
+      renderFamilyTreeWarnings(window.__FAMILY_TREE_STATE__.warnings);
+    });
 
     // ─── DRAG STATE (HTML5 NATIVE FOR REACT FLOW) ──────────────────────────────────────────────────────────────
     window.handleNativeDragStart = function (evt, personData) {
@@ -2852,7 +2920,9 @@ endif %}
 
     document.getElementById('case-form')?.addEventListener('submit', (ev) => {
       ev.preventDefault();
-      const warns = validateTreeWarnings();
+      const treeState = getFamilyTreeState();
+      const treeParticipants = treeState.participants || [];
+      const warns = treeParticipants.length ? treeState.warnings : validateTreeWarnings();
       if (warns.length > 0) {
         const ok = window.confirm(`Hồ sơ đang có ${warns.length} cảnh báo đỏ. Bạn vẫn muốn lưu?`);
         if (!ok) return;
@@ -2866,6 +2936,25 @@ endif %}
       if (noiInput && noiFld) noiFld.value = noiInput.value;
       const holder = document.getElementById('participants-hidden');
       holder.innerHTML = '';
+
+      if (treeParticipants.length > 0) {
+        const owner = treeParticipants.find(p => p.role === 'Owner');
+        if (ownerInput) ownerInput.value = owner ? owner.id : '';
+
+        treeParticipants.forEach(p => {
+          holder.insertAdjacentHTML('beforeend', `
+        <input type="hidden" name="participant_id" value="${p.id}">
+        <input type="hidden" name="participant_role" value="${p.role}">
+        <input type="hidden" name="participant_share" value="${p.sharePercent || p.share || '0'}">
+        <input type="hidden" name="participant_receive" value="${p.willReceive ? '1' : '0'}">
+        <input type="hidden" name="participant_parent_id" value="${p.parentId || ''}">
+      `);
+        });
+
+        localStorage.removeItem(_stagingKey());
+        ev.target.submit();
+        return;
+      }
 
       function addParticipant(card, role) {
         if (!card) return;
@@ -2907,7 +2996,13 @@ endif %}
     });
     // Load React app
   </script>
-  <script type="text/babel" src="/static/ReactFlowApp.jsx"></script>
+  <link rel="stylesheet" href="/static/vendor/reactflow.style.css">
+  <script src="/static/vendor/react.production.min.js"></script>
+  <script src="/static/vendor/react-dom.production.min.js"></script>
+  <script src="/static/vendor/babel.min.js"></script>
+  <script src="/static/vendor/reactflow.umd.js"></script>
+  <script src="/static/vendor/dagre.min.js"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
@@ -2923,13 +3018,17 @@ endif %}
       });
 
       // Đọc payload từ React Flow
-      const treePayload = window.__CURRENT_TREE_PAYLOAD__ || [];
+      const treeState = getFamilyTreeState();
+      const treePayload = treeState.participants && treeState.participants.length
+        ? treeState.participants
+        : (window.__CURRENT_TREE_PAYLOAD__ || []);
 
       treePayload.forEach(p => {
         payload.append('participant_id', p.id);
         payload.append('participant_role', p.role);
-        payload.append('participant_share', '0');
-        payload.append('participant_receive', p.death ? '0' : '1');
+        payload.append('participant_share', p.sharePercent || p.share || '0');
+        payload.append('participant_receive', p.willReceive ? '1' : '0');
+        payload.append('participant_parent_id', p.parentId || '');
       });
 
       if (emptyState) emptyState.style.display = 'none';
@@ -2953,6 +3052,20 @@ endif %}
       } catch (err) {
         console.error('Lỗi khi tải preview', err);
       }
+    }
+
+    let __familyTreePreviewTimer = null;
+    window.addEventListener('onFamilyTreeUpdate', () => {
+      clearTimeout(__familyTreePreviewTimer);
+      __familyTreePreviewTimer = setTimeout(() => {
+        if (typeof loadLivePreview === 'function' && window.liveEditor) {
+          loadLivePreview();
+        }
+      }, 350);
+    });
+
+    if (getFamilyTreeState().participants.length && window.liveEditor) {
+      loadLivePreview();
     }
 
     function exportDraftWord() {
