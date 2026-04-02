@@ -11,7 +11,7 @@ set "PLINK_PATH=%BIN_DIR%\plink.exe"
 set "MODE=interactive"
 set "RAW_TERMINAL=0"
 set "OPEN_BROWSER=1"
-set "CLEAN_SHELL_CMD=env TERM=dumb bash -li"
+set "CLEAN_SHELL_CMD="
 set "VPS_APP_SCHEME=http"
 set "VPS_APP_PORT=8000"
 set "VPS_APP_PATH=/"
@@ -41,8 +41,10 @@ if "%VPS_PORT%"=="" set "VPS_PORT=22"
 if "%VPS_APP_SCHEME%"=="" set "VPS_APP_SCHEME=http"
 if "%VPS_APP_PORT%"=="" set "VPS_APP_PORT=8000"
 if "%VPS_APP_PATH%"=="" set "VPS_APP_PATH=/"
+if "%VPS_REPO_DIR%"=="" set "VPS_REPO_DIR=~/notary_v2"
 if not "%VPS_APP_PATH:~0,1%"=="/" set "VPS_APP_PATH=/%VPS_APP_PATH%"
 call :APPLY_BROWSER_FLAG "%VPS_AUTO_OPEN_BROWSER%"
+call :BUILD_CLEAN_SHELL_CMD
 set "APP_URL=%VPS_APP_SCHEME%://%VPS_HOST%:%VPS_APP_PORT%%VPS_APP_PATH%"
 
 if not exist "%PLINK_PATH%" (
@@ -60,7 +62,7 @@ echo [RUN] Dang ket noi toi %VPS_USER%@%VPS_HOST%:%VPS_PORT% ...
 if "%RAW_TERMINAL%"=="1" (
   echo [RUN] Raw terminal mode: giu shell mac dinh cua VPS.
 ) else (
-  echo [RUN] Clean shell mode: an xterm control sequence tren Windows console.
+  echo [RUN] Clean shell mode: vao thang repo %VPS_REPO_DIR% va an xterm control sequence tren Windows console.
 )
 if not "%OPEN_BROWSER%"=="0" (
   echo [RUN] Dang mo trinh duyet: %APP_URL%
@@ -137,6 +139,11 @@ if /I "%~1"=="VPS_APP_SCHEME" set "VPS_APP_SCHEME=%~2"
 if /I "%~1"=="VPS_APP_PORT" set "VPS_APP_PORT=%~2"
 if /I "%~1"=="VPS_APP_PATH" set "VPS_APP_PATH=%~2"
 if /I "%~1"=="VPS_AUTO_OPEN_BROWSER" set "VPS_AUTO_OPEN_BROWSER=%~2"
+if /I "%~1"=="VPS_REPO_DIR" set "VPS_REPO_DIR=%~2"
+goto :eof
+
+:BUILD_CLEAN_SHELL_CMD
+set "CLEAN_SHELL_CMD=REPO_DIR='%VPS_REPO_DIR%'; if [ "${REPO_DIR#~/}" != "$REPO_DIR" ]; then REPO_DIR="$HOME/${REPO_DIR#~/}"; fi; if [ -d "$REPO_DIR" ]; then cd "$REPO_DIR"; else echo "[WARN] Khong tim thay repo dir: $REPO_DIR"; fi; exec env TERM=dumb bash -li"
 goto :eof
 
 :APPLY_BROWSER_FLAG

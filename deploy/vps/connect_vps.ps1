@@ -127,6 +127,10 @@ set -e
 REPO_DIR="__REPO_DIR__"
 APP_PORT="__APP_PORT__"
 
+if [ "${REPO_DIR#~/}" != "$REPO_DIR" ]; then
+  REPO_DIR="$HOME/${REPO_DIR#~/}"
+fi
+
 cd "$REPO_DIR"
 (git pull --ff-only || true)
 
