@@ -582,6 +582,18 @@ def _safe_text(v) -> str:
     return s
 
 
+def _honorific_for_customer(c: Optional[Customer]) -> str:
+    if not c:
+        return ""
+    gender = (c.gioi_tinh or "").strip().lower()
+    if gender == "nam":
+        return "\u00d4ng"
+    if gender in ("n\u1eef", "nu"):
+        return "B\u00e0"
+    return ""
+
+
+
 def _so_thanh_chu(so: float) -> str:
     """Chuyển số thực (diện tích m²) thành chữ tiếng Việt."""
     if so is None:
@@ -762,6 +774,7 @@ def _build_template_mapping(case: InheritanceCase) -> dict:
 
     for i in range(1, 21):
         c = people_slots[i]
+        m[f"[Xưng hô {i}]"] = _honorific_for_customer(c)
         m[f"[Tên {i}]"] = _safe_text(c.ho_ten if c else "")
         m[f"[Năm sinh {i}]"] = _safe_text(_fmt_birth_or_year(c.ngay_sinh) if c else "")
         m[f"[CCCD {i}]"] = _safe_text(c.so_giay_to if c else "")
