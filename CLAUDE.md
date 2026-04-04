@@ -136,6 +136,8 @@ Sau khi cai dat:
 - Uu tien fix theo huong giu contract API hien tai.
 - Khong doi ten task Celery.
 - Khong thay doi schema DB neu khong bat buoc.
+- Bat buoc de lai "future-dev comment" cho logic nghiep vu kho, fallback, workaround, magic number/regex, va state merge. Xem `docs/CODE_COMMENT_POLICY.md`.
+- Khi sua Python/JS/Jinja, uu tien copy template tu `docs/COMMENT_TEMPLATES.md` de comment giai thich WHY/RISK/CHANGE RULE thay vi ghi chu chung chung.
 - Neu sua flow OCR, phai test lai bo anh regression 10 anh CCCD.
 
 ## Kiem tra nhanh truoc khi ban giao
