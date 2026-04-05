@@ -21,6 +21,22 @@ python -m uvicorn main:app --port 8000
 
 URL mac dinh: `http://127.0.0.1:8000`
 
+## Session context cho agent
+- Repo nay da co co che session context cho Codex trong `AGENTS.md`.
+- Agent se tu suy ra chuc nang dang lam tu branch, file dirty, va lich su
+  session.
+- Lenh bootstrap nhanh cho moi session:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\session_context_check.ps1
+```
+
+- Script tren se:
+  - suy ra `active context`
+  - dam bao local stack duoc bat qua `run.bat` neu can
+  - cho server `127.0.0.1:8000` san sang
+  - in cac log gan `active context` nhat
+
 ## VPS one-click
 ```bash
 bash install_vps.sh
