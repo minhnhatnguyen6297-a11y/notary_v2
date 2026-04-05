@@ -57,6 +57,20 @@ class FilterTargetBoxesTests(unittest.TestCase):
 
 
 class ParseFullTextTests(unittest.TestCase):
+    def test_extract_id_12_from_mrz_text_uses_canonical_22_digit_rule(self):
+        cases = {
+            "IDVNM065001407903606500140`7<<4": "036065001407",
+            "IDVNM0820009892036082000989<<7": "036082000989",
+            "IDVNM1680062760036168006276<<5": "036168006276",
+            "IDVNM0840118259036084011825<<4": "036084011825",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                extracted = ocr_local._extract_id_12_from_mrz_text(text)
+                self.assertEqual(extracted, expected)
+                self.assertNotIn(extracted, {"065001407903", "082000989203"})
+
     def test_parse_cccd_fulltext_front_old_extracts_key_fields(self):
         full_text = """
         CAN CUOC CONG DAN

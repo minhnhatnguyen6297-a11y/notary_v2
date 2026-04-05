@@ -1100,8 +1100,28 @@ def _extract_id_12_from_text(text: str) -> str:
     return ""
 
 
+def _extract_canonical_cccd_from_mrz_text(text: str) -> str:
+    # [WHY] Canonical VN ID MRZ rule: after `IDVNM`, ignore separators like `<`,
+    # keep digit order, take the first 22 digits, then use digits 11..22 as the CCCD.
+    # [RISK] Taking the first 12 digits after `IDVNM` can create a wrong person key for the back side.
+    normalized = re.sub(r"\s+", "", _ascii_fold(text or "").upper()).replace("`", "<")
+    if not normalized:
+        return ""
+    start = normalized.find("IDVNM")
+    if start < 0:
+        return ""
+    digits_after_prefix = "".join(ch for ch in normalized[start + 5:] if ch.isdigit())
+    if len(digits_after_prefix) < 22:
+        return ""
+    return digits_after_prefix[:22][10:22]
+
+
 def _extract_id_12_from_mrz_text(text: str) -> str:
-    normalized = re.sub(r"\s+", "", _ascii_fold(text or "").upper())
+    # [WHY] Use the same canonical 22-digit rule as AI OCR before any fallback regex.
+    canonical = _extract_canonical_cccd_from_mrz_text(text)
+    if canonical:
+        return canonical
+    normalized = re.sub(r"\s+", "", _ascii_fold(text or "").upper()).replace("`", "<")
     if not normalized:
         return ""
     if match := re.search(r"IDVNM\d{10}(\d{12})", normalized):

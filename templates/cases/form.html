@@ -1646,12 +1646,12 @@ endif %}
       {% for p in participants %}
     {
       id: "{{ p.customer_id }}",
-        name: "{{ p.customer.ho_ten|e }}",
-          doc: "{{ p.customer.so_giay_to|e }}",
-            gender: "{{ p.customer.gioi_tinh|default('', true)|e }}",
-              birth: "{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}",
-              death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
-                role: "{{ p.vai_tro|e }}",
+        name: {{ p.customer.ho_ten | tojson }},
+          doc: {{ (p.customer.so_giay_to or '') | tojson }},
+            gender: {{ (p.customer.gioi_tinh or '') | tojson }},
+              birth: {{ (p.customer.ngay_sinh.year | string if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '')) | tojson }},
+              death: {{ (p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '') | tojson }},
+                role: {{ p.vai_tro | tojson }},
                   share: "{{ p.ty_le }}",
                     receive: "{{ '1' if p.co_nhan_tai_san else '0' }}",
                       parent_id: "{{ p.parent_customer_id if p.parent_customer_id else '' }}"
@@ -1664,11 +1664,11 @@ endif %}
       {% for c in all_customers %}
     {
       id: "{{ c.id }}",
-        name: "{{ c.ho_ten|e }}",
-          doc: "{{ c.so_giay_to|e }}",
-            gender: "{{ c.gioi_tinh|default('', true)|e }}",
-              death: "{{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '') }}",
-                birth: "{{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '') }}"
+        name: {{ c.ho_ten | tojson }},
+          doc: {{ (c.so_giay_to or '') | tojson }},
+            gender: {{ (c.gioi_tinh or '') | tojson }},
+              death: {{ (c.ngay_chet.year | string if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '')) | tojson }},
+                birth: {{ (c.ngay_sinh.year | string if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '')) | tojson }}
     } {% if not loop.last %}, {% endif %}
     {% endfor %}
   ];
@@ -3327,7 +3327,7 @@ endif %}
           imageQueue.push(entry);
           renderQueue();
           const [preview, qrDataUrl] = await Promise.all([
-            resizeImage(f, 1000),
+            resizeImage(f, 700),
             fileToDataUrl(f),
           ]);
           entry.dataUrl = preview?.dataUrl || null;
@@ -3409,6 +3409,22 @@ endif %}
       }
 
       // ── Preview ảnh to khi click thumbnail ────────────────────────────────
+      function statusHtml(item) {
+        const s = typeof item === 'string' ? item : item.status;
+        const errMsg = typeof item === 'object' ? (item._errorMsg || '') : '';
+        if (s === 'pending') return '<span style="color:#64748b;">Cho xu ly</span>';
+        if (s === 'queued') return '<span style="color:#0f172a;">Dang xep hang</span>';
+        if (s === 'qr') return '<span style="color:#059669;">QR (mien phi)</span>';
+        if (s === 'processing') return '<span style="color:#d97706;">Dang trich xuat...</span>';
+        if (s === 'ocr') return '<span style="color:#2563eb;">OCR</span>';
+        if (s === 'ocr_back') return '<span style="color:#7c3aed;">OCR - mat sau da ghep</span>';
+        if (s === 'ai') return '<span style="color:#2563eb;">AI OCR</span>';
+        if (s === 'ai_back') return '<span style="color:#7c3aed;">Mat sau (da ghep)</span>';
+        if (s === 'ai_manual') return '<span style="color:#b45309;">AI OCR - can gan/chinh tay</span>';
+        if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">${errMsg || 'Loi'}</span>`;
+        return s;
+      }
+
       window.ocrPreviewImg = function (id) {
         const item = imageQueue.find(i => i.id === id);
         if (!item?.dataUrl) return;
@@ -3449,7 +3465,7 @@ endif %}
           if (suppBtn) { suppBtn.disabled = true; suppBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
 
           try {
-            const { dataUrl } = await resizeImage(file, 1000);
+            const { dataUrl } = await resizeImage(file, 700);
             const qId = Date.now() + '_s';
             imageQueue.push({ id: qId, file, name: file.name, dataUrl, status: 'processing', sizeKB: 0 });
             renderQueue();
@@ -3705,22 +3721,31 @@ endif %}
         document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
 
         // ── Bước 1: QR scan tất cả (client-side, miễn phí) ──────────────────
-        const needsAI = [];
-        for (const item of pending) {
-          item.status = 'processing';
-          renderQueue();
-          const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
-          if (qrText) {
-            const person = parseQRToPerson(qrText);
-            if (person) {
-              item.status = 'qr';
-              item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
-              renderQueue();
-              continue;
+        const qrConcurrency = 3;
+        let qrCursor = 0;
+        const qrWorkers = Array.from({ length: Math.min(qrConcurrency, pending.length) }, async () => {
+          while (qrCursor < pending.length) {
+            const currentIndex = qrCursor++;
+            const item = pending[currentIndex];
+            if (!item) break;
+
+            item.status = 'processing';
+            renderQueue();
+
+            const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
+            if (qrText) {
+              const person = parseQRToPerson(qrText);
+              if (person) {
+                item.status = 'qr';
+                item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
+                renderQueue();
+                continue;
+              }
             }
           }
-          needsAI.push(item);
-        }
+        });
+        await Promise.all(qrWorkers);
+        const needsAI = pending.filter(item => item.status !== 'qr');
 
         // ── Bước 2: Gửi ảnh cần AI (1 lần gọi duy nhất) ────────────────────
         if (needsAI.length) {
@@ -3746,6 +3771,7 @@ endif %}
             const persons = data.persons || [];
             const properties = data.properties || [];
             const marriages = data.marriages || [];
+            const rawResults = Array.isArray(data.raw_results) ? data.raw_results : [];
 
             // Map filename → kết quả (index TẤT CẢ files trong _files[] để back cũng được đánh dấu)
             const byFile = {};
@@ -3756,6 +3782,12 @@ endif %}
             }
             for (const pr of properties) (byFile[pr._file || ''] = byFile[pr._file || ''] || []).push({ type: 'property', data: pr });
             for (const m of marriages) (byFile[m._file || ''] = byFile[m._file || ''] || []).push({ type: 'marriage', data: m });
+            const rawByFile = {};
+            for (const rr of rawResults) {
+              const filename = String(rr?.filename || '').trim();
+              if (!filename) continue;
+              rawByFile[filename] = rr;
+            }
 
             for (const item of needsAI) {
               const results = byFile[item.name] || [];
@@ -3769,6 +3801,11 @@ endif %}
               } else {
                 item.status = 'error';
                 item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+              }
+              if (item.status === 'error' && rawByFile[item.name]) {
+                item.status = 'ai_manual';
+                item._errorMsg = '';
+                item._rawResult = rawByFile[item.name];
               }
               renderQueue();
             }

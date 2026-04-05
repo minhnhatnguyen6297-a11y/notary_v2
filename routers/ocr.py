@@ -12,6 +12,8 @@ Pipeline:
 
 import asyncio
 import base64, io, json, logging, os, re, unicodedata
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime
 from time import perf_counter
 from typing import Any, List
@@ -33,6 +35,8 @@ _logger = logging.getLogger("ocr_api")
 _local_ocr_module = None
 _local_ocr_import_attempted = False
 _face_cascade = None
+_PREPROCESS_POOL: ProcessPoolExecutor | None = None
+_PREPROCESS_POOL_WORKERS = 0
 
 # ─── Config — đọc động từ file .env để không cần restart khi đổi key ──────────
 _ENV_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
@@ -106,10 +110,25 @@ def _get_ai_ocr_settings() -> dict[str, Any]:
         "timing_slow_ms": _get_env_float("AI_OCR_TIMING_SLOW_MS", 2500.0, minimum=100.0),
         "enable_targeted_fields": _get_env_flag("AI_OCR_ENABLE_TARGETED_FIELDS", True),
         "enable_mrz_local": _get_env_flag("AI_OCR_ENABLE_MRZ_LOCAL", True),
+        "preprocess_workers": _get_env_int("AI_OCR_PREPROCESS_WORKERS", 2, minimum=0),
+        "preprocess_warmup": _get_env_flag("AI_OCR_PREPROCESS_WARMUP", True),
     }
+
+
+def _parse_mrz_crop_ratio() -> float:
+    try:
+        value = float(_get_env_value("AI_OCR_MRZ_CROP_RATIO", "0.65"))
+    except (TypeError, ValueError):
+        return 0.65
+    return max(0.4, min(0.9, value))
+
 
 MAX_IMAGE_PX = 1000
 JPEG_QUALITY = 82
+MRZ_BOTTOM_CROP_RATIO = _parse_mrz_crop_ratio()
+MRZ_CROP_FILTER_Y_MAX = 0.6
+MRZ_CROP_MIN_WIDTH_RATIO = 0.5
+MRZ_CROP_MAX_HEIGHT_RATIO = 0.12
 
 DOC_PROFILE_FRONT_OLD = "cccd_front_old"
 DOC_PROFILE_BACK_OLD = "cccd_back_old"
@@ -211,6 +230,12 @@ def _qr_variants(file_bytes: bytes):
         if pil_img.mode not in ("RGB", "L"):
             pil_img = pil_img.convert("RGB")
         variants.append(pil_img)
+        # Try cheap PIL rotations before heavier OpenCV variants.
+        for angle in (90, 180, 270):
+            try:
+                variants.append(pil_img.rotate(-angle, expand=True))
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -222,35 +247,17 @@ def _qr_variants(file_bytes: bytes):
         img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img_bgr is None:
             return variants
-        
+
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        
-        # Tạo 2 biến thể xịn nhất: Upscale x2 (mịn hơn) và Adaptive Threshold (bao vùng mờ/bóng)
-        h, w = gray.shape[:2]
-        scale = 2.0
-        nw, nh = int(w * scale), int(h * scale)
-        if nw <= 2600 and nh <= 2600:
-            upscaled = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_CUBIC)
-            base_for_thresh = upscaled
-            pil_var = _cv_to_pil_gray(upscaled)
-            if pil_var is not None:
-                variants.append(pil_var)
-        else:
-            base_for_thresh = gray
-            
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(base_for_thresh)
-        sharpen = cv2.filter2D(clahe, -1, np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32))
-        adaptive = cv2.adaptiveThreshold(
-            sharpen,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            31,
-            7,
-        )
-        pil_var = _cv_to_pil_gray(adaptive)
-        if pil_var is not None:
-            variants.append(pil_var)
+        if os.getenv("AI_OCR_QR_UPSCALE", "0") == "1":
+            h, w = gray.shape[:2]
+            scale = 2.0
+            nw, nh = int(w * scale), int(h * scale)
+            if nw <= 2600 and nh <= 2600:
+                upscaled = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_CUBIC)
+                pil_var = _cv_to_pil_gray(upscaled)
+                if pil_var is not None:
+                    variants.append(pil_var)
 
     except Exception:
         pass
@@ -734,6 +741,18 @@ def _normalize_mrz_line(value: str) -> str:
     return re.sub(r"[^A-Z0-9<]", "", cleaned)
 
 
+def _extract_canonical_cccd_from_mrz_line1(normalized_line1: str) -> str:
+    # [WHY] Canonical VN ID MRZ rule: after `IDVNM`, ignore separators like `<`,
+    # keep digit order, take the first 22 digits, then use digits 11..22 as the CCCD.
+    # [RISK] Taking the first 12 digits after `IDVNM` creates wrong back-side keys and breaks front/back pairing.
+    if not normalized_line1.startswith("IDVNM"):
+        return ""
+    digits_after_prefix = "".join(ch for ch in normalized_line1[5:] if ch.isdigit())
+    if len(digits_after_prefix) < 22:
+        return ""
+    return digits_after_prefix[:22][10:22]
+
+
 def _parse_cccd_mrz_lines(lines: list[str]) -> dict[str, Any]:
     normalized_lines = [_normalize_mrz_line(line) for line in lines if _normalize_mrz_line(line)]
     if not normalized_lines:
@@ -752,14 +771,8 @@ def _parse_cccd_mrz_lines(lines: list[str]) -> dict[str, Any]:
     if not line3 and len(normalized_lines) >= 3:
         line3 = normalized_lines[2]
 
-    so_giay_to = ""
-    if line1.startswith("IDVNM") and len(line1) >= 27:
-        tail_match = re.search(r"^IDVNM(?:\d|<){10}([0-9<]{11,13})<<", line1)
-        fixed_candidate = re.sub(r"[^0-9]", "", tail_match.group(1) if tail_match else "")
-        if len(fixed_candidate) >= 12:
-            so_giay_to = fixed_candidate[:12]
-        elif len(fixed_candidate) == 12:
-            so_giay_to = fixed_candidate
+    # [WHY] Always try the canonical 22-digit MRZ rule first so pairing never uses the first 12 digits by mistake.
+    so_giay_to = _extract_canonical_cccd_from_mrz_line1(line1)
     if not so_giay_to and (match := re.search(r"(\d{12})<<\d", line1)):
         so_giay_to = match.group(1)
     elif not so_giay_to and (match := re.search(r"IDVNM\d{10}(\d{12})", line1)):
@@ -841,11 +854,15 @@ def _crop_image_to_base64(img: Image.Image, ratios: tuple[float, float, float, f
 
 def extract_cccd_from_mrz(mrz_line1: str) -> str:
     """Trích 12 số CCCD từ dòng MRZ 1 (IDVNM...)."""
-    raw = re.sub(r"\s", "", str(mrz_line1 or ""))
-    m = re.search(r"(\d{12})<<\d", raw)
+    normalized = _normalize_mrz_line(mrz_line1)
+    # [WHY] Canonical rule first; regex fallback only handles partial/noisy OCR when the 22-digit block is incomplete.
+    canonical = _extract_canonical_cccd_from_mrz_line1(normalized)
+    if canonical:
+        return canonical
+    m = re.search(r"(\d{12})<<\d", normalized)
     if m:
         return m.group(1)
-    m2 = re.search(r"(\d{12})<<", raw)
+    m2 = re.search(r"(\d{12})<<", normalized)
     return m2.group(1) if m2 else ""
 
 
@@ -863,7 +880,56 @@ def _try_import_local_ocr_module():
     return _local_ocr_module
 
 
-def _extract_local_mrz_data(file_bytes: bytes, *, has_qr: bool, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+def _preprocess_for_mrz(img_bgr: "np.ndarray") -> "np.ndarray":
+    """Mirror local OCR preprocess for MRZ crop only.
+
+    This is an intentional fork from ocr_local._preprocess so AI OCR can preprocess
+    just the bottom crop without changing Local OCR behavior.
+    """
+    if cv2 is None or np is None:
+        return img_bgr
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+    if _get_env_flag("LOCAL_OCR_DENOISE", True):
+        gray = cv2.fastNlMeansDenoising(gray, None, h=7, templateWindowSize=7, searchWindowSize=21)
+    blur = cv2.GaussianBlur(gray, (0, 0), sigmaX=1.0)
+    sharpened = cv2.addWeighted(gray, 1.6, blur, -0.6, 0)
+    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+
+
+def _filter_mrz_boxes_in_crop(boxes: list[dict[str, Any]], crop_shape: tuple[int, int]) -> list[dict[str, Any]]:
+    """Keep only MRZ-like candidates in crop coordinate space."""
+    if np is None:
+        return list(boxes or [])
+
+    h = float(max(1, crop_shape[0]))
+    w = float(max(1, crop_shape[1]))
+    result: list[dict[str, Any]] = []
+    for item in boxes or []:
+        box = item.get("box")
+        if box is None:
+            continue
+        arr = np.asarray(box, dtype=np.float32)
+        center_y = float(arr[:, 1].mean()) / h
+        box_w = float(arr[:, 0].max() - arr[:, 0].min()) / w
+        box_h = float(arr[:, 1].max() - arr[:, 1].min()) / h
+        if (
+            center_y < MRZ_CROP_FILTER_Y_MAX
+            and box_w > MRZ_CROP_MIN_WIDTH_RATIO
+            and box_h < MRZ_CROP_MAX_HEIGHT_RATIO
+        ):
+            result.append(item)
+    return result
+
+
+def _extract_local_mrz_data(
+    file_bytes: bytes,
+    *,
+    has_qr: bool,
+    settings: dict[str, Any] | None = None,
+    filename: str = "",
+) -> dict[str, Any]:
     runtime_settings = settings or _get_ai_ocr_settings()
     if not runtime_settings.get("enable_mrz_local", True) or cv2 is None or np is None:
         return {}
@@ -872,39 +938,108 @@ def _extract_local_mrz_data(file_bytes: bytes, *, has_qr: bool, settings: dict[s
     if ocr_local is None:
         return {}
 
+    t_total = perf_counter()
+    smart_crop_ms = 0.0
+    preprocess_ms = 0.0
+    detect_ms = 0.0
+    filter_ms = 0.0
+    recognize_ms = 0.0
+
+    def log_mrz_timing() -> None:
+        if not runtime_settings.get("timing_log", True):
+            return
+        _logger.info(
+            "[MRZ_TIMING] %s smart_crop_ms=%.2f preprocess_ms=%.2f detect_ms=%.2f filter_ms=%.2f recognize_ms=%.2f total_ms=%.2f",
+            filename or "unknown",
+            smart_crop_ms,
+            preprocess_ms,
+            detect_ms,
+            filter_ms,
+            recognize_ms,
+            round((perf_counter() - t_total) * 1000.0, 2),
+        )
+
     try:
         img_arr = np.frombuffer(file_bytes, dtype=np.uint8)
         img_bgr = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
         if img_bgr is None:
+            log_mrz_timing()
             return {}
 
+        use_bottom_crop = False
         crop_result = getattr(ocr_local, "_opencv_smart_crop", None)
         if callable(crop_result):
+            t_step = perf_counter()
             smart = crop_result(img_bgr)
+            smart_crop_ms = round((perf_counter() - t_step) * 1000.0, 2)
             if smart is not None:
-                img_bgr = smart[0]
-
-        preprocess = getattr(ocr_local, "_preprocess", None)
-        img_ocr = preprocess(img_bgr) if callable(preprocess) else img_bgr
+                smart_img, smart_bbox, smart_conf = smart
+                x1, y1, x2, y2 = smart_bbox
+                crop_area = max(1, x2 - x1) * max(1, y2 - y1)
+                full_area = max(1, img_bgr.shape[0] * img_bgr.shape[1])
+                area_ratio = float(crop_area) / float(full_area)
+                min_conf = float(getattr(ocr_local, "LOCAL_OCR_SMART_CROP_MIN_CONF", 0.22))
+                if smart_conf >= min_conf and area_ratio < 0.98:
+                    img_bgr = smart_img
+                    use_bottom_crop = True
 
         detect_boxes = getattr(ocr_local, "_rapidocr_detect_boxes", None)
-        filter_boxes = getattr(ocr_local, "filter_target_boxes", None)
         recognize = getattr(ocr_local, "_recognize_target_boxes_rapidocr", None)
         group_lines = getattr(ocr_local, "_group_lines", None)
-        if not all(callable(fn) for fn in (detect_boxes, filter_boxes, recognize, group_lines)):
+        if not all(callable(fn) for fn in (detect_boxes, recognize, group_lines)):
+            log_mrz_timing()
             return {}
 
-        boxes, _ = detect_boxes(img_ocr)
         triage_state = TRIAGE_STATE_BACK_NEW if has_qr else TRIAGE_STATE_BACK_OLD
-        selected = filter_boxes(boxes, img_ocr.shape[:2], triage_state, "id")
+
+        if use_bottom_crop:
+            h_full = img_bgr.shape[0]
+            crop_y = max(0, min(h_full - 1, int(h_full * MRZ_BOTTOM_CROP_RATIO)))
+            img_crop_raw = img_bgr[crop_y:, :]
+            if img_crop_raw is None or img_crop_raw.size == 0:
+                log_mrz_timing()
+                return {}
+
+            t_step = perf_counter()
+            img_ocr = _preprocess_for_mrz(img_crop_raw)
+            preprocess_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+            t_step = perf_counter()
+            boxes, _ = detect_boxes(img_ocr)
+            detect_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+            t_step = perf_counter()
+            selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2])
+            filter_ms = round((perf_counter() - t_step) * 1000.0, 2)
+        else:
+            t_step = perf_counter()
+            img_ocr = _preprocess_for_mrz(img_bgr)
+            preprocess_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+            t_step = perf_counter()
+            boxes, _ = detect_boxes(img_ocr)
+            detect_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+            t_step = perf_counter()
+            selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2])
+            filter_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+        if not selected:
+            log_mrz_timing()
+            return {}
+
+        t_step = perf_counter()
         recognized, _ = recognize(img_ocr, selected, context=f"ai_ocr:{triage_state}:mrz")
+        recognize_ms = round((perf_counter() - t_step) * 1000.0, 2)
         lines = group_lines(recognized)
         parsed = _parse_cccd_mrz_lines(lines)
         if parsed.get("so_giay_to"):
             parsed["raw_text"] = "\n".join(lines)
+            log_mrz_timing()
             return parsed
     except Exception as exc:
         _logger.info("[AI_OCR_LOCAL_HELPER] MRZ local extract skipped: %s", exc)
+    log_mrz_timing()
     return {}
 
 
@@ -1020,8 +1155,8 @@ def _build_empty_row(index: int, filename: str) -> dict[str, Any]:
         "paired_back_index": None,
         "ai_plan": None,
         "ai_models_run": [],
-        "full_b64": "",
         "image": None,
+        "preprocess_timing": {},
         "_side": "unknown",
     }
 
@@ -1064,15 +1199,27 @@ def _sync_row_identity(row: dict[str, Any]) -> None:
     row["pair_key_source"] = pair_key_source
 
 
-def _build_initial_ai_row(index: int, filename: str, file_bytes: bytes, settings: dict[str, Any]) -> dict[str, Any]:
+def _build_initial_ai_snapshot_sync(index: int, filename: str, file_bytes: bytes, settings_snapshot: dict[str, Any]) -> dict[str, Any]:
     row = _build_empty_row(index, filename)
-    row["image"] = _load_normalized_image(file_bytes)
-    row["full_b64"] = _encode_image_to_base64(row["image"])
-    row["face_detected"] = _detect_face_signal(file_bytes)
+    t_total = perf_counter()
+    face_ms = 0.0
+    t_qr = perf_counter()
     row["qr_text"] = try_decode_qr(file_bytes) or ""
+    qr_ms = round((perf_counter() - t_qr) * 1000.0, 2)
     row["has_qr"] = bool(row["qr_text"])
     row["qr_data"] = parse_cccd_qr(row["qr_text"]) if row["qr_text"] else None
-    row["mrz_data"] = _extract_local_mrz_data(file_bytes, has_qr=row["has_qr"], settings=settings)
+    mrz_ms = 0.0
+    if not row["has_qr"]:
+        t_mrz = perf_counter()
+        row["mrz_data"] = _extract_local_mrz_data(
+            file_bytes,
+            has_qr=False,
+            settings=settings_snapshot,
+            filename=filename,
+        )
+        mrz_ms = round((perf_counter() - t_mrz) * 1000.0, 2)
+    else:
+        row["mrz_data"] = None
     row["has_mrz"] = bool((row["mrz_data"] or {}).get("so_giay_to") or (row["mrz_data"] or {}).get("mrz_line1"))
     row["state"] = _infer_deterministic_state(has_qr=row["has_qr"], has_mrz=row["has_mrz"])
     row["profile"] = _state_to_profile(row["state"])
@@ -1080,12 +1227,145 @@ def _build_initial_ai_row(index: int, filename: str, file_bytes: bytes, settings
     _apply_source_merge(row["data"], row["field_sources"], row["qr_data"], source="qr", profile=row["profile"])
     _apply_source_merge(row["data"], row["field_sources"], row["mrz_data"], source="mrz", profile=row["profile"])
     _sync_row_identity(row)
+    total_ms = round((perf_counter() - t_total) * 1000.0, 2)
+    return {
+        "index": row["index"],
+        "filename": row["filename"],
+        "data": dict(row["data"]),
+        "field_sources": dict(row["field_sources"]),
+        "qr_text": row["qr_text"],
+        "qr_data": dict(row["qr_data"] or {}) if row["qr_data"] else None,
+        "has_qr": row["has_qr"],
+        "mrz_data": dict(row["mrz_data"] or {}),
+        "has_mrz": row["has_mrz"],
+        "face_detected": row["face_detected"],
+        "state": row["state"],
+        "profile": row["profile"],
+        "doc_type": row["doc_type"],
+        "pair_key": row["pair_key"],
+        "pair_key_source": row["pair_key_source"],
+        "preprocess_timing": {
+            "face_ms": face_ms,
+            "qr_ms": qr_ms,
+            "mrz_ms": mrz_ms,
+            "total_ms": total_ms,
+        },
+    }
+
+
+def _row_from_snapshot(snapshot: dict[str, Any], *, path: str) -> dict[str, Any]:
+    row = _build_empty_row(int(snapshot["index"]), str(snapshot.get("filename") or "unknown"))
+    row["data"] = dict(snapshot.get("data") or {})
+    row["field_sources"] = dict(snapshot.get("field_sources") or {})
+    row["qr_text"] = str(snapshot.get("qr_text") or "")
+    row["qr_data"] = dict(snapshot["qr_data"]) if isinstance(snapshot.get("qr_data"), dict) else snapshot.get("qr_data")
+    row["has_qr"] = bool(snapshot.get("has_qr", False))
+    row["mrz_data"] = dict(snapshot.get("mrz_data") or {})
+    row["has_mrz"] = bool(snapshot.get("has_mrz", False))
+    row["face_detected"] = bool(snapshot.get("face_detected", False))
+    row["state"] = str(snapshot.get("state") or TRIAGE_STATE_UNKNOWN)
+    row["profile"] = str(snapshot.get("profile") or DOC_PROFILE_UNKNOWN)
+    row["doc_type"] = str(snapshot.get("doc_type") or "unknown")
+    row["pair_key"] = str(snapshot.get("pair_key") or "")
+    row["pair_key_source"] = str(snapshot.get("pair_key_source") or "")
+    row["preprocess_timing"] = dict(snapshot.get("preprocess_timing") or {})
+    row["preprocess_timing"]["path"] = path
+    _sync_row_identity(row)
     return row
+
+
+def _build_initial_ai_row(index: int, filename: str, file_bytes: bytes, settings: dict[str, Any], *, path: str = "fallback") -> dict[str, Any]:
+    snapshot = _build_initial_ai_snapshot_sync(index, filename, file_bytes, settings)
+    return _row_from_snapshot(snapshot, path=path)
+
+
+def _warmup_ai_preprocess_worker() -> int:
+    local_module = _try_import_local_ocr_module()
+    if local_module is None:
+        raise RuntimeError("AI OCR local helper unavailable in worker")
+    warmup_local_ocr = getattr(local_module, "warmup_local_ocr", None)
+    if callable(warmup_local_ocr):
+        warmup_ok, warmup_error = warmup_local_ocr()
+        if not warmup_ok:
+            raise RuntimeError(f"Local OCR worker warmup failed: {warmup_error or 'unknown'}")
+    recognizer_getter = getattr(local_module, "_get_rapidocr_recognizer", None)
+    if callable(recognizer_getter):
+        recognizer_getter()
+    return os.getpid()
+
+
+def init_ai_preprocess_pool(n_workers: int) -> None:
+    global _PREPROCESS_POOL, _PREPROCESS_POOL_WORKERS
+    if n_workers <= 1:
+        shutdown_ai_preprocess_pool()
+        return
+    if _PREPROCESS_POOL is not None and _PREPROCESS_POOL_WORKERS == n_workers:
+        return
+    shutdown_ai_preprocess_pool()
+    mp_context = multiprocessing.get_context("spawn")
+    _PREPROCESS_POOL = ProcessPoolExecutor(max_workers=n_workers, mp_context=mp_context)
+    _PREPROCESS_POOL_WORKERS = n_workers
+
+
+def warmup_ai_preprocess_pool(timeout_seconds: float = 90.0) -> None:
+    pool = _PREPROCESS_POOL
+    if pool is None or _PREPROCESS_POOL_WORKERS <= 1:
+        return
+
+    unique_pids: set[int] = set()
+    max_attempts = max(_PREPROCESS_POOL_WORKERS * 4, _PREPROCESS_POOL_WORKERS)
+    attempts = 0
+    t_deadline = perf_counter() + timeout_seconds
+
+    while len(unique_pids) < _PREPROCESS_POOL_WORKERS and attempts < max_attempts and perf_counter() < t_deadline:
+        remaining = max_attempts - attempts
+        batch_size = min(_PREPROCESS_POOL_WORKERS, remaining)
+        futures = [pool.submit(_warmup_ai_preprocess_worker) for _ in range(batch_size)]
+        attempts += batch_size
+        wait_timeout = max(0.1, t_deadline - perf_counter())
+        try:
+            for future in as_completed(futures, timeout=wait_timeout):
+                try:
+                    unique_pids.add(int(future.result()))
+                except Exception as exc:
+                    _logger.warning("[AI_OCR_POOL] worker warmup failed: %s", exc)
+        except FuturesTimeoutError:
+            _logger.warning("[AI_OCR_POOL] worker warmup timed out while waiting for result")
+            break
+
+    if len(unique_pids) < _PREPROCESS_POOL_WORKERS:
+        _logger.warning(
+            "[AI_OCR_POOL] warmup incomplete expected_workers=%s warmed_workers=%s attempts=%s",
+            _PREPROCESS_POOL_WORKERS,
+            len(unique_pids),
+            attempts,
+        )
+        return
+
+    _logger.info(
+        "[AI_OCR_POOL] warmup ok workers=%s warmed_pids=%s",
+        _PREPROCESS_POOL_WORKERS,
+        ",".join(str(pid) for pid in sorted(unique_pids)),
+    )
+
+
+def shutdown_ai_preprocess_pool() -> None:
+    global _PREPROCESS_POOL, _PREPROCESS_POOL_WORKERS
+    if _PREPROCESS_POOL is not None:
+        _PREPROCESS_POOL.shutdown(wait=False, cancel_futures=True)
+    _PREPROCESS_POOL = None
+    _PREPROCESS_POOL_WORKERS = 0
 
 
 def _resolve_front_new_pairs(rows: list[dict[str, Any]]) -> None:
     def assign_pairs(back_state: str, front_state: str, front_profile: str) -> None:
-        front_unknown_rows = [row for row in rows if row.get("state") == TRIAGE_STATE_FRONT_UNKNOWN and row.get("face_detected")]
+        front_unknown_rows = [
+            row
+            for row in rows
+            if row.get("state") in {TRIAGE_STATE_FRONT_UNKNOWN, TRIAGE_STATE_FRONT_NEW}
+            and not row.get("pair_key")
+            and not row.get("has_mrz")
+        ]
         unmatched_back_rows = [row for row in rows if row.get("state") == back_state and row.get("pair_key")]
         if not front_unknown_rows or not unmatched_back_rows:
             return
@@ -1161,6 +1441,32 @@ def _field_budget_for_targets(targets: tuple[str, ...], *, full_mode: bool) -> i
     return 220
 
 
+def _plan_crop_ratios(state: str) -> tuple[float, float, float, float]:
+    crop_key = TRIAGE_STATE_FRONT_UNKNOWN if state == TRIAGE_STATE_FRONT_UNKNOWN else state
+    return _TARGETED_CROP_PRESETS.get(crop_key, (0.0, 0.0, 1.0, 1.0))
+
+
+def _missing_required_fields(row: dict[str, Any]) -> list[str]:
+    profile = row.get("profile", DOC_PROFILE_UNKNOWN)
+    required = _PROFILE_REQUIRED_FIELDS.get(profile, _PROFILE_REQUIRED_FIELDS[DOC_PROFILE_UNKNOWN])
+    data = row.get("data") or {}
+    return [field_name for field_name in required if not _is_field_valid(field_name, data.get(field_name, ""), profile)]
+
+
+def _short_mrz_marker(value: str) -> str:
+    text = _normalize_text_space(value)
+    if not text:
+        return ""
+    return text[:20]
+
+
+def _log_ai_ocr_diag(message: str, *, settings: dict[str, Any] | None = None) -> None:
+    runtime_settings = settings or _get_ai_ocr_settings()
+    if not runtime_settings.get("timing_log", False):
+        return
+    _logger.info("[AI_OCR_DIAG] %s", message)
+
+
 def _build_ai_plan(rows: list[dict[str, Any]], settings: dict[str, Any]) -> list[dict[str, Any]]:
     if not rows:
         return []
@@ -1215,29 +1521,46 @@ def _build_ai_plan(rows: list[dict[str, Any]], settings: dict[str, Any]) -> list
                 continue
             plan = {"mode": "targeted", "targets": ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh")}
         else:
-            if state == TRIAGE_STATE_FRONT_UNKNOWN and row.get("face_detected"):
-                plan = {"mode": "targeted" if targeted_fields else "full", "targets": ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh")}
-            else:
-                plan = {"mode": "full", "targets": ()}
+            plan = {"mode": "full", "targets": ()}
 
         if plan["mode"] == "targeted" and not targeted_fields:
             plan = {"mode": "full", "targets": ()}
 
         full_mode = plan["mode"] == "full"
-        crop_key = TRIAGE_STATE_FRONT_UNKNOWN if state == TRIAGE_STATE_FRONT_UNKNOWN else state
-        crop_b64 = row["full_b64"] if full_mode else _crop_image_to_base64(row["image"], _TARGETED_CROP_PRESETS.get(crop_key, (0.0, 0.0, 1.0, 1.0)))
+        missing_before = tuple(_missing_required_fields(row))
         plan.update(
             {
                 "record_index": row["index"],
                 "model": _get_primary_model(),
                 "prompt": SYSTEM_PROMPT if full_mode else _build_targeted_prompt(state, plan["targets"]),
-                "image_b64": crop_b64,
                 "image_detail": "high",
                 "max_tokens_per_image": _field_budget_for_targets(plan["targets"], full_mode=full_mode),
+                "crop_ratios": None if full_mode else _plan_crop_ratios(state),
             }
         )
+        row["_diag_missing_before"] = list(missing_before)
         row["ai_plan"] = plan
         plans.append(plan)
+        if full_mode:
+            _log_ai_ocr_diag(
+                (
+                    "phase=plan img#%s file=%s mode=full state=%s profile=%s pair_key=%s pair_key_source=%s "
+                    "has_qr=%s has_mrz=%s face_detected=%s missing=%s"
+                )
+                % (
+                    row["index"],
+                    row.get("filename", "unknown"),
+                    state,
+                    profile,
+                    row.get("pair_key", ""),
+                    row.get("pair_key_source", ""),
+                    row.get("has_qr", False),
+                    row.get("has_mrz", False),
+                    row.get("face_detected", False),
+                    ",".join(missing_before) or "-",
+                ),
+                settings=settings,
+            )
 
     return plans
 
@@ -1261,8 +1584,24 @@ def _infer_profile_from_ai(current_profile: str, ai_doc_type: str, ai_data: dict
 def _apply_ai_rows_to_record(row: dict[str, Any], ai_rows: list[dict[str, Any]], *, model: str) -> None:
     if not ai_rows:
         return
+    before_profile = row.get("profile", DOC_PROFILE_UNKNOWN)
+    before_state = row.get("state", TRIAGE_STATE_UNKNOWN)
+    before_pair_key = row.get("pair_key", "")
+    before_pair_key_source = row.get("pair_key_source", "")
+    before_missing = tuple(_missing_required_fields(row))
+    ai_identity_rows: list[dict[str, Any]] = []
     for ai_row in ai_rows:
         ai_data = dict(ai_row.get("data") or {})
+        ai_identity_rows.append(
+            {
+                "doc_type": ai_row.get("doc_type", "unknown"),
+                "so_giay_to": _clean_doc_number(ai_data.get("so_giay_to", "")),
+                "so_giay_to_mrz": _clean_doc_number(ai_data.get("so_giay_to_mrz", "")),
+                "mrz_line1": _short_mrz_marker(ai_data.get("mrz_line1", "")),
+                "dia_chi": bool(_normalize_text_space(ai_data.get("dia_chi", "") or ai_data.get("dia_chi_back", ""))),
+                "ngay_cap": bool(_normalize_date(ai_data.get("ngay_cap", ""))),
+            }
+        )
         if "dia_chi_back" in ai_data and not ai_data.get("dia_chi"):
             ai_data["dia_chi"] = ai_data.get("dia_chi_back", "")
         row["profile"] = _infer_profile_from_ai(row.get("profile", DOC_PROFILE_UNKNOWN), ai_row.get("doc_type", "unknown"), ai_data)
@@ -1278,11 +1617,89 @@ def _apply_ai_rows_to_record(row: dict[str, Any], ai_rows: list[dict[str, Any]],
         row["doc_type"] = ai_row.get("doc_type") or row.get("doc_type", "unknown")
     row["ai_models_run"].append(model)
     _sync_row_identity(row)
+    after_missing = tuple(_missing_required_fields(row))
+    should_log = (
+        (row.get("ai_plan") or {}).get("mode") == "full"
+        or model == _get_escalation_model()
+        or before_pair_key_source != row.get("pair_key_source", "")
+        or before_profile != row.get("profile", DOC_PROFILE_UNKNOWN)
+    )
+    if should_log:
+        ai_debug = ";".join(
+            (
+                f"{item['doc_type']}"
+                f":so={item['so_giay_to'] or '-'}"
+                f":mrz_so={item['so_giay_to_mrz'] or '-'}"
+                f":mrz={item['mrz_line1'] or '-'}"
+                f":dia_chi={int(item['dia_chi'])}"
+                f":ngay_cap={int(item['ngay_cap'])}"
+            )
+            for item in ai_identity_rows
+        ) or "-"
+        _log_ai_ocr_diag(
+            (
+                "phase=apply img#%s file=%s model=%s mode=%s before_state=%s before_profile=%s after_state=%s "
+                "after_profile=%s before_pair_key=%s before_pair_key_source=%s after_pair_key=%s after_pair_key_source=%s "
+                "missing_before=%s missing_after=%s ai=%s"
+            )
+            % (
+                row.get("index"),
+                row.get("filename", "unknown"),
+                model,
+                (row.get("ai_plan") or {}).get("mode", "none"),
+                before_state,
+                before_profile,
+                row.get("state", TRIAGE_STATE_UNKNOWN),
+                row.get("profile", DOC_PROFILE_UNKNOWN),
+                before_pair_key,
+                before_pair_key_source,
+                row.get("pair_key", ""),
+                row.get("pair_key_source", ""),
+                ",".join(before_missing) or "-",
+                ",".join(after_missing) or "-",
+                ai_debug,
+            )
+        )
+
+def _load_cached_ai_image(record_index: int, file_bytes_map: dict[int, bytes], image_cache: dict[int, Image.Image]) -> Image.Image:
+    image = image_cache.get(record_index)
+    if image is not None:
+        return image
+    file_bytes = file_bytes_map.get(record_index)
+    if file_bytes is None:
+        raise KeyError(f"Missing file bytes for record_index={record_index}")
+    image = _load_normalized_image(file_bytes)
+    image_cache[record_index] = image
+    return image
 
 
-async def _execute_ai_plans(plans: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
-    grouped: dict[tuple[str, str, str, int | None], list[dict[str, Any]]] = {}
+def _materialize_ai_plan_payloads(
+    plans: list[dict[str, Any]],
+    file_bytes_map: dict[int, bytes],
+    image_cache: dict[int, Image.Image],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
     for plan in plans:
+        record_index = int(plan["record_index"])
+        image = _load_cached_ai_image(record_index, file_bytes_map, image_cache)
+        payload = dict(plan)
+        crop_ratios = payload.pop("crop_ratios", None)
+        if payload["mode"] == "full":
+            payload["image_b64"] = _encode_image_to_base64(image)
+        else:
+            payload["image_b64"] = _crop_image_to_base64(image, crop_ratios or (0.0, 0.0, 1.0, 1.0))
+        payloads.append(payload)
+    return payloads
+
+
+async def _execute_ai_plans(
+    plans: list[dict[str, Any]],
+    *,
+    file_bytes_map: dict[int, bytes],
+    image_cache: dict[int, Image.Image],
+) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[tuple[str, str, str, int | None], list[dict[str, Any]]] = {}
+    for plan in _materialize_ai_plan_payloads(plans, file_bytes_map, image_cache):
         key = (plan["model"], plan["prompt"], plan["image_detail"], plan.get("max_tokens_per_image"))
         grouped.setdefault(key, []).append(plan)
 
@@ -1313,6 +1730,23 @@ def _build_escalation_plans(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         plan = dict(ai_plan)
         plan["model"] = escalation_model
         plans.append(plan)
+        _log_ai_ocr_diag(
+            (
+                "phase=escalation-plan img#%s file=%s model=%s mode=%s state=%s profile=%s pair_key=%s "
+                "pair_key_source=%s missing=%s"
+            )
+            % (
+                row.get("index"),
+                row.get("filename", "unknown"),
+                escalation_model,
+                ai_plan.get("mode", "none"),
+                row.get("state", TRIAGE_STATE_UNKNOWN),
+                row.get("profile", DOC_PROFILE_UNKNOWN),
+                row.get("pair_key", ""),
+                row.get("pair_key_source", ""),
+                ",".join(_missing_required_fields(row)) or "-",
+            )
+        )
     return plans
 
 
@@ -1322,6 +1756,105 @@ def _log_ai_ocr_timing(message: str, *, level: str = "info", settings: dict[str,
         return
     logger_method = _logger.warning if level == "warning" else _logger.info
     logger_method("[AI_OCR_TIMING] %s", message)
+
+
+def _coerce_snapshot_result(
+    *,
+    index: int,
+    filename: str,
+    file_bytes: bytes,
+    settings: dict[str, Any],
+    result: Any,
+) -> dict[str, Any]:
+    if isinstance(result, BaseException):
+        _logger.warning("[AI_OCR_PREPROCESS] img#%s file=%s process_failed=%s fallback=sequential", index, filename, result)
+        snapshot = _build_initial_ai_snapshot_sync(index, filename, file_bytes, settings)
+        return _row_from_snapshot(snapshot, path="fallback")
+    return _row_from_snapshot(dict(result), path="process")
+
+
+async def _preprocess_ai_file_items(
+    file_items: list[dict[str, Any]],
+    settings: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not file_items:
+        return [], []
+
+    rows: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    use_pool = settings.get("preprocess_workers", 0) > 1 and _PREPROCESS_POOL is not None
+
+    if not use_pool:
+        for item in file_items:
+            try:
+                rows.append(
+                    _build_initial_ai_row(
+                        item["index"],
+                        item["filename"],
+                        item["bytes"],
+                        settings,
+                        path="fallback",
+                    )
+                )
+            except Exception as exc:
+                errors.append({"filename": item["filename"], "error": str(exc)})
+        return rows, errors
+
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(
+            _PREPROCESS_POOL,
+            _build_initial_ai_snapshot_sync,
+            item["index"],
+            item["filename"],
+            item["bytes"],
+            settings,
+        )
+        for item in file_items
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for item, result in zip(file_items, results):
+        try:
+            row = _coerce_snapshot_result(
+                index=item["index"],
+                filename=item["filename"],
+                file_bytes=item["bytes"],
+                settings=settings,
+                result=result,
+            )
+            rows.append(row)
+        except Exception as exc:
+            errors.append({"filename": item["filename"], "error": str(exc)})
+    return rows, errors
+
+
+def _log_ai_ocr_row_timing(row: dict[str, Any], *, settings: dict[str, Any]) -> None:
+    if not settings.get("timing_log", False):
+        return
+    timing = dict(row.get("preprocess_timing") or {})
+    total_ms = float(timing.get("total_ms", 0.0) or 0.0)
+    level = "warning" if total_ms >= float(settings.get("timing_slow_ms", 2500.0)) else "info"
+    message = (
+        "img#%s file=%s path=%s state=%s profile=%s pair_key_source=%s "
+        "has_qr=%s has_mrz=%s face_detected=%s preprocess_ms=%.2f qr_ms=%.2f mrz_ms=%.2f ai_plan_mode=%s"
+        % (
+            row.get("index"),
+            row.get("filename", "unknown"),
+            timing.get("path", "fallback"),
+            row.get("state", TRIAGE_STATE_UNKNOWN),
+            row.get("profile", DOC_PROFILE_UNKNOWN),
+            row.get("pair_key_source", ""),
+            row.get("has_qr", False),
+            row.get("has_mrz", False),
+            row.get("face_detected", False),
+            total_ms,
+            float(timing.get("qr_ms", 0.0) or 0.0),
+            float(timing.get("mrz_ms", 0.0) or 0.0),
+            (row.get("ai_plan") or {}).get("mode", "none"),
+        )
+    )
+    _log_ai_ocr_timing(message, level=level, settings=settings)
 
 
 def _chunk_indexed_images(
@@ -1771,159 +2304,6 @@ async def call_vision_batch_v2(
     return merged_results
 
 
-def group_documents(results: list) -> dict:
-    fronts    = [r for r in results if r.get("doc_type") == "cccd_front"]
-    backs     = [r for r in results if r.get("doc_type") == "cccd_back"]
-    marriages = [r for r in results if r.get("doc_type") == "marriage_cert"]
-    lands     = [r for r in results if r.get("doc_type") == "land_cert"]
-    unknowns  = [r for r in results if r.get("doc_type") == "unknown"]
-
-    # Quốc tịch "Việt Nam" hay bị AI nhầm vào dia_chi — lọc bỏ
-    _NATIONALITY = {"việt nam", "viet nam", "vietnam"}
-    def _valid_addr(s: str) -> str:
-        return "" if (s or "").strip().lower() in _NATIONALITY else (s or "")
-
-    persons = []
-    matched_backs = set()
-
-    for front in fronts:
-        fd   = front.get("data", {})
-        cccd = re.sub(r"\D", "", str(fd.get("so_giay_to") or ""))
-        # Fallback: nếu AI không trích được so_giay_to (hay gặp với CĂN CƯỚC mới),
-        # dùng QR data đã gắn trước đó để lấy CCCD cho việc ghép mặt sau
-        if not cccd:
-            qr_pre = front.get("qr_data")
-            if qr_pre:
-                cccd = qr_pre.get("so_giay_to", "")
-
-        back_match = None
-        for i, back in enumerate(backs):
-            if i in matched_backs:
-                continue
-            bd = back.get("data", {})
-            mrz_cccd = re.sub(r"\D", "", str(bd.get("so_giay_to_mrz") or ""))
-            if not mrz_cccd:
-                mrz_cccd = extract_cccd_from_mrz(bd.get("mrz_line1", ""))
-            if cccd and mrz_cccd == cccd:
-                back_match = back
-                matched_backs.add(i)
-                break
-
-        bd   = back_match.get("data", {}) if back_match else {}
-        side = back_match.get("_side", "") if back_match else ""
-
-        # QR ưu tiên cao nhất (chính xác 100%)
-        # CC mới: QR ở mặt sau → back_match có qr_data
-        # CCCD cũ: QR ở mặt trước → front có qr_data
-        qr = back_match.get("qr_data") if back_match else None
-        if not qr:
-            qr = front.get("qr_data")
-
-        # dia_chi theo thứ tự ưu tiên:
-        # 1. QR (authoritative, UTF-8 chính xác)
-        # 2. AI mặt trước (chỉ dùng nếu là CCCD cũ — CC mới không có địa chỉ trên mặt trước)
-        # 3. dia_chi_back từ mặt sau (CC mới)
-        front_ai_addr = _valid_addr(fd.get("dia_chi")) if side != "back_new_cc" else ""
-        dia_chi = (
-            qr["dia_chi"] if qr and qr.get("dia_chi") else
-            front_ai_addr or
-            _valid_addr(bd.get("dia_chi_back", ""))
-        )
-
-        persons.append({
-            "ho_ten":       qr["ho_ten"]       if qr else fd.get("ho_ten", ""),
-            "so_giay_to":   qr["so_giay_to"]   if qr else cccd,
-            "ngay_sinh":    qr["ngay_sinh"]     if qr else fd.get("ngay_sinh", ""),
-            "gioi_tinh":    (qr.get("gioi_tinh") if qr else None) or fd.get("gioi_tinh", ""),
-            "dia_chi":      dia_chi,
-            "ngay_het_han": qr["ngay_het_han"]  if qr else fd.get("ngay_het_han", ""),
-            "ngay_cap":     (qr.get("ngay_cap") if qr else "") or bd.get("ngay_cap", ""),
-            "_source":      "cccd" + ("+back" if back_match else " (thiếu mặt sau)"),
-            "_side":        side,
-            "_qr":          bool(qr),
-            "_files":       [front.get("filename", ""), back_match.get("filename", "") if back_match else ""],
-        })
-
-    # Mặt sau chưa ghép được mặt trước
-    for i, back in enumerate(backs):
-        if i in matched_backs:
-            continue
-        bd  = back.get("data", {})
-        qr  = back.get("qr_data")
-        mrz_cccd = re.sub(r"\D", "", str(bd.get("so_giay_to_mrz") or ""))
-        if not mrz_cccd:
-            mrz_cccd = extract_cccd_from_mrz(bd.get("mrz_line1", ""))
-
-        dia_chi = (
-            qr["dia_chi"] if qr and qr.get("dia_chi") else
-            _valid_addr(bd.get("dia_chi_back", ""))
-        )
-
-        persons.append({
-            "ho_ten":       qr["ho_ten"]       if qr else "",
-            "so_giay_to":   qr["so_giay_to"]   if qr else mrz_cccd,
-            "ngay_sinh":    qr["ngay_sinh"]     if qr else "",
-            "gioi_tinh":    qr.get("gioi_tinh", "") if qr else "",
-            "dia_chi":      dia_chi,
-            "ngay_het_han": qr["ngay_het_han"]  if qr else "",
-            "ngay_cap":     (qr.get("ngay_cap") if qr else "") or bd.get("ngay_cap", ""),
-            "_source":      "cccd+back" if qr else "cccd_back only",
-            "_qr":          bool(qr),
-            "_files":       [back.get("filename", "")],
-        })
-
-    marriage_data = []
-    for m in marriages:
-        md = m.get("data", {})
-        marriage_data.append({
-            "chong": {
-                "ho_ten": md.get("chong_ho_ten", ""),
-                "so_giay_to": re.sub(r"\D", "", str(md.get("chong_so_giay_to") or "")),
-                "ngay_sinh": md.get("chong_ngay_sinh", ""),
-                "gioi_tinh": "Nam", "dia_chi": "",
-            },
-            "vo": {
-                "ho_ten": md.get("vo_ho_ten", ""),
-                "so_giay_to": re.sub(r"\D", "", str(md.get("vo_so_giay_to") or "")),
-                "ngay_sinh": md.get("vo_ngay_sinh", ""),
-                "gioi_tinh": "Nữ", "dia_chi": "",
-            },
-            "ngay_dang_ky":  md.get("ngay_dang_ky", ""),
-            "noi_dang_ky":   md.get("noi_dang_ky", ""),
-            "_file": m.get("filename", ""),
-        })
-
-    properties = []
-    for land in lands:
-        ld = land.get("data", {})
-        properties.append({
-            "so_serial":    ld.get("so_serial", ""),
-            "so_thua_dat":  ld.get("so_thua_dat", ""),
-            "so_to_ban_do": ld.get("so_to_ban_do", ""),
-            "dia_chi":      ld.get("dia_chi_dat", ""),
-            "loai_dat":     ld.get("loai_dat", ""),
-            "ngay_cap":     ld.get("ngay_cap", ""),
-            "co_quan_cap":  ld.get("co_quan_cap", ""),
-            "_file": land.get("filename", ""),
-        })
-
-    return {
-        "persons":    persons,
-        "properties": properties,
-        "marriages":  marriage_data,
-        "raw_results": results,
-        "summary": {
-            "total_images":    len(results),
-            "cccd_fronts":     len(fronts),
-            "cccd_backs":      len(backs),
-            "matched_pairs":   len(matched_backs),
-            "marriages":       len(marriages),
-            "land_certs":      len(lands),
-            "unknowns":        len(unknowns),
-        },
-    }
-
-
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 def group_documents(results: list) -> dict:
     fronts = [r for r in results if r.get("doc_type") == "cccd_front"]
@@ -2021,6 +2401,13 @@ def group_documents(results: list) -> dict:
         else:
             source_label = "cccd (thiếu mặt sau)"
 
+        is_back_only = back_present and not front_present
+        if is_back_only:
+            so_giay_to_val = _clean_doc_number(group["data"].get("so_giay_to", ""))
+            so_giay_to_source = group.get("field_sources", {}).get("so_giay_to", "")
+            if len(so_giay_to_val) != 12 or so_giay_to_source not in ("qr", "mrz"):
+                continue
+
         persons.append(
             {
                 "ho_ten": group["data"].get("ho_ten", ""),
@@ -2096,14 +2483,21 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     settings = _get_ai_ocr_settings()
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    file_bytes_map: dict[int, bytes] = {}
+    file_items: list[dict[str, Any]] = []
 
     for idx, upload in enumerate(files):
         try:
             file_bytes = await upload.read()
-            row = _build_initial_ai_row(idx, upload.filename or "unknown", file_bytes, settings)
-            rows.append(row)
+            filename = upload.filename or "unknown"
+            file_bytes_map[idx] = file_bytes
+            file_items.append({"index": idx, "filename": filename, "bytes": file_bytes})
         except Exception as exc:
             errors.append({"filename": upload.filename, "error": str(exc)})
+
+    built_rows, preprocess_errors = await _preprocess_ai_file_items(file_items, settings)
+    rows.extend(built_rows)
+    errors.extend(preprocess_errors)
 
     if not rows:
         return {"persons": [], "properties": [], "marriages": [], "errors": errors, "summary": {}}
@@ -2111,7 +2505,12 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     _resolve_front_new_pairs(rows)
 
     primary_plans = _build_ai_plan(rows, settings)
-    primary_results = await _execute_ai_plans(primary_plans) if primary_plans else {}
+    image_cache: dict[int, Image.Image] = {}
+    primary_results = (
+        await _execute_ai_plans(primary_plans, file_bytes_map=file_bytes_map, image_cache=image_cache)
+        if primary_plans
+        else {}
+    )
     primary_model = _get_primary_model()
     for row in rows:
         _apply_ai_rows_to_record(row, primary_results.get(row["index"], []), model=primary_model)
@@ -2119,7 +2518,11 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     _resolve_front_new_pairs(rows)
 
     escalation_plans = _build_escalation_plans(rows)
-    escalation_results = await _execute_ai_plans(escalation_plans) if escalation_plans else {}
+    escalation_results = (
+        await _execute_ai_plans(escalation_plans, file_bytes_map=file_bytes_map, image_cache=image_cache)
+        if escalation_plans
+        else {}
+    )
     escalation_model = _get_escalation_model()
     for row in rows:
         _apply_ai_rows_to_record(row, escalation_results.get(row["index"], []), model=escalation_model)
@@ -2157,13 +2560,30 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
 
     skip_ai = sum(1 for row in rows if not row.get("ai_plan"))
     mrz_rows = sum(1 for row in rows if row.get("has_mrz"))
+    primary_ai_rows = len({plan["record_index"] for plan in primary_plans})
     escalated_rows = len({plan["record_index"] for plan in escalation_plans})
+    ai_encoded = len(primary_plans) + len(escalation_plans)
+    for row in rows:
+        _log_ai_ocr_row_timing(row, settings=settings)
+        tags: list[str] = []
+        if row.get("has_mrz"):
+            tags.append("mrz_partial")
+        if row.get("ai_models_run"):
+            tags.append("ai_call")
+        elif row.get("has_qr") or row.get("pair_key_source") == "qr":
+            tags.append("qr_skip")
+        else:
+            tags.append("skip_ai")
+        if escalation_model in row.get("ai_models_run", []) and escalation_model != primary_model:
+            tags.append("escalated")
+        _logger.info("[OCR] img#%s: %s", row["index"], "|".join(tags))
     _logger.info(
-        "[AI_OCR_FLOW] total=%s skip_ai=%s mrz_rows=%s ai_crops=%s escalated_rows=%s",
+        "[AI_OCR_FLOW] total=%s skip_ai=%s mrz_rows=%s primary_ai_rows=%s ai_encoded=%s escalated_rows=%s",
         len(rows),
         skip_ai,
         mrz_rows,
-        len(primary_plans) + len(escalation_plans),
+        primary_ai_rows,
+        ai_encoded,
         escalated_rows,
     )
 
@@ -2175,101 +2595,10 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
 @router.post("/analyze")
 async def analyze_images(files: List[UploadFile] = File(...)):
     """
-    Nhận 1..n ảnh giấy tờ. Gộp vào 1 lần gọi AI để tiết kiệm token.
-    QR decode trước AI — kết quả QR gắn vào AI result theo số CCCD (không theo index).
-    Trả về persons[], properties[], marriages[].
+    Nhận 1..n ảnh giấy tờ, áp QR/MRZ-first và trả về persons[], properties[], marriages[].
+    Response contract giữ nguyên shape hiện tại của API OCR.
     """
     return await _analyze_images_v2(files)
-
-    if not files:
-        raise HTTPException(status_code=400, detail="Chưa có ảnh nào được gửi lên")
-
-    images_b64:  list[str]      = []
-    filenames:   list[str]      = []
-    errors:      list[dict]     = []
-    img_has_qr:  set[int]       = set()   # index ảnh nào có QR (Python scan, không cần AI)
-    qr_by_cccd:  dict[str, dict] = {}     # CCCD 12 số → QR data (authoritative)
-
-    for idx, f in enumerate(files):
-        try:
-            file_bytes = await f.read()
-
-            # Quét QR trước (miễn phí, chính xác — không cần AI)
-            qr_text = try_decode_qr(file_bytes)
-            if qr_text:
-                img_has_qr.add(idx)
-                qr_parsed = parse_cccd_qr(qr_text)
-                if qr_parsed and qr_parsed.get("so_giay_to"):
-                    qr_by_cccd[qr_parsed["so_giay_to"]] = qr_parsed
-
-            b64 = resize_to_base64(file_bytes)
-            images_b64.append(b64)
-            filenames.append(f.filename or "unknown")
-        except Exception as e:
-            errors.append({"filename": f.filename, "error": str(e)})
-
-    if not images_b64:
-        return {"persons": [], "properties": [], "marriages": [],
-                "errors": errors, "summary": {}}
-
-    # 1 lần gọi AI cho tất cả ảnh
-    raw_results = await call_vision_batch_v2(images_b64)
-
-    # Gắn filename + QR data; override doc_type dựa trên tín hiệu vật lý
-    n_imgs = len(images_b64)
-    for i, r in enumerate(raw_results):
-        if not isinstance(r, dict):
-            r = {"doc_type": "unknown", "data": {}}
-            raw_results[i] = r
-
-        # Ảnh 2 mặt trong 1 scan → AI trả >n results; map overflow về ảnh cuối cùng
-        # [WHY] Provider duoc goi kem nhan `SOURCE_IMAGE_INDEX` de tra ket qua ve dung file goc.
-        # [RISK] Map theo thu tu don thuan se de dan nham filename khi 1 anh tra ve >1 object.
-        # [CHANGE RULE] Neu sua rule nay, bat buoc test lai case 1 anh -> 2 objects va batch > 1 anh.
-        img_idx = _coerce_source_image_index(r.get("_source_image_index"), n_imgs)
-        if img_idx is None:
-            img_idx = i if i < n_imgs else n_imgs - 1
-        r["filename"] = filenames[img_idx]
-        if not isinstance(r.get("data"), dict):
-            r["data"] = {}
-        d = r["data"]
-
-        # Tín hiệu vật lý 1: MRZ (IDVNM...) chỉ có ở MẶT SAU — override AI classification
-        has_mrz = bool(
-            d.get("mrz_line1") or
-            d.get("so_giay_to_mrz") or
-            extract_cccd_from_mrz(d.get("mrz_line1", ""))
-        )
-        if has_mrz:
-            r["doc_type"] = "cccd_back"   # MRZ = chắc chắn mặt sau
-
-        # Tín hiệu vật lý 2: QR trong ảnh nguồn
-        r["_img_has_qr"] = (img_idx in img_has_qr)
-
-        # Tag loại thẻ theo bảng phân loại:
-        #   MRZ + QR trong ảnh  → mặt sau CC mới  (QR ở mặt sau)
-        #   MRZ, không QR       → mặt sau CCCD cũ (không có QR ở mặt sau)
-        #   QR, không MRZ       → mặt trước CCCD cũ (QR ở mặt trước)
-        #   Không QR, không MRZ → mặt trước CC mới
-        if has_mrz and r["_img_has_qr"]:
-            r["_side"] = "back_new_cc"
-        elif has_mrz:
-            r["_side"] = "back_old_cccd"
-        elif r["_img_has_qr"]:
-            r["_side"] = "front_old_cccd"
-        else:
-            r["_side"] = "front_new_cc"
-
-        # Gắn QR theo số CCCD — không phụ thuộc index
-        doc_cccd = re.sub(r"\D", "", str(d.get("so_giay_to") or d.get("so_giay_to_mrz") or ""))
-        if not doc_cccd:
-            doc_cccd = extract_cccd_from_mrz(d.get("mrz_line1", ""))
-        if doc_cccd and doc_cccd in qr_by_cccd:
-            r["qr_data"] = qr_by_cccd[doc_cccd]
-
-    grouped = group_documents(raw_results)
-    grouped["errors"] = errors
-    return grouped
 
 
 @router.get("/config")

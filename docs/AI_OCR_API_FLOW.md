@@ -7,6 +7,28 @@ Tai lieu nay mo ta flow hien tai cua `POST /api/ocr/analyze` sau refactor QR/MRZ
 - Uu tien QR va MRZ truoc AI de tiet kiem token.
 - Chi goi AI cho field con thieu, co fallback sang model lon hon khi can.
 
+## MRZ Extraction Rule
+- Day la source of truth cho `pair_key` khi ghep mat sau CCCD/CC.
+- Normalize `mrz_line1` truoc khi parse:
+  - uppercase
+  - bo khoang trang
+  - doi ky tu OCR loi nhu `` ` `` thanh `<`
+- Khi dong 1 bat dau bang `IDVNM`, khong lay 12 so dau.
+- Rule chuan:
+  - lay 22 chu so dau tien sau prefix `IDVNM` bang cach bo qua ky tu `<` nhung giu nguyen thu tu chu so
+  - CCCD dung la 12 chu so cuoi cua block 22 chu so do
+  - tuong duong `digits_after_IDVNM[10:22]`
+- Vi du:
+  - `IDVNM065001407903606500140\`7<<4`
+  - `digits_after_IDVNM = 0650014079036065001407`
+  - `so_giay_to = 036065001407`
+- Anti-rule:
+  - `065001407903` hoac `082000989203` la sai vi do la 12 so dau, khong phai CCCD.
+- Neu sai rule nay:
+  - mat sau se tao `pair_key` sai
+  - backend sinh person rac tu back-only
+  - front QR khong ghep duoc voi back MRZ
+
 ## Tong quan flow hien tai
 1. Frontend van gui `files[]` len `/api/ocr/analyze`.
 2. Backend doc tung anh va tao `row` noi bo cho moi file:
@@ -61,7 +83,7 @@ Tai lieu nay mo ta flow hien tai cua `POST /api/ocr/analyze` sau refactor QR/MRZ
 ## Telemetry noi bo
 - `skip_ai`: so anh khong can AI
 - `mrz_rows`: so anh co MRZ local
-- `ai_crops`: tong so crop gui AI (primary + escalation)
+- `ai_encoded`: tong so payload anh duoc encode/gui AI (primary + escalation)
 - `escalated_rows`: so row phai retry model lon hon
 
 ## Bien moi truong lien quan
