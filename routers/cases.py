@@ -70,7 +70,9 @@ def _build_temp_participants(
 
         parent_cid = None
         if parent_raw and str(parent_raw).isdigit():
-            parent_cid = int(parent_raw)
+            _pid = int(parent_raw)
+            if str(_pid) in customers_by_id:
+                parent_cid = _pid
 
         participants.append(SimpleNamespace(
             customer_id=customer.id,
@@ -165,6 +167,7 @@ def create(
         share_list = _to_list(participant_share)
         recv_list = _to_list(participant_receive)
         parent_list = _to_list(participant_parent_id)
+        valid_customer_ids = {c2.id for c2 in all_customers}
         if pid_list and role_list:
             for idx, cid in enumerate(pid_list):
                 if not cid:
@@ -183,7 +186,9 @@ def create(
 
                 parent_cid = None
                 if parent_raw and str(parent_raw).isdigit():
-                    parent_cid = int(parent_raw)
+                    _pid = int(parent_raw)
+                    if _pid in valid_customer_ids:
+                        parent_cid = _pid
 
                 p = InheritanceParticipant(
                     ho_so_id=c.id, customer_id=int(cid),
@@ -300,6 +305,7 @@ def edit(
         share_list = _to_list(participant_share)
         recv_list = _to_list(participant_receive)
         parent_list = _to_list(participant_parent_id)
+        valid_customer_ids = {c2.id for c2 in all_customers}
         if pid_list and role_list:
             for idx, participant_customer_id in enumerate(pid_list):
                 if not participant_customer_id:
@@ -318,7 +324,9 @@ def edit(
 
                 parent_cid = None
                 if parent_raw and str(parent_raw).isdigit():
-                    parent_cid = int(parent_raw)
+                    _pid = int(parent_raw)
+                    if _pid in valid_customer_ids:
+                        parent_cid = _pid
 
                 p = InheritanceParticipant(
                     ho_so_id=case.id, customer_id=int(participant_customer_id),
@@ -587,11 +595,10 @@ def _honorific_for_customer(c: Optional[Customer]) -> str:
         return ""
     gender = (c.gioi_tinh or "").strip().lower()
     if gender == "nam":
-        return "\u00d4ng"
-    if gender in ("n\u1eef", "nu"):
-        return "B\u00e0"
+        return "Ông"
+    if gender in ("nữ", "nu"):
+        return "Bà"
     return ""
-
 
 
 def _so_thanh_chu(so: float) -> str:
