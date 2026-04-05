@@ -898,7 +898,13 @@ def _preprocess_for_mrz(img_bgr: "np.ndarray") -> "np.ndarray":
     return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
 
 
-def _filter_mrz_boxes_in_crop(boxes: list[dict[str, Any]], crop_shape: tuple[int, int]) -> list[dict[str, Any]]:
+def _filter_mrz_boxes_in_crop(
+    boxes: list[dict[str, Any]],
+    crop_shape: tuple[int, int],
+    *,
+    y_min: float = 0.0,
+    y_max: float = MRZ_CROP_FILTER_Y_MAX,
+) -> list[dict[str, Any]]:
     """Keep only MRZ-like candidates in crop coordinate space."""
     if np is None:
         return list(boxes or [])
@@ -915,7 +921,7 @@ def _filter_mrz_boxes_in_crop(boxes: list[dict[str, Any]], crop_shape: tuple[int
         box_w = float(arr[:, 0].max() - arr[:, 0].min()) / w
         box_h = float(arr[:, 1].max() - arr[:, 1].min()) / h
         if (
-            center_y < MRZ_CROP_FILTER_Y_MAX
+            y_min <= center_y <= y_max
             and box_w > MRZ_CROP_MIN_WIDTH_RATIO
             and box_h < MRZ_CROP_MAX_HEIGHT_RATIO
         ):
@@ -979,7 +985,8 @@ def _extract_local_mrz_data(
                 full_area = max(1, img_bgr.shape[0] * img_bgr.shape[1])
                 area_ratio = float(crop_area) / float(full_area)
                 min_conf = float(getattr(ocr_local, "LOCAL_OCR_SMART_CROP_MIN_CONF", 0.22))
-                if smart_conf >= min_conf and area_ratio < 0.98:
+                touches_bottom = y2 >= (img_bgr.shape[0] - 5)
+                if smart_conf >= min_conf and area_ratio < 0.98 and not touches_bottom:
                     img_bgr = smart_img
                     use_bottom_crop = True
 
@@ -1021,7 +1028,7 @@ def _extract_local_mrz_data(
             detect_ms = round((perf_counter() - t_step) * 1000.0, 2)
 
             t_step = perf_counter()
-            selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2])
+            selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2], y_min=0.5, y_max=0.67)
             filter_ms = round((perf_counter() - t_step) * 1000.0, 2)
 
         if not selected:
@@ -1209,17 +1216,14 @@ def _build_initial_ai_snapshot_sync(index: int, filename: str, file_bytes: bytes
     row["has_qr"] = bool(row["qr_text"])
     row["qr_data"] = parse_cccd_qr(row["qr_text"]) if row["qr_text"] else None
     mrz_ms = 0.0
-    if not row["has_qr"]:
-        t_mrz = perf_counter()
-        row["mrz_data"] = _extract_local_mrz_data(
-            file_bytes,
-            has_qr=False,
-            settings=settings_snapshot,
-            filename=filename,
-        )
-        mrz_ms = round((perf_counter() - t_mrz) * 1000.0, 2)
-    else:
-        row["mrz_data"] = None
+    t_mrz = perf_counter()
+    row["mrz_data"] = _extract_local_mrz_data(
+        file_bytes,
+        has_qr=row["has_qr"],
+        settings=settings_snapshot,
+        filename=filename,
+    )
+    mrz_ms = round((perf_counter() - t_mrz) * 1000.0, 2)
     row["has_mrz"] = bool((row["mrz_data"] or {}).get("so_giay_to") or (row["mrz_data"] or {}).get("mrz_line1"))
     row["state"] = _infer_deterministic_state(has_qr=row["has_qr"], has_mrz=row["has_mrz"])
     row["profile"] = _state_to_profile(row["state"])

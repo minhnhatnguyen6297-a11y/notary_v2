@@ -458,6 +458,21 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         self.assertFalse(snapshot["face_detected"])
         self.assertEqual(snapshot["preprocess_timing"]["face_ms"], 0.0)
 
+    def test_build_initial_ai_snapshot_sync_keeps_mrz_probe_when_qr_exists(self):
+        qr_text = "036065001407|NGO VAN TAN|17061965|Nam|To Dan Pho So 8|21052025"
+        mrz_data = {"so_giay_to": "036065001407", "mrz_line1": "IDVNM065001407903606500140<<4"}
+        with mock.patch.object(ocr, "try_decode_qr", return_value=qr_text), \
+             mock.patch.object(ocr, "_extract_local_mrz_data", return_value=mrz_data) as mrz_mock:
+            snapshot = ocr._build_initial_ai_snapshot_sync(0, "back-new.jpg", b"fake-bytes", self.settings)
+
+        self.assertTrue(snapshot["has_qr"])
+        self.assertTrue(snapshot["has_mrz"])
+        self.assertEqual(snapshot["state"], ocr.TRIAGE_STATE_BACK_NEW)
+        self.assertEqual(snapshot["profile"], ocr.DOC_PROFILE_BACK_NEW)
+        self.assertEqual(snapshot["pair_key_source"], "qr")
+        mrz_mock.assert_called_once()
+        self.assertTrue(mrz_mock.call_args.kwargs["has_qr"])
+
     def test_coerce_snapshot_result_falls_back_to_sequential_when_worker_errors(self):
         fake_snapshot = {
             "index": 1,
@@ -595,7 +610,7 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         noise_box = np.array([[15.0, 2.0], [40.0, 2.0], [40.0, 5.0], [15.0, 5.0]], dtype=np.float32)
         local_module = mock.Mock()
         local_module._opencv_smart_crop = mock.Mock(
-            return_value=(np.zeros((80, 100, 3), dtype=np.uint8), (0, 20, 100, 100), 0.9)
+            return_value=(np.zeros((74, 100, 3), dtype=np.uint8), (0, 20, 100, 94), 0.9)
         )
         local_module.LOCAL_OCR_SMART_CROP_MIN_CONF = 0.22
         local_module._rapidocr_detect_boxes = mock.Mock(
@@ -634,9 +649,9 @@ class SnapshotAndPayloadTests(unittest.TestCase):
 
         self.assertEqual(parsed["so_giay_to"], "036168006276")
         detect_img = local_module._rapidocr_detect_boxes.call_args.args[0]
-        self.assertEqual(detect_img.shape[:2], (28, 100))
+        self.assertEqual(detect_img.shape[:2], (26, 100))
         recognize_args = local_module._recognize_target_boxes_rapidocr.call_args.args
-        self.assertEqual(recognize_args[0].shape[:2], (28, 100))
+        self.assertEqual(recognize_args[0].shape[:2], (26, 100))
         self.assertEqual(len(recognize_args[1]), 3)
         self.assertNotIn(noise_box.tolist(), [np.asarray(item["box"]).tolist() for item in recognize_args[1]])
 
@@ -644,8 +659,8 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         buf = io.BytesIO()
         Image.new("RGB", (100, 100), "white").save(buf, format="JPEG")
         file_bytes = buf.getvalue()
-        mrz_box_1 = np.array([[10.0, 30.0], [90.0, 30.0], [90.0, 33.0], [10.0, 33.0]], dtype=np.float32)
-        mrz_box_2 = np.array([[10.0, 36.0], [90.0, 36.0], [90.0, 39.0], [10.0, 39.0]], dtype=np.float32)
+        mrz_box_1 = np.array([[10.0, 60.0], [90.0, 60.0], [90.0, 63.0], [10.0, 63.0]], dtype=np.float32)
+        mrz_box_2 = np.array([[10.0, 66.0], [90.0, 66.0], [90.0, 69.0], [10.0, 69.0]], dtype=np.float32)
         local_module = mock.Mock()
         local_module._opencv_smart_crop = mock.Mock(return_value=None)
         local_module._rapidocr_detect_boxes = mock.Mock(
@@ -676,6 +691,50 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         with mock.patch.object(ocr, "_try_import_local_ocr_module", return_value=local_module), \
              mock.patch.object(ocr, "_preprocess_for_mrz", side_effect=lambda img: img):
             parsed = ocr._extract_local_mrz_data(file_bytes, has_qr=False, settings=self.settings)
+
+        self.assertEqual(parsed["so_giay_to"], "036084011825")
+        detect_img = local_module._rapidocr_detect_boxes.call_args.args[0]
+        self.assertEqual(detect_img.shape[:2], (100, 100))
+
+    def test_extract_local_mrz_data_falls_back_to_full_image_when_smart_crop_touches_bottom(self):
+        buf = io.BytesIO()
+        Image.new("RGB", (100, 100), "white").save(buf, format="JPEG")
+        file_bytes = buf.getvalue()
+        mrz_box_1 = np.array([[10.0, 60.0], [90.0, 60.0], [90.0, 63.0], [10.0, 63.0]], dtype=np.float32)
+        mrz_box_2 = np.array([[10.0, 66.0], [90.0, 66.0], [90.0, 69.0], [10.0, 69.0]], dtype=np.float32)
+        local_module = mock.Mock()
+        local_module._opencv_smart_crop = mock.Mock(
+            return_value=(np.zeros((90, 100, 3), dtype=np.uint8), (0, 10, 100, 100), 0.9)
+        )
+        local_module.LOCAL_OCR_SMART_CROP_MIN_CONF = 0.22
+        local_module._rapidocr_detect_boxes = mock.Mock(
+            return_value=(
+                [
+                    {"box": mrz_box_1},
+                    {"box": mrz_box_2},
+                ],
+                0.0,
+            )
+        )
+        local_module._recognize_target_boxes_rapidocr = mock.Mock(
+            return_value=(
+                [
+                    {"box": mrz_box_1, "text": "IDVNM0840118259036084011825<<4", "score": 0.99},
+                    {"box": mrz_box_2, "text": "8412092M4412094VNM<<<<<<<<<<<8", "score": 0.99},
+                ],
+                0.0,
+            )
+        )
+        local_module._group_lines = mock.Mock(
+            return_value=[
+                "IDVNM0840118259036084011825<<4",
+                "8412092M4412094VNM<<<<<<<<<<<8",
+            ]
+        )
+
+        with mock.patch.object(ocr, "_try_import_local_ocr_module", return_value=local_module), \
+             mock.patch.object(ocr, "_preprocess_for_mrz", side_effect=lambda img: img):
+            parsed = ocr._extract_local_mrz_data(file_bytes, has_qr=True, settings=self.settings)
 
         self.assertEqual(parsed["so_giay_to"], "036084011825")
         detect_img = local_module._rapidocr_detect_boxes.call_args.args[0]

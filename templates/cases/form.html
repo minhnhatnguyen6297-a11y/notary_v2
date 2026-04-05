@@ -3402,6 +3402,7 @@ endif %}
         if (s === 'processing') return '<span style="color:#d97706;">⚙️ Đang trích xuất...</span>';
         if (s === 'ocr') return '<span style="color:#2563eb;">🧾 OCR</span>';
         if (s === 'ocr_back') return '<span style="color:#7c3aed;">🧾 OCR • mặt sau đã ghép</span>';
+        if (s === 'qr_back') return '<span style="color:#059669;">✅ QR • mặt sau đã ghép</span>';
         if (s === 'ai') return '<span style="color:#2563eb;">🤖 AI OCR</span>';
         if (s === 'ai_back') return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
         if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
@@ -3418,6 +3419,7 @@ endif %}
         if (s === 'processing') return '<span style="color:#d97706;">Dang trich xuat...</span>';
         if (s === 'ocr') return '<span style="color:#2563eb;">OCR</span>';
         if (s === 'ocr_back') return '<span style="color:#7c3aed;">OCR - mat sau da ghep</span>';
+        if (s === 'qr_back') return '<span style="color:#059669;">QR - mat sau da ghep</span>';
         if (s === 'ai') return '<span style="color:#2563eb;">AI OCR</span>';
         if (s === 'ai_back') return '<span style="color:#7c3aed;">Mat sau (da ghep)</span>';
         if (s === 'ai_manual') return '<span style="color:#b45309;">AI OCR - can gan/chinh tay</span>';
@@ -3791,12 +3793,19 @@ endif %}
 
             for (const item of needsAI) {
               const results = byFile[item.name] || [];
+              const rawForItem = rawByFile[item.name] || null;
+              const rawUsesQr = Boolean(rawForItem?._img_has_qr) || Object.values(rawForItem?.field_sources || {})
+                .some(v => String(v || '').toLowerCase() === 'qr');
               if (results.length) {
                 const r = results[0];
                 // Mặt sau CCCD đã ghép → show "ai (mặt sau)" không cần thêm vào ocrResults
                 const isBackOnly = r.type === 'person' && r.data?._source?.includes('+back')
                   && r.data?._files?.[1] === item.name;
-                item.status = isBackOnly ? 'ai_back' : 'ai';
+                if (rawUsesQr) {
+                  item.status = isBackOnly ? 'qr_back' : 'qr';
+                } else {
+                  item.status = isBackOnly ? 'ai_back' : 'ai';
+                }
                 item._result = { ...r, source: 'AI', filename: item.name };
               } else {
                 item.status = 'error';
@@ -4071,9 +4080,9 @@ endif %}
         list.innerHTML = html;
 
         // Summary
-        const qrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'QR').length;
-        const ocrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'OCR').length;
-        const aiCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'AI').length;
+        const qrCount = persons.filter(personUsesQr).length;
+        const aiCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'AI').length;
+        const ocrCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'OCR').length;
         if (aiCount > 0 && ocrCount === 0) {
           document.getElementById('ocr-summary-text').textContent =
             `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
@@ -4098,6 +4107,18 @@ endif %}
           if (/[\u0300-\u036f]/.test(nfd)) total += 1;
         }
         return total;
+      }
+
+      function personUsesQr(result) {
+        const d = result?.data || {};
+        if (d._qr) return true;
+        const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
+        if (sourceType === 'QR') return true;
+        const fieldSources = {
+          ...(d.field_sources || {}),
+          ...(result?.field_sources || {})
+        };
+        return Object.values(fieldSources).some(v => String(v || '').toLowerCase() === 'qr');
       }
 
       function personCard(d, idx, result) {
@@ -4132,6 +4153,7 @@ endif %}
         // Badge + note + supplement button theo nguồn
         let srcBadge, suppNote = '', suppBtn = '';
         const _src = d._source || '';
+        const usesQr = personUsesQr(result);
         const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
         const side = String(result?.side || d.side || '').toLowerCase();
         const sideLabel = side === 'front' ? 'mặt trước' : side === 'back' ? 'mặt sau' : 'không rõ mặt';
@@ -4140,9 +4162,9 @@ endif %}
         } else if (sourceType === 'OCR') {
           srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">OCR • ${sideLabel}</span>`;
         } else if (_src.includes('+back')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓</span>`;
+          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">${usesQr ? '2 mặt • QR' : '2 mặt ✓'}</span>`;
         } else if (_src.includes('thiếu mặt sau')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt sau</span>`;
+          srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">${usesQr ? 'QR • thiếu mặt sau' : 'Thiếu mặt sau'}</span>`;
           suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'back')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt sau CCCD (lấy ngày cấp)"><i class="bi bi-camera"></i> Bổ sung</button>`;
         } else if (_src === 'cccd_back only') {
           srcBadge = `<span class="ocr-src-badge" style="background:#ffedd5;color:#9a3412;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt trước</span>`;
