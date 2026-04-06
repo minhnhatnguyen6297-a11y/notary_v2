@@ -1,0 +1,77 @@
+{
+  "web_form": {
+    "ten_hop_dong": "Hợp đồng chuyển nhượng quyền sử dụng đất",
+    "ngay_cong_chung": "23/03/2026",
+    "so_cong_chung": "375/2026/CCGD",
+    "nhom_hop_dong": "Chuyển nhượng - Mua bán",
+    "loai_tai_san": "Đất đai không có tài sản",
+    "cong_chung_vien": "Phạm Minh Chi",
+    "thu_ky": "Nguyễn Nhật Minh",
+    "nguoi_yeu_cau": "Ông Nguyễn Đức Hưng; Sinh ngày: 02/03/1997; Căn cước số: 036097015841; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 16/08/2021; Cư trú tại: Thôn Thắng Lợi, xã Yên Cường, tỉnh Ninh Bình",
+    "duong_su": "BÊN A (Bên chuyển nhượng):\n1. Ông Nguyễn Đức Hiệp; Sinh ngày: 17/05/1982; CCCD: 036082016110; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 16/10/2022\n2. Bà Tạ Thị Chủ; Sinh ngày: 08/01/1956; CCCD: 036156012959; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 10/01/2023\n3. Bà Nguyễn Thị Hồng Vân; Sinh ngày: 03/09/1990; CCCD: 036190018113; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 08/09/2022\n4. Bà Nguyễn Thị Hồng Thu; Sinh ngày: 11/10/1993; CCCD: 036193016359; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 09/05/2024\n\nBÊN B (Bên nhận chuyển nhượng):\n1. Ông Nguyễn Đức Hưng; Sinh ngày: 02/03/1997; CCCD: 036097015841; do Cục cảnh sát quản lý hành chính về trật tự xã hội cấp ngày 16/08/2021\n2. Bà Nguyễn Thị Như Quỳnh; Sinh ngày: 17/08/1997; CCCD: 038197028093; do Bộ Công an cấp ngày 06/09/2025\nCùng cư trú tại: Thôn Thắng Lợi, xã Yên Cường, tỉnh Ninh Bình",
+    "tai_san": "Đối tượng của Hợp đồng này là toàn bộ quyền sử dụng đất của bên A có địa chỉ tại: Đội 3, Phú Bình, xã Yên Cường, huyện Ý Yên, tỉnh Nam Định (nay là Thôn Tâm Bình, xã Yên Cường, tỉnh Ninh Bình) theo Giấy chứng nhận quyền sử dụng đấtsố: AP 336412; Số vào sổ cấp GCN: 1027 do Ủy ban nhân dân huyện Ý Yên, tỉnh Nam Định cấp ngày 07/12/2007, cụ thể như sau:\nThửa đất số: 44, \ttờ bản đồ số: 15\nĐịa chỉ: Đội 3, Phú Bình, xã Yên Cường, huyện Ý Yên, tỉnh Nam Định (nay là Thôn Tâm Bình, xã Yên Cường, tỉnh Ninh Bình)\nDiện tích: 160,0 m2 (bằng chữ: Một trăm sáu mươi mét vuông)\nHình thức sử dụng: Sử dụng riêng: 160,0 m2; Sử dụng chung: Không\nMục đích sử dụng: Đất ở tại nông thôn\nThời hạn sử dụng: Lâu dài\nNguồn gốc sử dụng đất: Nhà nước giao đất có thu tiền sử dụng đất."
+  },
+  "raw": {
+    "ben_a": {
+      "nguoi": [
+        {
+          "gioi_tinh": "Ông",
+          "ho_ten": "Nguyễn Đức Hiệp",
+          "ngay_sinh": "17/05/1982",
+          "cccd": "036082016110",
+          "noi_cap": "Cục cảnh sát quản lý hành chính về trật tự xã hội",
+          "ngay_cap_cccd": "16/10/2022"
+        },
+        {
+          "gioi_tinh": "Bà",
+          "ho_ten": "Tạ Thị Chủ",
+          "ngay_sinh": "08/01/1956",
+          "cccd": "036156012959",
+          "noi_cap": "Cục cảnh sát quản lý hành chính về trật tự xã hội",
+          "ngay_cap_cccd": "10/01/2023"
+        },
+        {
+          "gioi_tinh": "Bà",
+          "ho_ten": "Nguyễn Thị Hồng Vân",
+          "ngay_sinh": "03/09/1990",
+          "cccd": "036190018113",
+          "noi_cap": "Cục cảnh sát quản lý hành chính về trật tự xã hội",
+          "ngay_cap_cccd": "08/09/2022"
+        },
+        {
+          "gioi_tinh": "Bà",
+          "ho_ten": "Nguyễn Thị Hồng Thu",
+          "ngay_sinh": "11/10/1993",
+          "cccd": "036193016359",
+          "noi_cap": "Cục cảnh sát quản lý hành chính về trật tự xã hội",
+          "ngay_cap_cccd": "09/05/2024"
+        }
+      ],
+      "dia_chi": ""
+    },
+    "ben_b": {
+      "nguoi": [
+        {
+          "gioi_tinh": "Ông",
+          "ho_ten": "Nguyễn Đức Hưng",
+          "ngay_sinh": "02/03/1997",
+          "cccd": "036097015841",
+          "noi_cap": "Cục cảnh sát quản lý hành chính về trật tự xã hội",
+          "ngay_cap_cccd": "16/08/2021"
+        },
+        {
+          "gioi_tinh": "Bà",
+          "ho_ten": "Nguyễn Thị Như Quỳnh",
+          "ngay_sinh": "17/08/1997",
+          "cccd": "038197028093",
+          "noi_cap": "Bộ Công an",
+          "ngay_cap_cccd": "06/09/2025"
+        }
+      ],
+      "dia_chi": "Thôn Thắng Lợi, xã Yên Cường, tỉnh Ninh Bình"
+    },
+    "file_goc": "\\\\maychu\\D\\HỢP ĐỒNG 2026\\CHUYỂN NHƯỢNG\\Tháng 3 Minh\\23.03.2026 Hiệp - Hưng Quỳnh\\1. HĐCN (sổ đỏ, sổ hồng cũ)_hiệp  hưng quỳnh.docx",
+    "scan_contract_no": "375/2026/CCGD",
+    "scan_reason": "Tim thay so CC: 375/2026/CCGD"
+  }
+}

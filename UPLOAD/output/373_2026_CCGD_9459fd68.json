@@ -1,0 +1,27 @@
+{
+  "web_form": {
+    "ten_hop_dong": "",
+    "ngay_cong_chung": "23/03/2026",
+    "so_cong_chung": "373/2026/CCGD",
+    "nhom_hop_dong": "Khác",
+    "loai_tai_san": "Tài sản khác",
+    "cong_chung_vien": "Phạm Minh Chi",
+    "thu_ky": "Nguyễn Nhật Minh",
+    "nguoi_yeu_cau": "",
+    "duong_su": "BÊN A (Bên chuyển nhượng):\n\nBÊN B (Bên nhận chuyển nhượng):",
+    "tai_san": ""
+  },
+  "raw": {
+    "ben_a": {
+      "nguoi": [],
+      "dia_chi": ""
+    },
+    "ben_b": {
+      "nguoi": [],
+      "dia_chi": ""
+    },
+    "file_goc": "\\\\maychu\\D\\HỢP ĐỒNG 2026\\CHUYỂN NHƯỢNG\\Tháng 3 Minh\\23.03.2026 Hiệp - Hưng Quỳnh\\Lời chứng Hiệp thu Vân.docx",
+    "scan_contract_no": "373/2026/CCGD",
+    "scan_reason": "Tim thay so CC: 373/2026/CCGD"
+  }
+}
