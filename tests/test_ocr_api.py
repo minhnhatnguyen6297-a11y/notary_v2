@@ -253,6 +253,43 @@ class GroupDocumentsTests(unittest.TestCase):
 
         self.assertEqual(grouped["persons"][0]["dia_chi"], "Yên Lương, Ý Yên, Nam Định")
 
+    def test_group_documents_includes_unknown_rows_when_ai_returns_identity_hints(self):
+        results = [
+            {
+                "doc_type": "unknown",
+                "profile": ocr.DOC_PROFILE_UNKNOWN,
+                "pair_key": "036084011825",
+                "pair_key_source": "qr",
+                "filename": "front-or-back.jpg",
+                "field_sources": {
+                    "so_giay_to": "qr",
+                    "ho_ten": "qr",
+                    "ngay_sinh": "qr",
+                    "gioi_tinh": "qr",
+                    "dia_chi": "qr",
+                    "ngay_cap": "qr",
+                },
+                "qr_data": {"so_giay_to": "036084011825"},
+                "mrz_data": {},
+                "data": {
+                    "doc_side": "back",
+                    "doc_version": "new",
+                    "so_giay_to": "036084011825",
+                    "ho_ten": "NGUYỄN HUY HOÀNG",
+                    "ngay_sinh": "09/12/1984",
+                    "gioi_tinh": "Nam",
+                    "dia_chi": "Yên Lương, Ý Yên, Nam Định",
+                    "ngay_cap": "06/01/2025",
+                },
+                "_side": "unknown",
+            }
+        ]
+
+        grouped = ocr.group_documents(results)
+
+        self.assertEqual(len(grouped["persons"]), 1)
+        self.assertEqual(grouped["persons"][0]["so_giay_to"], "036084011825")
+
 
 class AiPlanningTests(unittest.TestCase):
     def setUp(self):
@@ -271,7 +308,7 @@ class AiPlanningTests(unittest.TestCase):
             "preprocess_warmup": True,
         }
 
-    def test_build_ai_plan_skips_ai_for_five_pairs_when_qr_or_mrz_are_enough(self):
+    def test_build_ai_plan_uses_full_extract_first_mode_for_all_rows(self):
         rows = []
         old_keys = ["036168006276", "036082000989", "036185021354"]
         for offset, key in enumerate(old_keys):
@@ -372,9 +409,11 @@ class AiPlanningTests(unittest.TestCase):
 
         plans = ocr._build_ai_plan(rows, self.settings)
 
-        self.assertEqual(plans, [])
+        self.assertEqual(len(plans), len(rows))
+        self.assertTrue(all(plan["mode"] == "full" for plan in plans))
+        self.assertTrue(all(plan["prompt"] == ocr.SYSTEM_PROMPT for plan in plans))
 
-    def test_build_ai_plan_asks_back_fields_when_mrz_exists_but_front_qr_not_confirmed(self):
+    def test_build_ai_plan_uses_full_mode_for_mrz_only_row(self):
         row = make_row(
             index=0,
             filename="new-back-qr-fail.jpg",
@@ -388,14 +427,14 @@ class AiPlanningTests(unittest.TestCase):
             field_sources={"so_giay_to": "mrz"},
         )
 
-        with mock.patch.object(ocr, "_crop_image_to_base64", return_value="crop"):
-            plans = ocr._build_ai_plan([row], self.settings)
+        plans = ocr._build_ai_plan([row], self.settings)
 
         self.assertEqual(len(plans), 1)
-        self.assertEqual(plans[0]["targets"], ("dia_chi", "ngay_cap"))
-        self.assertNotIn("image_b64", plans[0])
+        self.assertEqual(plans[0]["mode"], "full")
+        self.assertEqual(plans[0]["targets"], ())
+        self.assertIsNone(plans[0]["crop_ratios"])
 
-    def test_build_ai_plan_targets_front_old_when_old_front_is_paired_from_back(self):
+    def test_build_ai_plan_no_longer_uses_early_pairing_to_target_front_old(self):
         rows = [
             make_row(
                 index=0,
@@ -422,11 +461,10 @@ class AiPlanningTests(unittest.TestCase):
             ),
         ]
 
-        with mock.patch.object(ocr, "_crop_image_to_base64", return_value="crop"):
-            plans = ocr._build_ai_plan(rows, self.settings)
+        plans = ocr._build_ai_plan(rows, self.settings)
 
         self.assertEqual(len(plans), 2)
-        self.assertEqual(plans[0]["targets"], ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi"))
+        self.assertTrue(all(plan["mode"] == "full" for plan in plans))
 
 
 class SnapshotAndPayloadTests(unittest.TestCase):
@@ -447,8 +485,8 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         }
 
     def test_build_initial_ai_snapshot_sync_returns_serializable_snapshot(self):
-        with mock.patch.object(ocr, "try_decode_qr", return_value=""), \
-             mock.patch.object(ocr, "_extract_local_mrz_data", return_value={"so_giay_to": "012345678901"}):
+        qr_text = "012345678901|NGUYEN VAN A|01011980|Nam|Nam Dinh|01012020"
+        with mock.patch.object(ocr, "try_decode_qr", return_value=qr_text):
             snapshot = ocr._build_initial_ai_snapshot_sync(0, "sample.jpg", b"fake-bytes", self.settings)
 
         pickle.dumps(snapshot)
@@ -457,21 +495,21 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         self.assertIn("preprocess_timing", snapshot)
         self.assertFalse(snapshot["face_detected"])
         self.assertEqual(snapshot["preprocess_timing"]["face_ms"], 0.0)
+        self.assertEqual(snapshot["mrz_data"], {})
+        self.assertFalse(snapshot["has_mrz"])
 
-    def test_build_initial_ai_snapshot_sync_keeps_mrz_probe_when_qr_exists(self):
+    def test_build_initial_ai_snapshot_sync_does_not_probe_local_mrz_when_qr_exists(self):
         qr_text = "036065001407|NGO VAN TAN|17061965|Nam|To Dan Pho So 8|21052025"
-        mrz_data = {"so_giay_to": "036065001407", "mrz_line1": "IDVNM065001407903606500140<<4"}
         with mock.patch.object(ocr, "try_decode_qr", return_value=qr_text), \
-             mock.patch.object(ocr, "_extract_local_mrz_data", return_value=mrz_data) as mrz_mock:
+             mock.patch.object(ocr, "_extract_local_mrz_data") as mrz_mock:
             snapshot = ocr._build_initial_ai_snapshot_sync(0, "back-new.jpg", b"fake-bytes", self.settings)
 
         self.assertTrue(snapshot["has_qr"])
-        self.assertTrue(snapshot["has_mrz"])
-        self.assertEqual(snapshot["state"], ocr.TRIAGE_STATE_BACK_NEW)
-        self.assertEqual(snapshot["profile"], ocr.DOC_PROFILE_BACK_NEW)
+        self.assertFalse(snapshot["has_mrz"])
+        self.assertEqual(snapshot["state"], ocr.TRIAGE_STATE_UNKNOWN)
+        self.assertEqual(snapshot["profile"], ocr.DOC_PROFILE_UNKNOWN)
         self.assertEqual(snapshot["pair_key_source"], "qr")
-        mrz_mock.assert_called_once()
-        self.assertTrue(mrz_mock.call_args.kwargs["has_qr"])
+        mrz_mock.assert_not_called()
 
     def test_coerce_snapshot_result_falls_back_to_sequential_when_worker_errors(self):
         fake_snapshot = {
@@ -506,10 +544,10 @@ class SnapshotAndPayloadTests(unittest.TestCase):
         self.assertEqual(row["preprocess_timing"]["path"], "fallback")
         self.assertEqual(row["pair_key"], "012345678901")
 
-    def test_materialize_ai_plan_payloads_only_loads_images_for_rows_needing_ai(self):
-        skip_row = make_row(
+    def test_materialize_ai_plan_payloads_loads_all_rows_under_extract_first_mode(self):
+        qr_row = make_row(
             index=0,
-            filename="skip.jpg",
+            filename="qr.jpg",
             state=ocr.TRIAGE_STATE_FRONT_OLD,
             profile=ocr.DOC_PROFILE_FRONT_OLD,
             pair_key="012345678901",
@@ -543,16 +581,16 @@ class SnapshotAndPayloadTests(unittest.TestCase):
             field_sources={"so_giay_to": "mrz"},
         )
 
-        plans = ocr._build_ai_plan([skip_row, ai_row], self.settings)
+        plans = ocr._build_ai_plan([qr_row, ai_row], self.settings)
 
         with mock.patch.object(ocr, "_load_normalized_image", return_value=mock.Mock()) as load_mock, \
-             mock.patch.object(ocr, "_crop_image_to_base64", return_value="crop-payload") as crop_mock:
+             mock.patch.object(ocr, "_encode_image_to_base64", return_value="full-payload") as encode_mock:
             payloads = ocr._materialize_ai_plan_payloads(plans, {0: b"skip", 1: b"need-ai"}, {})
 
-        self.assertEqual(len(payloads), 1)
-        load_mock.assert_called_once_with(b"need-ai")
-        crop_mock.assert_called_once()
-        self.assertEqual(payloads[0]["image_b64"], "crop-payload")
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(load_mock.call_count, 2)
+        self.assertEqual(encode_mock.call_count, 2)
+        self.assertTrue(all(payload["image_b64"] == "full-payload" for payload in payloads))
 
     def test_extract_local_mrz_data_returns_early_when_no_selected_boxes(self):
         buf = io.BytesIO()

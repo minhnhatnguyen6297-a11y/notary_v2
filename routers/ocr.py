@@ -798,27 +798,31 @@ def _parse_cccd_mrz_lines(lines: list[str]) -> dict[str, Any]:
 
 
 # ─── Prompt — mô tả rõ layout từng loại thẻ để AI không nhầm trường ──────────
-SYSTEM_PROMPT = """Vietnamese CCCD/legal doc OCR. Return one JSON object per document. If image shows BOTH sides → return 2 objects. Return JSON array.
+SYSTEM_PROMPT = """Vietnamese CCCD/legal doc OCR fast path. Each input image is one document side. Return JSON array.
 
-CARD TYPES AND FIELD LAYOUT:
-1. Old CCCD "CĂN CƯỚC CÔNG DÂN" (pre-2024): front has QR code top-right corner.
-   Front fields top→bottom: Họ tên → Ngày sinh → [Giới tính + Quốc tịch on SAME LINE] → Quê quán → Nơi thường trú → Có giá trị đến
-   IMPORTANT: "Quốc tịch: Việt Nam" is on the SAME LINE as Giới tính — it is NATIONALITY, NOT an address. IGNORE it for dia_chi.
-   dia_chi = "Nơi thường trú" ONLY (the LAST address field at bottom, labeled "Nơi thường trú"). NEVER use "Quê quán" (the field just above it) and NEVER use "Quốc tịch" value.
-   Back: fingerprints + date + MRZ lines (no QR, no address text).
+For every image, return exactly one object with:
+{"source_image_index":0,"doc_type":"cccd_front|cccd_back|marriage_cert|land_cert|unknown","data":{"doc_side":"front|back|unknown","doc_version":"old|new|unknown","ho_ten":"","so_giay_to":"","ngay_sinh":"","gioi_tinh":"","dia_chi":"","ngay_cap":"","ngay_het_han":"","mrz_line1":"","mrz_line2":"","mrz_line3":"","so_giay_to_mrz":"","dia_chi_back":""}}
 
-2. New CĂN CƯỚC (from 2024, title "CĂN CƯỚC" without "CÔNG DÂN"): front has NO QR code.
-   Front fields: Số → Họ tên → Ngày sinh → [Giới tính + Quốc tịch on SAME LINE]. NO address on front → dia_chi = "".
-   Back: QR code top-right + chip + "Nơi cư trú" text at top (2 lines) + Ngày cấp + Ngày hết hạn + MRZ lines.
-   dia_chi_back = "Nơi cư trú" text from top of back (first address field visible on back).
+Vietnamese ID card rules:
+1. Old CCCD "CĂN CƯỚC CÔNG DÂN" (pre-2024)
+- Front usually has QR code.
+- Front fields: Họ tên, Ngày sinh, Giới tính, Quốc tịch, Quê quán, Nơi thường trú, Có giá trị đến.
+- dia_chi on old front MUST be "Nơi thường trú". Never use "Quê quán" or "Quốc tịch".
+- Back usually has fingerprints, ngày cấp, and MRZ lines.
 
-cccd_front→{"doc_type":"cccd_front","data":{"ho_ten":"NGUYỄN VĂN AN","so_giay_to":"12digits","ngay_sinh":"DD/MM/YYYY","gioi_tinh":"Nam|Nữ","dia_chi":"Nơi thường trú (old card bottom field) or empty string (new card or if no address visible)","ngay_het_han":"DD/MM/YYYY or empty"}}
-cccd_back→{"doc_type":"cccd_back","data":{"mrz_line1":"full IDVNM... line","so_giay_to_mrz":"12digits","ngay_cap":"DD/MM/YYYY","dia_chi_back":"Nơi cư trú from top of back (new card only) or empty"}}
-marriage_cert→{"doc_type":"marriage_cert","data":{"chong_ho_ten":"","chong_ngay_sinh":"DD/MM/YYYY","chong_so_giay_to":"","vo_ho_ten":"","vo_ngay_sinh":"DD/MM/YYYY","vo_so_giay_to":"","ngay_dang_ky":"DD/MM/YYYY","noi_dang_ky":""}}
-land_cert→{"doc_type":"land_cert","data":{"so_serial":"","so_thua_dat":"","so_to_ban_do":"","dia_chi_dat":"","loai_dat":"","ngay_cap":"DD/MM/YYYY","co_quan_cap":""}}
-unknown→{"doc_type":"unknown","data":{}}
+2. New CĂN CƯỚC (2024+, title "CĂN CƯỚC")
+- Front has no address. dia_chi = "" on front.
+- Back may show QR, chip, "Nơi cư trú", ngày cấp, ngày hết hạn, and MRZ.
+- dia_chi_back is the residence text from back if visible.
 
-Rules: ho_ten EXACTLY as printed with Vietnamese diacritics (e.g. NGUYỄN VĂN AN not NGUYEN VAN AN). Dates DD/MM/YYYY. ID digits only. "" if unreadable. Return ONLY JSON array."""
+Rules:
+- ho_ten must preserve Vietnamese diacritics exactly as printed.
+- Dates must be DD/MM/YYYY.
+- ID fields must contain digits only.
+- If MRZ is visible, copy full MRZ lines into mrz_line1/2/3 and extract so_giay_to_mrz if readable.
+- If unsure about side/version, set doc_side/doc_version to "unknown".
+- Never pair documents together, never infer data from another image, never invent missing text.
+- Return ONLY JSON array."""
 
 # ─── Image helpers ─────────────────────────────────────────────────────────────
 def _load_normalized_image(file_bytes: bytes) -> Image.Image:
@@ -950,18 +954,29 @@ def _extract_local_mrz_data(
     detect_ms = 0.0
     filter_ms = 0.0
     recognize_ms = 0.0
+    group_ms = 0.0
+    parse_ms = 0.0
+    selected_count = 0
+    recognized_count = 0
+    path_label = "full_image"
 
     def log_mrz_timing() -> None:
         if not runtime_settings.get("timing_log", True):
             return
         _logger.info(
-            "[MRZ_TIMING] %s smart_crop_ms=%.2f preprocess_ms=%.2f detect_ms=%.2f filter_ms=%.2f recognize_ms=%.2f total_ms=%.2f",
+            "[MRZ_TIMING] %s path=%s selected=%s recognized=%s smart_crop_ms=%.2f preprocess_ms=%.2f "
+            "detect_ms=%.2f filter_ms=%.2f recognize_ms=%.2f group_ms=%.2f parse_ms=%.2f total_ms=%.2f",
             filename or "unknown",
+            path_label,
+            selected_count,
+            recognized_count,
             smart_crop_ms,
             preprocess_ms,
             detect_ms,
             filter_ms,
             recognize_ms,
+            group_ms,
+            parse_ms,
             round((perf_counter() - t_total) * 1000.0, 2),
         )
 
@@ -1000,6 +1015,7 @@ def _extract_local_mrz_data(
         triage_state = TRIAGE_STATE_BACK_NEW if has_qr else TRIAGE_STATE_BACK_OLD
 
         if use_bottom_crop:
+            path_label = "bottom_crop"
             h_full = img_bgr.shape[0]
             crop_y = max(0, min(h_full - 1, int(h_full * MRZ_BOTTOM_CROP_RATIO)))
             img_crop_raw = img_bgr[crop_y:, :]
@@ -1019,6 +1035,7 @@ def _extract_local_mrz_data(
             selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2])
             filter_ms = round((perf_counter() - t_step) * 1000.0, 2)
         else:
+            path_label = "full_image"
             t_step = perf_counter()
             img_ocr = _preprocess_for_mrz(img_bgr)
             preprocess_ms = round((perf_counter() - t_step) * 1000.0, 2)
@@ -1031,6 +1048,7 @@ def _extract_local_mrz_data(
             selected = _filter_mrz_boxes_in_crop(boxes or [], img_ocr.shape[:2], y_min=0.5, y_max=0.67)
             filter_ms = round((perf_counter() - t_step) * 1000.0, 2)
 
+        selected_count = len(selected or [])
         if not selected:
             log_mrz_timing()
             return {}
@@ -1038,8 +1056,15 @@ def _extract_local_mrz_data(
         t_step = perf_counter()
         recognized, _ = recognize(img_ocr, selected, context=f"ai_ocr:{triage_state}:mrz")
         recognize_ms = round((perf_counter() - t_step) * 1000.0, 2)
+        recognized_count = len(recognized or [])
+
+        t_step = perf_counter()
         lines = group_lines(recognized)
+        group_ms = round((perf_counter() - t_step) * 1000.0, 2)
+
+        t_step = perf_counter()
         parsed = _parse_cccd_mrz_lines(lines)
+        parse_ms = round((perf_counter() - t_step) * 1000.0, 2)
         if parsed.get("so_giay_to"):
             parsed["raw_text"] = "\n".join(lines)
             log_mrz_timing()
@@ -1206,6 +1231,35 @@ def _sync_row_identity(row: dict[str, Any]) -> None:
     row["pair_key_source"] = pair_key_source
 
 
+def _infer_profile_from_data_hints(data: dict[str, Any]) -> str:
+    side = _normalize_text_space(data.get("doc_side", "")).lower()
+    version = _normalize_text_space(data.get("doc_version", "")).lower()
+    dia_chi = _normalize_text_space(data.get("dia_chi", "") or data.get("dia_chi_back", ""))
+    mrz_hint = _normalize_text_space(
+        data.get("mrz_line1", "") or data.get("so_giay_to_mrz", "") or data.get("ngay_cap", "")
+    )
+    has_identity = any(
+        _normalize_text_space(data.get(field_name, ""))
+        for field_name in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh")
+    )
+
+    if side == "back":
+        if version == "new" or dia_chi:
+            return DOC_PROFILE_BACK_NEW
+        return DOC_PROFILE_BACK_OLD
+    if side == "front":
+        if version == "old" or dia_chi:
+            return DOC_PROFILE_FRONT_OLD
+        return DOC_PROFILE_FRONT_NEW
+    if mrz_hint:
+        if dia_chi:
+            return DOC_PROFILE_BACK_NEW
+        return DOC_PROFILE_BACK_OLD
+    if has_identity:
+        return DOC_PROFILE_FRONT_OLD if dia_chi else DOC_PROFILE_FRONT_NEW
+    return DOC_PROFILE_UNKNOWN
+
+
 def _build_initial_ai_snapshot_sync(index: int, filename: str, file_bytes: bytes, settings_snapshot: dict[str, Any]) -> dict[str, Any]:
     row = _build_empty_row(index, filename)
     t_total = perf_counter()
@@ -1216,20 +1270,12 @@ def _build_initial_ai_snapshot_sync(index: int, filename: str, file_bytes: bytes
     row["has_qr"] = bool(row["qr_text"])
     row["qr_data"] = parse_cccd_qr(row["qr_text"]) if row["qr_text"] else None
     mrz_ms = 0.0
-    t_mrz = perf_counter()
-    row["mrz_data"] = _extract_local_mrz_data(
-        file_bytes,
-        has_qr=row["has_qr"],
-        settings=settings_snapshot,
-        filename=filename,
-    )
-    mrz_ms = round((perf_counter() - t_mrz) * 1000.0, 2)
-    row["has_mrz"] = bool((row["mrz_data"] or {}).get("so_giay_to") or (row["mrz_data"] or {}).get("mrz_line1"))
-    row["state"] = _infer_deterministic_state(has_qr=row["has_qr"], has_mrz=row["has_mrz"])
-    row["profile"] = _state_to_profile(row["state"])
-    row["doc_type"] = _state_to_doc_type(row["state"])
+    row["mrz_data"] = {}
+    row["has_mrz"] = False
+    row["state"] = TRIAGE_STATE_UNKNOWN if row["has_qr"] else TRIAGE_STATE_FRONT_UNKNOWN
+    row["profile"] = DOC_PROFILE_UNKNOWN
+    row["doc_type"] = "unknown"
     _apply_source_merge(row["data"], row["field_sources"], row["qr_data"], source="qr", profile=row["profile"])
-    _apply_source_merge(row["data"], row["field_sources"], row["mrz_data"], source="mrz", profile=row["profile"])
     _sync_row_identity(row)
     total_ms = round((perf_counter() - t_total) * 1000.0, 2)
     return {
@@ -1284,17 +1330,6 @@ def _build_initial_ai_row(index: int, filename: str, file_bytes: bytes, settings
 
 
 def _warmup_ai_preprocess_worker() -> int:
-    local_module = _try_import_local_ocr_module()
-    if local_module is None:
-        raise RuntimeError("AI OCR local helper unavailable in worker")
-    warmup_local_ocr = getattr(local_module, "warmup_local_ocr", None)
-    if callable(warmup_local_ocr):
-        warmup_ok, warmup_error = warmup_local_ocr()
-        if not warmup_ok:
-            raise RuntimeError(f"Local OCR worker warmup failed: {warmup_error or 'unknown'}")
-    recognizer_getter = getattr(local_module, "_get_rapidocr_recognizer", None)
-    if callable(recognizer_getter):
-        recognizer_getter()
     return os.getpid()
 
 
@@ -1475,113 +1510,69 @@ def _build_ai_plan(rows: list[dict[str, Any]], settings: dict[str, Any]) -> list
     if not rows:
         return []
 
-    front_qr_keys = {
-        row.get("pair_key", "")
-        for row in rows
-        if row.get("profile") == DOC_PROFILE_FRONT_OLD and row.get("pair_key_source") == "qr" and _row_is_complete(row)
-    }
-    front_old_keys = {
-        row.get("pair_key", "")
-        for row in rows
-        if row.get("profile") == DOC_PROFILE_FRONT_OLD and row.get("pair_key")
-    }
-    back_new_qr_keys = {
-        row.get("pair_key", "")
-        for row in rows
-        if row.get("profile") == DOC_PROFILE_BACK_NEW and row.get("pair_key_source") == "qr" and _row_is_complete(row)
-    }
     plans: list[dict[str, Any]] = []
 
     for row in rows:
         profile = row.get("profile", DOC_PROFILE_UNKNOWN)
         state = row.get("state", TRIAGE_STATE_UNKNOWN)
-        pair_key = row.get("pair_key", "")
-        targeted_fields = settings.get("enable_targeted_fields", True)
-        plan: dict[str, Any] | None = None
-
-        if profile == DOC_PROFILE_FRONT_OLD:
-            if row.get("pair_key_source") == "qr" and _row_is_complete(row):
-                row["ai_plan"] = None
-                continue
-            plan = {"mode": "targeted", "targets": ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi")}
-        elif profile == DOC_PROFILE_BACK_OLD:
-            if row.get("has_mrz") and pair_key and pair_key in front_qr_keys:
-                row["ai_plan"] = None
-                continue
-            if row.get("has_mrz") and pair_key and pair_key in front_old_keys:
-                plan = {"mode": "targeted", "targets": ("ngay_cap",)}
-            elif row.get("has_mrz"):
-                plan = {"mode": "targeted", "targets": ("dia_chi", "ngay_cap")}
-            else:
-                plan = {"mode": "full", "targets": ()}
-        elif profile == DOC_PROFILE_BACK_NEW:
-            if row.get("pair_key_source") == "qr" and _row_is_complete(row):
-                row["ai_plan"] = None
-                continue
-            plan = {"mode": "targeted", "targets": ("dia_chi", "ngay_cap")} if row.get("has_mrz") else {"mode": "full", "targets": ()}
-        elif profile == DOC_PROFILE_FRONT_NEW:
-            if pair_key and pair_key in back_new_qr_keys:
-                row["ai_plan"] = None
-                continue
-            plan = {"mode": "targeted", "targets": ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh")}
-        else:
-            plan = {"mode": "full", "targets": ()}
-
-        if plan["mode"] == "targeted" and not targeted_fields:
-            plan = {"mode": "full", "targets": ()}
-
-        full_mode = plan["mode"] == "full"
         missing_before = tuple(_missing_required_fields(row))
+        plan = {"mode": "full", "targets": ()}
         plan.update(
             {
                 "record_index": row["index"],
                 "model": _get_primary_model(),
-                "prompt": SYSTEM_PROMPT if full_mode else _build_targeted_prompt(state, plan["targets"]),
+                "prompt": SYSTEM_PROMPT,
                 "image_detail": "high",
-                "max_tokens_per_image": _field_budget_for_targets(plan["targets"], full_mode=full_mode),
-                "crop_ratios": None if full_mode else _plan_crop_ratios(state),
+                "max_tokens_per_image": _field_budget_for_targets(plan["targets"], full_mode=True),
+                "crop_ratios": None,
             }
         )
         row["_diag_missing_before"] = list(missing_before)
         row["ai_plan"] = plan
         plans.append(plan)
-        if full_mode:
-            _log_ai_ocr_diag(
-                (
-                    "phase=plan img#%s file=%s mode=full state=%s profile=%s pair_key=%s pair_key_source=%s "
-                    "has_qr=%s has_mrz=%s face_detected=%s missing=%s"
-                )
-                % (
-                    row["index"],
-                    row.get("filename", "unknown"),
-                    state,
-                    profile,
-                    row.get("pair_key", ""),
-                    row.get("pair_key_source", ""),
-                    row.get("has_qr", False),
-                    row.get("has_mrz", False),
-                    row.get("face_detected", False),
-                    ",".join(missing_before) or "-",
-                ),
-                settings=settings,
+        _log_ai_ocr_diag(
+            (
+                "phase=plan img#%s file=%s mode=full state=%s profile=%s pair_key=%s pair_key_source=%s "
+                "has_qr=%s has_mrz=%s face_detected=%s missing=%s"
             )
+            % (
+                row["index"],
+                row.get("filename", "unknown"),
+                state,
+                profile,
+                row.get("pair_key", ""),
+                row.get("pair_key_source", ""),
+                row.get("has_qr", False),
+                row.get("has_mrz", False),
+                row.get("face_detected", False),
+                ",".join(missing_before) or "-",
+            ),
+            settings=settings,
+        )
 
     return plans
 
 
 def _infer_profile_from_ai(current_profile: str, ai_doc_type: str, ai_data: dict[str, Any]) -> str:
     if ai_doc_type == "cccd_back":
+        if _normalize_text_space(ai_data.get("doc_version", "")).lower() == "new":
+            return DOC_PROFILE_BACK_NEW
         if _normalize_text_space(ai_data.get("dia_chi_back") or ai_data.get("dia_chi") or ""):
             return DOC_PROFILE_BACK_NEW
         if current_profile in {DOC_PROFILE_UNKNOWN, DOC_PROFILE_BACK_OLD, DOC_PROFILE_BACK_NEW}:
             return DOC_PROFILE_BACK_OLD if current_profile == DOC_PROFILE_UNKNOWN else current_profile
         return current_profile
     if ai_doc_type == "cccd_front":
+        if _normalize_text_space(ai_data.get("doc_version", "")).lower() == "old":
+            return DOC_PROFILE_FRONT_OLD
         if _normalize_text_space(ai_data.get("dia_chi", "")):
             return DOC_PROFILE_FRONT_OLD
         if current_profile in {DOC_PROFILE_UNKNOWN, DOC_PROFILE_FRONT_NEW, DOC_PROFILE_FRONT_OLD}:
             return DOC_PROFILE_FRONT_NEW if current_profile == DOC_PROFILE_UNKNOWN else current_profile
         return current_profile
+    hinted = _infer_profile_from_data_hints(ai_data)
+    if hinted != DOC_PROFILE_UNKNOWN:
+        return hinted
     return DOC_PROFILE_UNKNOWN
 
 
@@ -1609,15 +1600,25 @@ def _apply_ai_rows_to_record(row: dict[str, Any], ai_rows: list[dict[str, Any]],
         if "dia_chi_back" in ai_data and not ai_data.get("dia_chi"):
             ai_data["dia_chi"] = ai_data.get("dia_chi_back", "")
         row["profile"] = _infer_profile_from_ai(row.get("profile", DOC_PROFILE_UNKNOWN), ai_row.get("doc_type", "unknown"), ai_data)
-        if row["profile"] != DOC_PROFILE_UNKNOWN and row.get("state") == TRIAGE_STATE_FRONT_UNKNOWN:
-            row["state"] = TRIAGE_STATE_FRONT_NEW if row["profile"] == DOC_PROFILE_FRONT_NEW else TRIAGE_STATE_FRONT_OLD
+        if row["profile"] == DOC_PROFILE_FRONT_NEW:
+            row["state"] = TRIAGE_STATE_FRONT_NEW
+        elif row["profile"] == DOC_PROFILE_FRONT_OLD:
+            row["state"] = TRIAGE_STATE_FRONT_OLD
+        elif row["profile"] == DOC_PROFILE_BACK_NEW:
+            row["state"] = TRIAGE_STATE_BACK_NEW
+        elif row["profile"] == DOC_PROFILE_BACK_OLD:
+            row["state"] = TRIAGE_STATE_BACK_OLD
         _apply_source_merge(row["data"], row["field_sources"], ai_data, source="ai", profile=row.get("profile", DOC_PROFILE_UNKNOWN))
-        if ai_data.get("mrz_line1") and not row.get("mrz_data"):
+        if ai_data.get("mrz_line1") or ai_data.get("so_giay_to_mrz"):
             row["mrz_data"] = {
                 **row.get("mrz_data", {}),
-                "mrz_line1": ai_data.get("mrz_line1", ""),
-                "so_giay_to_mrz": ai_data.get("so_giay_to_mrz", ""),
+                "mrz_line1": ai_data.get("mrz_line1", "") or row.get("mrz_data", {}).get("mrz_line1", ""),
+                "so_giay_to_mrz": ai_data.get("so_giay_to_mrz", "")
+                or row.get("mrz_data", {}).get("so_giay_to_mrz", ""),
             }
+            row["has_mrz"] = bool(
+                row["mrz_data"].get("mrz_line1") or row["mrz_data"].get("so_giay_to_mrz")
+            )
         row["doc_type"] = ai_row.get("doc_type") or row.get("doc_type", "unknown")
     row["ai_models_run"].append(model)
     _sync_row_identity(row)
@@ -2315,12 +2316,25 @@ def group_documents(results: list) -> dict:
     marriages = [r for r in results if r.get("doc_type") == "marriage_cert"]
     lands = [r for r in results if r.get("doc_type") == "land_cert"]
     unknowns = [r for r in results if r.get("doc_type") == "unknown"]
+    identity_unknowns = [
+        row
+        for row in unknowns
+        if _infer_profile_from_data_hints(dict(row.get("data") or {})) != DOC_PROFILE_UNKNOWN
+        or len(
+            _clean_doc_number(
+                (row.get("data") or {}).get("so_giay_to")
+                or (row.get("data") or {}).get("so_giay_to_mrz")
+                or extract_cccd_from_mrz((row.get("data") or {}).get("mrz_line1", ""))
+            )
+        )
+        == 12
+    ]
 
     persons_map: dict[str, dict[str, Any]] = {}
     person_order: list[str] = []
     reverse_profile_map = {value: key for key, value in _PROFILE_TO_SIDE_LABEL.items()}
 
-    for row in fronts + backs:
+    for row in fronts + backs + identity_unknowns:
         data = dict(row.get("data") or {})
         if "dia_chi_back" in data and not data.get("dia_chi"):
             data["dia_chi"] = data.get("dia_chi_back", "")
@@ -2330,6 +2344,8 @@ def group_documents(results: list) -> dict:
             profile = reverse_profile_map.get(str(row.get("_side", "")), DOC_PROFILE_UNKNOWN)
         if profile == DOC_PROFILE_UNKNOWN:
             profile = _infer_profile_from_ai(DOC_PROFILE_UNKNOWN, row.get("doc_type", "unknown"), data)
+        if profile == DOC_PROFILE_UNKNOWN:
+            profile = _infer_profile_from_data_hints(data)
 
         pair_key = _clean_doc_number(
             row.get("pair_key")
@@ -2506,8 +2522,6 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     if not rows:
         return {"persons": [], "properties": [], "marriages": [], "errors": errors, "summary": {}}
 
-    _resolve_front_new_pairs(rows)
-
     primary_plans = _build_ai_plan(rows, settings)
     image_cache: dict[int, Image.Image] = {}
     primary_results = (
@@ -2519,8 +2533,6 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     for row in rows:
         _apply_ai_rows_to_record(row, primary_results.get(row["index"], []), model=primary_model)
 
-    _resolve_front_new_pairs(rows)
-
     escalation_plans = _build_escalation_plans(rows)
     escalation_results = (
         await _execute_ai_plans(escalation_plans, file_bytes_map=file_bytes_map, image_cache=image_cache)
@@ -2530,8 +2542,6 @@ async def _analyze_images_v2(files: List[UploadFile]) -> dict[str, Any]:
     escalation_model = _get_escalation_model()
     for row in rows:
         _apply_ai_rows_to_record(row, escalation_results.get(row["index"], []), model=escalation_model)
-
-    _resolve_front_new_pairs(rows)
 
     raw_results: list[dict[str, Any]] = []
     for row in rows:
