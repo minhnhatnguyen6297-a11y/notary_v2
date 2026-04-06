@@ -3,6 +3,22 @@
 Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
 Cap nhat: 01/04/2026.
 
+## Nguyen tac van hanh mac dinh - VPS first
+- Mac dinh moi thao tac van hanh, kiem tra, restart service, xem log va sua truc tiep ban dang chay deu thuc hien tren VPS, khong lam tren local.
+- Nguon su that uu tien la repo tren VPS: `/root/notary_v2`.
+- Chi sua/chay local khi nguoi dung noi ro la muon lam local, hoac khi can chuan bi commit/push de dong bo len VPS.
+- Tai lieu workflow chinh: `docs/VPS_WORKFLOW.md`.
+- Truoc khi sua code, uu tien:
+  1. SSH vao VPS.
+  2. `cd /root/notary_v2`
+  3. Kiem tra `git status --short --branch`
+  4. Kiem tra service `bash deploy/vps/manage_services.sh status`
+- Sau khi sua/cai dat tren VPS, phai uu tien restart va kiem tra lai:
+  - `bash install_vps.sh --skip-system-packages` neu co doi dependency
+  - `bash deploy/vps/manage_services.sh restart`
+  - `bash deploy/vps/manage_services.sh logs`
+- Neu commit local va VPS bi lech nhau, phai xac minh ro ben nao la ban moi nhat truoc khi tiep tuc, khong duoc mac dinh local la nguon dung.
+
 ## Tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
@@ -29,6 +45,11 @@ bash install_vps.sh
 Sau khi cai dat:
 - Quan ly service: `bash deploy/vps/manage_services.sh status|restart|logs`
 - Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
+- Workflow van hanh/mac dinh: `docs/VPS_WORKFLOW.md`
+- Windows wrappers:
+  - `launch_vps_app.bat`
+  - `connect_vps.bat`
+  - `view_vps_logs.bat`
 - Log file tren VPS: `logs/web.log`, `logs/worker.log`
 
 ## Local OCR - RapidOCR Only
