@@ -401,6 +401,7 @@ def _normalize_plain_text_for_extract(text: str) -> str:
     normalized = str(text or "")
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     normalized = normalized.replace("\x0b", "\n").replace("\t", " ").replace("\xa0", " ")
+    normalized = unicodedata.normalize("NFC", normalized)
     lines = []
     for raw in normalized.split("\n"):
         line = re.sub(r"\s+", " ", raw).strip()
@@ -561,9 +562,28 @@ def _sentence_case_vn(text: str) -> str:
     return cleaned[:1].upper() + cleaned[1:].lower()
 
 
+def _clean_title_line(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip(" .:-;\n\t")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(
+        r"\s+(?:này\s+)?được\s+giao\s+kết\s+bởi\s*:?\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?:nay\s+)?duoc\s+giao\s+ket\s+boi\s*:?\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip(" .:-;\n\t")
+
+
 def _find_title_line(text: str) -> str:
     for raw in str(text or "").split("\n")[:20]:
-        line = re.sub(r"\s+", " ", raw).strip(" .:-;")
+        line = _clean_title_line(raw)
         if not line:
             continue
         folded = _fold_text(line)
@@ -578,16 +598,21 @@ def _find_title_line(text: str) -> str:
 
 
 def _detect_document_kind_and_title(text: str, *, file_name: str = "") -> tuple[str, str]:
-    title_line = _find_title_line(text)
+    title_line = _clean_title_line(_find_title_line(text))
     title_fold = _fold_text(title_line)
     combined_fold = _fold_text(f"{file_name}\n{text}")
+    header_fold = _fold_text("\n".join(str(text or "").split("\n")[:40]))
+    title_or_header_fold = f"{title_fold}\n{header_fold}"
 
     if "cam ket tai san rieng" in title_fold or "cam ket tai san rieng" in combined_fold:
         return DOC_KIND_ASSET_COMMITMENT, "Văn bản cam kết tài sản riêng"
 
     is_transfer_cancellation = (
-        ("huy bo" in title_fold or "huy bo" in combined_fold or "huy hop dong" in combined_fold)
-        and "chuyen nhuong" in combined_fold
+        ("huy bo" in title_fold or "huy hop dong" in title_fold)
+        and (
+            "hop dong chuyen nhuong" in title_or_header_fold
+            or "chuyen nhuong quyen su dung dat" in title_or_header_fold
+        )
     )
     if is_transfer_cancellation:
         if any(
@@ -607,7 +632,7 @@ def _detect_document_kind_and_title(text: str, *, file_name: str = "") -> tuple[
             "Văn bản thỏa thuận về việc hủy bỏ hợp đồng chuyển nhượng quyền sử dụng đất",
         )
 
-    if "hop dong chuyen nhuong" in title_fold or "hop dong chuyen nhuong" in combined_fold:
+    if "hop dong chuyen nhuong" in title_or_header_fold or "hop dong chuyen nhuong" in combined_fold:
         if any(
             marker in combined_fold
             for marker in (
@@ -617,7 +642,7 @@ def _detect_document_kind_and_title(text: str, *, file_name: str = "") -> tuple[
                 "va tai san",
             )
         ):
-            return DOC_KIND_TRANSFER, "Hợp đồng chuyển nhượng quyền sử dụng đất và tài sản gắn liền với đất"
+            return DOC_KIND_TRANSFER, "Hợp đồng chuyển nhượng quyền sử dụng đất"
         return DOC_KIND_TRANSFER, "Hợp đồng chuyển nhượng quyền sử dụng đất"
 
     if title_line:
@@ -721,6 +746,7 @@ def _find_tai_san_qsdd_common(text: str) -> str:
             r"(?m)^\s*dieu\s*2\b",
             r"(?m)^\s*bang hop dong nay\b",
             r"(?m)^\s*bang van ban nay chung toi xac dinh\b",
+            r"(?m)^\s*hai vo chong chung toi cam ket\b",
             r"(?m)^\s*hai vo chong chung toi cam doan\b",
             r"(?m)^\s*chung toi cong nhan\b",
             r"(?m)^\s*gia chuyen nhuong\b",
@@ -799,7 +825,9 @@ def guess_loai_tai_san(tai_san, ten_hd):
             "cong trinh xay dung",
             "tai san tren dat",
             "tai san gan lien voi dat",
+            "tai san khac gan lien voi dat",
             "nha o va quyen su dung dat o",
+            "quyen so huu nha o",
         )
         if any(keyword in combined for keyword in indicators):
             return "Đất đai có tài sản"
@@ -825,53 +853,78 @@ def guess_loai_tai_san(tai_san, ten_hd):
 # ============================================================
 # FORMAT CHO 3 O CKEDITOR TREN WEB
 # ============================================================
+def _normalize_person_block_lines(person: dict) -> list[str]:
+    raw_text = unicodedata.normalize("NFC", str(person.get("raw_text") or "")).strip()
+    lines = [re.sub(r"\s+", " ", line).strip(" ;") for line in raw_text.split("\n") if line.strip()]
+    if not lines:
+        first_line = " ".join(
+            part
+            for part in (
+                f"{person.get('gioi_tinh', '')} {person.get('ho_ten', '')}".strip(),
+                f"Sinh ngày: {person['ngay_sinh']}" if person.get("ngay_sinh") else "",
+            )
+            if part
+        ).strip()
+        if first_line:
+            lines.append(first_line)
+        if person.get("cccd"):
+            id_line = f"Căn cước số: {person['cccd']}"
+            if person.get("noi_cap") and person.get("ngay_cap_cccd"):
+                id_line += f" do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}"
+            lines.append(id_line)
+
+    if lines:
+        lines[0] = re.sub(
+            r"^(?:[-*]\s*)?(?:(?:Người|người)\s+(?:vợ|chồng)\s*[–-]\s*)?",
+            "",
+            lines[0],
+        ).strip()
+        lines[0] = re.sub(r"^(?:\d+\.\s*)+", "", lines[0]).strip()
+        lines[0] = re.sub(r"^(?:Và|và)\s+(?:vợ|chồng)\s+là\s+", "", lines[0]).strip()
+        if lines[0]:
+            lines[0] = lines[0][:1].upper() + lines[0][1:]
+
+    address_line = str(person.get("dia_chi_line") or "").strip(" ;")
+    if not address_line and person.get("dia_chi"):
+        address_line = f"Thường trú tại: {person['dia_chi']}"
+    if address_line and not any("tru tai" in _fold_text(line) for line in lines):
+        lines.append(address_line)
+    return lines
+
+
+def _format_person_block(person: dict, *, index: int | None = None) -> str:
+    lines = _normalize_person_block_lines(person)
+    if not lines:
+        return ""
+    if index is not None:
+        lines[0] = f"{index}. {lines[0]}"
+    return "\n".join(lines).strip()
+
+
 def fmt_nguoi_yeu_cau(ben_b):
     """Nguoi yeu cau CC = nguoi dau tien ben B."""
     if not ben_b.get("nguoi"):
         return ""
-    person = ben_b["nguoi"][0]
-    parts = [f"{person.get('gioi_tinh', '')} {person['ho_ten']}"]
-    if person.get("ngay_sinh"):
-        parts.append(f"Sinh ngày: {person['ngay_sinh']}")
-    if person.get("cccd"):
-        parts.append(f"Căn cước số: {person['cccd']}")
-    if person.get("noi_cap") and person.get("ngay_cap_cccd"):
-        parts.append(f"do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}")
-    if ben_b.get("dia_chi"):
-        parts.append(f"Cư trú tại: {ben_b['dia_chi']}")
-    return "; ".join(parts)
+    return _format_person_block(ben_b["nguoi"][0])
 
 
 def fmt_duong_su(ben_a, ben_b):
     """Duong su = toan bo ben A + ben B."""
     lines = ["BÊN A (Bên chuyển nhượng):"]
     for idx, person in enumerate(ben_a.get("nguoi", []), 1):
-        line = f"{idx}. {person.get('gioi_tinh', '')} {person['ho_ten']}"
-        if person.get("ngay_sinh"):
-            line += f"; Sinh ngày: {person['ngay_sinh']}"
-        if person.get("cccd"):
-            line += f"; CCCD: {person['cccd']}"
-        if person.get("noi_cap") and person.get("ngay_cap_cccd"):
-            line += f"; do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}"
-        lines.append(line)
-    if ben_a.get("dia_chi"):
-        lines.append(f"Cùng cư trú tại: {ben_a['dia_chi']}")
+        block = _format_person_block(person, index=idx)
+        if block:
+            lines.append(block)
+            lines.append("")
 
-    lines.append("")
     lines.append("BÊN B (Bên nhận chuyển nhượng):")
     for idx, person in enumerate(ben_b.get("nguoi", []), 1):
-        line = f"{idx}. {person.get('gioi_tinh', '')} {person['ho_ten']}"
-        if person.get("ngay_sinh"):
-            line += f"; Sinh ngày: {person['ngay_sinh']}"
-        if person.get("cccd"):
-            line += f"; CCCD: {person['cccd']}"
-        if person.get("noi_cap") and person.get("ngay_cap_cccd"):
-            line += f"; do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}"
-        lines.append(line)
-    if ben_b.get("dia_chi"):
-        lines.append(f"Cùng cư trú tại: {ben_b['dia_chi']}")
+        block = _format_person_block(person, index=idx)
+        if block:
+            lines.append(block)
+            lines.append("")
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip()
 
 
 def get_missing_web_form_fields(web_form: dict, *, file_hop_dong: str = "") -> list[str]:
@@ -894,8 +947,14 @@ def _find_first_pattern_index(text: str, patterns: Iterable[str], *, start: int 
 
 
 def _extract_plain_text_persons(section: str) -> list[dict]:
+    return [dict(entry) for entry in _extract_plain_text_person_entries(section)]
+
+
+def _extract_plain_text_person_entries(section: str) -> list[dict]:
+    section = unicodedata.normalize("NFC", str(section or ""))
     header_re = re.compile(
-        r"(?i)^\s*(?:\d+\.\s*)?(?:v\u00e0\s+(?:v\u1ee3|ch\u1ed3ng)\s+l\u00e0\s+)?"
+        r"(?i)^\s*(?:[-*]\s*)?(?:(?:ng\u01b0\u1eddi\s+)?(?:v\u1ee3|ch\u1ed3ng)\s*[–-]\s*)?"
+        r"(?:\d+\.\s*)?(?:v\u00e0\s+(?:v\u1ee3|ch\u1ed3ng)\s+l\u00e0\s+)?"
         r"(?:ng\u01b0\u1eddi\s+(?:v\u1ee3|ch\u1ed3ng)\s+)?(?P<title>\u00f4ng|b\u00e0)\s*:?\s*"
         r"(?P<name>.+?)(?=\s+Sinh ng\u00e0y:|[;]|$)"
     )
@@ -903,22 +962,33 @@ def _extract_plain_text_persons(section: str) -> list[dict]:
     id_re = re.compile(r"(?i)(?:C\u0103n c\u01b0\u1edbc(?:\s+c\u00f4ng d\u00e2n)?|CCCD|CMND)\s*(?:s\u1ed1)?\s*:?\s*(\d+)")
     issue_place_re = re.compile(r"(?i)\bdo\s+(.+?)\s+c\u1ea5p ng\u00e0y", re.DOTALL)
     issue_date_re = re.compile(r"(?i)c\u1ea5p ng\u00e0y\s*(\d{1,2}/\d{1,2}/\d{4})")
+    address_re = re.compile(
+        r"(?im)^(?:C\u1ea3 hai \u00f4ng b\u00e0\s+)?(?:C\u00f9ng\s+)?(?:N\u01a1i\s+)?"
+        r"(?:th\u01b0\u1eddng tr\u00fa|c\u01b0 tr\u00fa)\s+t\u1ea1i:\s*(.+)$"
+    )
 
-    lines = [line.strip() for line in section.split("\n") if line.strip()]
+    lines = [re.sub(r"\s+", " ", line).strip() for line in section.split("\n") if line.strip()]
     headers: list[tuple[int, re.Match[str]]] = []
+    address_lines: list[tuple[int, str, str]] = []
     for idx, line in enumerate(lines):
         match = header_re.search(line)
         if match:
             headers.append((idx, match))
+        address_match = address_re.search(line)
+        if address_match:
+            address_lines.append((idx, line.strip(" ;"), re.sub(r"\s+", " ", address_match.group(1)).strip(" .;")))
 
     persons = []
     for header_idx, (line_idx, match) in enumerate(headers):
         next_idx = headers[header_idx + 1][0] if header_idx + 1 < len(headers) else len(lines)
-        chunk = "\n".join(lines[line_idx:next_idx])
+        chunk_lines = [line.strip(" ;") for line in lines[line_idx:next_idx] if line.strip()]
+        chunk = "\n".join(chunk_lines)
         title = match.group("title").strip().lower()
         person = {
             "gioi_tinh": "\u00d4ng" if title.startswith("\u00f4") else "B\u00e0",
             "ho_ten": re.sub(r"\s+", " ", match.group("name")).strip(" ;,."),
+            "_line_idx": line_idx,
+            "raw_text": chunk,
         }
         birth_match = birth_re.search(chunk)
         person["ngay_sinh"] = birth_match.group(1) if birth_match else ""
@@ -928,16 +998,31 @@ def _extract_plain_text_persons(section: str) -> list[dict]:
         person["noi_cap"] = re.sub(r"\s+", " ", issue_place_match.group(1)).strip(" ;,.") if issue_place_match else ""
         issue_date_match = issue_date_re.search(chunk)
         person["ngay_cap_cccd"] = issue_date_match.group(1) if issue_date_match else ""
+        address_match = next((item for item in address_lines if line_idx <= item[0] < next_idx), None)
+        person["dia_chi"] = address_match[2] if address_match else ""
+        person["dia_chi_line"] = address_match[1] if address_match else ""
         name_fold = _fold_text(person["ho_ten"])
         if "hien dang so huu" in name_fold or "tai san la" in name_fold:
             continue
         if not birth_match and not id_match:
             continue
         persons.append(person)
+
+    for person in persons:
+        if not person.get("dia_chi"):
+            fallback = next((item for item in address_lines if item[0] > person["_line_idx"]), None)
+            if fallback:
+                person["dia_chi"] = fallback[2]
+                person["dia_chi_line"] = fallback[1]
+                raw_text = str(person.get("raw_text") or "").strip()
+                if fallback[1] not in raw_text:
+                    person["raw_text"] = f"{raw_text}\n{fallback[1]}".strip()
+        person.pop("_line_idx", None)
     return persons
 
 
 def _extract_plain_text_address(section: str) -> str:
+    section = unicodedata.normalize("NFC", str(section or ""))
     match = re.search(
         r"(?im)^(?:C\u1ea3 hai \u00f4ng b\u00e0\s+)?(?:C\u00f9ng\s+)?(?:N\u01a1i\s+)?"
         r"(?:th\u01b0\u1eddng tr\u00fa|c\u01b0 tr\u00fa)\s+t\u1ea1i:\s*(.+)$",
@@ -952,6 +1037,7 @@ def _extract_plain_text_parties(text: str) -> tuple[dict, dict]:
     ben_a_patterns = (r"\b(?:I\.\s*)?B\u00caN CHUY\u1ec2N NH\u01af\u1ee2NG\b", r"\bB\u00caN A\b")
     ben_b_patterns = (r"\b(?:II\.\s*)?B\u00caN NH\u1eacN CHUY\u1ec2N NH\u01af\u1ee2NG\b", r"\bB\u00caN B\b")
     end_patterns = (
+        r"\bC\u00e1c b\u00ean \u0111\u00e3 t\u1ef1 nguy\u1ec7n\b",
         r"\bHai b\u00ean t\u1ef1 nguy\u1ec7n\b",
         r"\bB\u1eb1ng H\u1ee3p \u0111\u1ed3ng n\u00e0y\b",
         r"\b\u0110I\u1ec0U\s*1\b",
@@ -990,12 +1076,60 @@ def _find_first_pattern_match_generic(text: str, patterns: Iterable[str], *, sta
     return best_match
 
 
+def _extract_commitment_parties(text: str) -> tuple[dict, dict]:
+    source = unicodedata.normalize("NFC", str(text or ""))
+    lines = [re.sub(r"\s+", " ", line).strip() for line in source.split("\n") if line.strip()]
+    if not lines:
+        return {"nguoi": [], "dia_chi": ""}, {"nguoi": [], "dia_chi": ""}
+
+    start_idx = 0
+    for idx, line in enumerate(lines):
+        if "chung toi gom" in _fold_text(line):
+            start_idx = idx + 1
+            break
+
+    stop_prefixes = (
+        "chung toi la vo chong",
+        "nay chung toi lap van ban nay",
+        "hien nay",
+        "bang van ban nay",
+        "loi chung",
+    )
+
+    preamble_lines: list[str] = []
+    for line in lines[start_idx:]:
+        folded = _fold_text(line)
+        if any(folded.startswith(prefix) for prefix in stop_prefixes):
+            break
+        preamble_lines.append(line)
+
+    entries = _extract_plain_text_person_entries("\n".join(preamble_lines))
+    ben_a = {"nguoi": [], "dia_chi": ""}
+    ben_b = {"nguoi": [], "dia_chi": ""}
+
+    if entries:
+        first = dict(entries[0])
+        ben_a["dia_chi"] = first.pop("dia_chi", "")
+        ben_a["nguoi"] = [first]
+    if len(entries) > 1:
+        second = dict(entries[1])
+        ben_b["dia_chi"] = second.pop("dia_chi", "")
+        ben_b["nguoi"] = [second]
+    return ben_a, ben_b
+
+
 def _extract_parties_generic(text: str) -> tuple[dict, dict]:
+    doc_kind, _ = _detect_document_kind_and_title(text)
+    if doc_kind == DOC_KIND_ASSET_COMMITMENT:
+        ben_a, ben_b = _extract_commitment_parties(text)
+        if ben_a.get("nguoi") or ben_b.get("nguoi"):
+            return ben_a, ben_b
+
     ben_a_patterns = (
         r"(?m)^\s*(?:I\.\s*)?B\u00caN CHUY\u1ec2N NH\u01af\u1ee2NG\b",
         r"(?m)^\s*(?:I\.\s*)?B\u00caN CHO VAY\b",
         r"(?m)^\s*(?:I\.\s*)?B\u00caN CHO THU\u00ca\b",
-        r"(?m)^\s*(?:I\.\s*)?B\u00caN U[\u1ef6Y\u1ee6] QUY\u1ec0N\b",
+        r"(?m)^\s*(?:I\.\s*)?B\u00caN (?:UY|U\u1ef6|\u1ee6Y) QUY\u1ec0N\b",
         r"(?m)^\s*(?:I\.\s*)?B\u00caN T\u1eb6NG CHO\b",
         r"(?m)^\s*(?:I\.\s*)?B\u00caN B\u00c1N\b",
         r"(?m)^\s*(?:I\.\s*)?B\u00caN A\b",
@@ -1004,7 +1138,7 @@ def _extract_parties_generic(text: str) -> tuple[dict, dict]:
         r"(?m)^\s*(?:II\.\s*)?B\u00caN NH\u1eacN CHUY\u1ec2N NH\u01af\u1ee2NG\b",
         r"(?m)^\s*(?:II\.\s*)?B\u00caN VAY\b",
         r"(?m)^\s*(?:II\.\s*)?B\u00caN THU\u00ca\b",
-        r"(?m)^\s*(?:II\.\s*)?B\u00caN \u0110\u01af\u1ee2C U[\u1ef6Y\u1ee6] QUY\u1ec0N\b",
+        r"(?m)^\s*(?:II\.\s*)?B\u00caN \u0110\u01af\u1ee2C (?:UY|U\u1ef6|\u1ee6Y) QUY\u1ec0N\b",
         r"(?m)^\s*(?:II\.\s*)?B\u00caN NH\u1eacN T\u1eb6NG CHO\b",
         r"(?m)^\s*(?:II\.\s*)?B\u00caN MUA\b",
         r"(?m)^\s*(?:II\.\s*)?B\u00caN B\b",
@@ -1015,6 +1149,7 @@ def _extract_parties_generic(text: str) -> tuple[dict, dict]:
     )
     end_patterns = (
         r"\bC\u00e1c b\u00ean t\u1ef1 nguy\u1ec7n\b",
+        r"\bC\u00e1c b\u00ean \u0111\u00e3 t\u1ef1 nguy\u1ec7n\b",
         r"\bHai b\u00ean t\u1ef1 nguy\u1ec7n\b",
         r"\bB\u1eb1ng H\u1ee3p \u0111\u1ed3ng n\u00e0y\b",
         r"\b\u0110I\u1ec0U\s*1\b",
@@ -1059,39 +1194,29 @@ def _extract_parties_generic(text: str) -> tuple[dict, dict]:
 def _fmt_duong_su_generic(ben_a, ben_b):
     lines = ["BÊN A:"]
     for idx, person in enumerate(ben_a.get("nguoi", []), 1):
-        line = f"{idx}. {person.get('gioi_tinh', '')} {person['ho_ten']}"
-        if person.get("ngay_sinh"):
-            line += f"; Sinh ngày: {person['ngay_sinh']}"
-        if person.get("cccd"):
-            line += f"; CCCD: {person['cccd']}"
-        if person.get("noi_cap") and person.get("ngay_cap_cccd"):
-            line += f"; do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}"
-        lines.append(line)
-    if ben_a.get("dia_chi"):
-        lines.append(f"Cùng cư trú tại: {ben_a['dia_chi']}")
+        block = _format_person_block(person, index=idx)
+        if block:
+            lines.append(block)
+            lines.append("")
 
-    lines.append("")
     lines.append("BÊN B:")
     for idx, person in enumerate(ben_b.get("nguoi", []), 1):
-        line = f"{idx}. {person.get('gioi_tinh', '')} {person['ho_ten']}"
-        if person.get("ngay_sinh"):
-            line += f"; Sinh ngày: {person['ngay_sinh']}"
-        if person.get("cccd"):
-            line += f"; CCCD: {person['cccd']}"
-        if person.get("noi_cap") and person.get("ngay_cap_cccd"):
-            line += f"; do {person['noi_cap']} cấp ngày {person['ngay_cap_cccd']}"
-        lines.append(line)
-    if ben_b.get("dia_chi"):
-        lines.append(f"Cùng cư trú tại: {ben_b['dia_chi']}")
-    return "\n".join(lines)
+        block = _format_person_block(person, index=idx)
+        if block:
+            lines.append(block)
+            lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _build_payload_generic(filepath, text: str, scan_result: dict, *, extract_mode: str) -> dict:
-    ben_a, ben_b = _extract_parties_generic(text)
     doc_kind, ten_hd = _detect_document_kind_and_title(text, file_name=Path(filepath).name)
+    ben_a, ben_b = _extract_parties_generic(text)
     tai_san = _find_tai_san_by_kind(text, doc_kind)
     so_cong_chung = _normalize_web_contract_no(find_so_cong_chung(text) or scan_result.get("contract_no", ""))
-    nguoi_yeu_cau_party = ben_b if ben_b.get("nguoi") else ben_a
+    if doc_kind == DOC_KIND_ASSET_COMMITMENT and ben_a.get("nguoi"):
+        nguoi_yeu_cau_party = ben_a
+    else:
+        nguoi_yeu_cau_party = ben_b if ben_b.get("nguoi") else ben_a
     web_form = {
         "ten_hop_dong": ten_hd,
         "ngay_cong_chung": find_ngay_cong_chung(text),
@@ -1126,7 +1251,10 @@ def _build_payload(filepath, text: str, scan_result: dict, ben_a: dict, ben_b: d
     doc_kind, ten_hd = _detect_document_kind_and_title(text, file_name=Path(filepath).name)
     tai_san = _find_tai_san_by_kind(text, doc_kind)
     so_cong_chung = _normalize_web_contract_no(find_so_cong_chung(text) or scan_result.get("contract_no", ""))
-    nguoi_yeu_cau_party = ben_b if ben_b.get("nguoi") else ben_a
+    if doc_kind == DOC_KIND_ASSET_COMMITMENT and ben_a.get("nguoi"):
+        nguoi_yeu_cau_party = ben_a
+    else:
+        nguoi_yeu_cau_party = ben_b if ben_b.get("nguoi") else ben_a
     web_form = {
         "ten_hop_dong": ten_hd,
         "ngay_cong_chung": find_ngay_cong_chung(text),
