@@ -32,7 +32,6 @@ FORM_FIELD_ORDER = [
     "nguoi_yeu_cau",
     "duong_su",
     "tai_san",
-    "file_hop_dong",
     "ghi_chu",
     "phi_cong_chung",
     "thu_lao_cong_chung",
@@ -40,86 +39,123 @@ FORM_FIELD_ORDER = [
 
 FORM_SELECTORS = {
     "ten_hop_dong": {
-        "kind": "text",
+        "kind": "dropdown",
         "label": "Tên hợp đồng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#hopdong\.tenhopdong"},
+        ],
         "verify": True,
     },
     "ngay_cong_chung": {
         "kind": "text",
         "label": "Ngày công chứng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": "input[placeholder='dd/mm/yyyy']"},
+        ],
     },
     "so_cong_chung": {
         "kind": "text",
         "label": "Số công chứng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#hopdong\.sohopdong"},
+        ],
         "verify": True,
     },
     "tinh_trang": {
         "kind": "dropdown",
         "label": "Tình trạng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#hopdong\.tinhtrang"},
+        ],
     },
     "nhom_hop_dong": {
         "kind": "dropdown",
         "label": "Nhóm hợp đồng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": "#nhomhopdongId"},
+        ],
         "verify": True,
     },
     "loai_tai_san": {
         "kind": "dropdown",
         "label": "Loại tài sản",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": "#loaiTaisan"},
+        ],
         "verify": True,
     },
     "cong_chung_vien": {
         "kind": "dropdown",
         "label": "Công chứng viên",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#hopdong\.congchungvien\.id"},
+        ],
     },
     "thu_ky": {
         "kind": "dropdown",
         "label": "Thư ký",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#hopdong\.thuky"},
+        ],
     },
     "nguoi_yeu_cau": {
         "kind": "editor",
         "label": "Thông tin người yêu cầu công chứng",
-        "strategies": [],
+        "strategies": [
+            {
+                "type": "xpath",
+                "value": "//div[contains(@class,'Field-container')][.//label[contains(normalize-space(.), 'Thông tin người yêu cầu công chứng')]]//*[@contenteditable='true'][1]",
+            },
+        ],
     },
     "duong_su": {
         "kind": "editor",
         "label": "Đương sự",
-        "strategies": [],
+        "strategies": [
+            {
+                "type": "xpath",
+                "value": "//div[contains(@class,'Field-container')][.//label[contains(normalize-space(.), 'Đương sự')]]//*[@contenteditable='true'][1]",
+            },
+        ],
     },
     "tai_san": {
         "kind": "editor",
         "label": "Tài sản",
-        "strategies": [],
+        "strategies": [
+            {
+                "type": "xpath",
+                "value": "//div[contains(@class,'Field-container')][.//label[contains(normalize-space(.), 'Tài sản')]]//*[@contenteditable='true'][1]",
+            },
+        ],
     },
     "file_hop_dong": {
         "kind": "file",
         "label": "Văn bản hợp đồng",
         "strategies": [
-            {"type": "css", "value": "input[type='file']"},
+            {"type": "css", "value": r"#hopdong\.fileHopdong"},
         ],
         "verify_upload": True,
     },
     "ghi_chu": {
         "kind": "text",
         "label": "Ghi chú",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": "#ghichu"},
+        ],
     },
     "phi_cong_chung": {
         "kind": "text",
         "label": "Phí công chứng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#chiphi\.phicongchung"},
+        ],
     },
     "thu_lao_cong_chung": {
         "kind": "text",
         "label": "Thù lao công chứng",
-        "strategies": [],
+        "strategies": [
+            {"type": "css", "value": r"#chiphi\.thulaoCongchung"},
+        ],
     },
 }
 
@@ -132,4 +168,4 @@ UPLOAD_SUCCESS_MARKERS = [
     {"type": "text_dynamic"},
 ]
 
-VERIFY_FIELDS = ["ten_hop_dong", "so_cong_chung", "nhom_hop_dong", "loai_tai_san", "file_hop_dong"]
+VERIFY_FIELDS = ["ten_hop_dong", "so_cong_chung", "nhom_hop_dong", "loai_tai_san"]

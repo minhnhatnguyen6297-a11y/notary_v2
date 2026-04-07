@@ -11,13 +11,13 @@ tmp/
 deploy/vps/ssh_credentials.env
 deploy/vps/bin/
 
-# UPLOAD tool - generated outputs
-UPLOAD/output/
-UPLOAD/runs/
-UPLOAD/upload_runs/
-UPLOAD/*.json
-UPLOAD/.ui_setup_state.json
-UPLOAD/nd_storage_state.json
+# UPLOAD tool - generated outputs (now at tools/upload_lab/)
+tools/upload_lab/output/
+tools/upload_lab/runs/
+tools/upload_lab/upload_runs/
+tools/upload_lab/*.json
+tools/upload_lab/.ui_setup_state.json
+tools/upload_lab/nd_storage_state.json
 
 # Claude local config
 .claude/settings.local.json

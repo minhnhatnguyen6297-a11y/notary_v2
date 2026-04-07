@@ -16,7 +16,7 @@ from database import get_db
 from models import InheritanceCase, Customer, Property, InheritanceParticipant, WordTemplate
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="frontend/templates")
 WORD_TEMPLATE_UPLOAD_DIR = Path("word_templates/custom")
 def _hang_for_role(role: str) -> int:
     role = (role or "").strip()

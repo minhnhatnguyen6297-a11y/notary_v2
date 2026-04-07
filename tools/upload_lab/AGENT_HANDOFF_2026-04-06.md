@@ -4,7 +4,7 @@
 
 Day la luong moi, tach rieng khoi app chinh. Muc tieu la xu ly cac ho so cu:
 
-1. Quet folder tong chua ho so hop dong `.docx`.
+1. Quet folder tong chua ho so hop dong `.docx` va `.doc`.
 2. Tim dung file hop dong bang so cong chung trong noi dung Word.
 3. Trich xuat du lieu thanh JSON.
 4. Doc JSON extracted de mo web So Tu phap Nam Dinh.
@@ -19,9 +19,9 @@ Khong ghep luong nay vao FastAPI app hien tai. Toan bo tool nam trong thu muc `U
 
 - Script quet folder tong, co the browse bang UI hoac nhan `--folder`.
 - Quet toi da `max depth = 3`.
-- Chi xu ly `.docx`.
-- Bo qua `~$*.docx`.
-- Bo `.doc`, `.xls`, `.xlsx` va ghi registry/manifest la unsupported.
+- Xu ly ca `.docx` va `.doc`.
+- Bo qua `~$*.docx` va `~$*.doc`.
+- Chi bo `.xls`, `.xlsx` va ghi registry/manifest la unsupported.
 - Nhan dien file hop dong bang cach doc noi dung Word va tim pattern so cong chung:
   - `\\d+/2026/CCGD`
 - Keyword `HĐ`, `HD`, `hop dong`, `hợp đồng` chi la dau hieu phu, khong du de auto-upload.
@@ -76,8 +76,9 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
 ## Cac file chinh da co
 
 - `UPLOAD/extract_contract.py`
-  - trich xuat 1 file `.docx`
+  - trich xuat 1 file `.docx` hoac `.doc`
   - co them `scan_docx_for_contract_no(path)`
+  - `.doc` scan va extract bang IFilter/plain text (nhanh), cho phep output partial neu thieu field
 - `UPLOAD/batch_scan.py`
   - batch scan folder
   - ghi `output/`, `runs/`, `registry.sqlite3`
@@ -96,6 +97,7 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
     - `Batch Scan Folder`
     - `Trich Xuat 1 File`
     - `Upload Playwright`
+  - Batch Scan co thanh tien do, toc do xu ly, ETA va file hien tai
 - `UPLOAD/HUONG_DAN.md`
   - huong dan su dung
 - `UPLOAD/.env.example`
@@ -110,8 +112,9 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
 - Unit test pass:
   - `tests.test_upload_batch_scan`
   - `tests.test_playwright_uploader`
-- Playwright package da co trong `venv`.
-- Chromium cho Playwright da cai xong.
+- `UPLOAD/run_ui.bat` bootstrap dependency tu dong cho tool standalone.
+- Dependency runtime nam trong `UPLOAD/requirements.txt`.
+- Moi truong rieng cua tool la `UPLOAD/.venv`.
 
 ## Cach chay
 
@@ -119,7 +122,7 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
 
 ```powershell
 cd d:\notary_v2\UPLOAD
-..\venv\Scripts\python.exe ui_runner.py
+.\run_ui.bat
 ```
 
 ### Batch scan bang terminal

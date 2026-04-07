@@ -3,14 +3,27 @@
 ## Cài đặt
 
 ```bash
-pip install python-docx playwright python-dotenv
-playwright install chromium
+double-click UPLOAD\run_ui.bat
 ```
 
-## 1. Trích xuất một file `.docx`
+`run_ui.bat` sẽ tự:
+- tạo `UPLOAD/.venv` nếu chưa có
+- cài dependency từ `UPLOAD/requirements.txt`
+- cài `playwright chromium` một lần
+- mở UI sau khi bootstrap xong
+
+Neu muon cai tay:
+
+```bash
+python -m pip install -r UPLOAD/requirements.txt
+python -m playwright install chromium
+```
+
+## 1. Trích xuất một file `.docx` hoặc `.doc`
 
 ```bash
 python extract_contract.py "D:\hoso\hop_dong.docx"
+python extract_contract.py "D:\hoso\hop_dong.doc"
 ```
 
 Kết quả:
@@ -22,7 +35,7 @@ Kết quả:
 Script `batch_scan.py` sẽ:
 - Cho chọn folder tổng bằng hộp thoại Windows, hoặc nhận `--folder`
 - Quét đệ quy tối đa 3 tầng
-- Chỉ xét `.docx`, bỏ qua `~$*.docx`
+- Xử lý cả `.docx` và `.doc`, bỏ qua `~$*.docx` và `~$*.doc`
 - Tìm file hợp đồng bằng số công chứng dạng `123/2026/CCGD` trong nội dung Word
 - Gọi `extract_contract.py` để trích xuất JSON
 - Ghi output vào `UPLOAD/output/`
@@ -60,12 +73,14 @@ hoac double-click:
 UPLOAD/run_ui.bat
 ```
 
-UI hien tai co 2 man hinh:
+UI hien tai co 3 man hinh:
 - `Batch Scan Folder`: browse folder tong, nhap `modified since` neu can, tick `full rescan`, roi bam `Chay Batch Scan`
-- `Trich Xuat 1 File`: browse 1 file `.docx`, roi bam `Trich Xuat 1 File`
+- `Trich Xuat 1 File`: browse 1 file `.docx` hoặc `.doc`, roi bam `Trich Xuat 1 File`
 - `Upload Playwright`: chon manifest, refresh queue, `Start Dry-run`, `Stop`, `Finalize Selected`
+- Log tong cua uploader: `UPLOAD/logs/playwright_uploader.log`
+- Moi dry-run chunk se ghi them `dry_run_trace.log` va `debug_<so_cong_chung>.json` trong thu muc artifact `UPLOAD/upload_runs/...`
 
-UI se hien log ngay trong cua so va thong bao duong dan output khi chay xong.
+UI se hien log ngay trong cua so, thanh tien do batch, toc do xu ly, ETA va thong bao duong dan output khi chay xong.
 
 ## 4. Upload Playwright dry-run
 
@@ -111,7 +126,7 @@ ND_POST_PREPARE_DELAY_MS=1500
 
 ## Quy tắc nhận diện file hợp đồng
 
-- Bắt buộc phải tìm thấy số công chứng trong nội dung `.docx`
+- Bắt buộc phải tìm thấy số công chứng trong nội dung Word (`.docx` hoặc `.doc`)
 - Pattern hiện tại đang khóa năm: `\d+/2026/CCGD`
 - Các keyword `HĐ`, `HD`, `hop dong`, `hợp đồng` chỉ là tín hiệu phụ, không đủ để auto flow nếu không có số công chứng
 
@@ -139,7 +154,9 @@ UPLOAD/
 
 ## Lưu ý
 
-- Chỉ hỗ trợ `.docx`
+- Hỗ trợ `.docx` và `.doc`
+- `.doc` khi scan số công chứng dùng IFilter nên nhanh và không cần Word
+- `.doc` khi trích xuất JSON mặc định dùng IFilter/plain text nên nhanh, khong goi Word COM trong flow thuong
 - File đã `upload_failed` hoặc `extract_failed` vẫn được retry, kể cả khi cũ hơn `--modified-since`
 - Nếu một `contract_no` đã có trạng thái `uploaded_success` trong registry thì batch scan sẽ skip các file mới cùng số đó
 - Muốn đổi tên công chứng viên, thư ký mặc định thì sửa trong `extract_contract.py`
