@@ -11,7 +11,7 @@ Day la luong moi, tach rieng khoi app chinh. Muc tieu la xu ly cac ho so cu:
 5. Tu dien form theo che do dry-run: bot dung truoc nut `Luu`, nguoi dung tu kiem tra va bam `Luu`.
 6. Sau khi luu tay xong, nguoi dung quay lai UI va `Finalize Selected` de danh dau `uploaded_success`.
 
-Khong ghep luong nay vao FastAPI app hien tai. Toan bo tool nam trong thu muc `UPLOAD/`.
+Khong ghep luong nay vao FastAPI app hien tai. Toan bo tool nam trong thu muc `tools/upload_lab/`.
 
 ## Quy tac nghiep vu da chot
 
@@ -34,7 +34,7 @@ Khong ghep luong nay vao FastAPI app hien tai. Toan bo tool nam trong thu muc `U
 - Nguon queue la `manifest` do nguoi dung chon.
 - Queue resolve bang:
   - doc `run_id` tu manifest
-  - query `UPLOAD/registry.sqlite3`
+  - query `tools/upload_lab/registry.sqlite3`
   - chi lay cac status: `extracted`, `upload_failed`, `prepared_dry_run`, `prepared_partial`
   - loai `uploaded_success`
 - Dry-run theo kieu tab deck:
@@ -75,32 +75,32 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
 
 ## Cac file chinh da co
 
-- `UPLOAD/extract_contract.py`
+- `tools/upload_lab/extract_contract.py`
   - trich xuat 1 file `.docx` hoac `.doc`
   - co them `scan_docx_for_contract_no(path)`
   - `.doc` scan va extract bang IFilter/plain text (nhanh), cho phep output partial neu thieu field
-- `UPLOAD/batch_scan.py`
+- `tools/upload_lab/batch_scan.py`
   - batch scan folder
   - ghi `output/`, `runs/`, `registry.sqlite3`
   - bo sung helper registry cho uploader
-- `UPLOAD/playwright_uploader.py`
+- `tools/upload_lab/playwright_uploader.py`
   - queue resolution tu manifest -> registry
   - session Playwright
   - auto login + storage state
   - prepare tab dry-run
   - finalize record
-- `UPLOAD/uploader_selectors.py`
+- `tools/upload_lab/uploader_selectors.py`
   - selector va thu tu fill form
   - hien van la best-effort, can calibrate tren site that
-- `UPLOAD/ui_runner.py`
+- `tools/upload_lab/ui_runner.py`
   - UI gom 3 tab:
     - `Batch Scan Folder`
     - `Trich Xuat 1 File`
     - `Upload Playwright`
   - Batch Scan co thanh tien do, toc do xu ly, ETA va file hien tai
-- `UPLOAD/HUONG_DAN.md`
+- `tools/upload_lab/HUONG_DAN.md`
   - huong dan su dung
-- `UPLOAD/.env.example`
+- `tools/upload_lab/.env.example`
   - mau bien moi truong
 - `tests/test_upload_batch_scan.py`
 - `tests/test_playwright_uploader.py`
@@ -112,16 +112,16 @@ Neu lech, thieu, hoac upload file khong xac nhan duoc thi danh dau `prepared_par
 - Unit test pass:
   - `tests.test_upload_batch_scan`
   - `tests.test_playwright_uploader`
-- `UPLOAD/run_ui.bat` bootstrap dependency tu dong cho tool standalone.
-- Dependency runtime nam trong `UPLOAD/requirements.txt`.
-- Moi truong rieng cua tool la `UPLOAD/.venv`.
+- `tools/upload_lab/run_ui.bat` bootstrap dependency tu dong cho tool standalone.
+- Dependency runtime nam trong `tools/upload_lab/requirements.txt`.
+- Moi truong rieng cua tool la `tools/upload_lab/.venv`.
 
 ## Cach chay
 
 ### UI
 
 ```powershell
-cd d:\notary_v2\UPLOAD
+cd d:\notary_v2\tools\upload_lab
 .\run_ui.bat
 ```
 
@@ -129,14 +129,14 @@ cd d:\notary_v2\UPLOAD
 
 ```powershell
 cd d:\notary_v2
-venv\Scripts\python.exe UPLOAD\batch_scan.py --folder "D:\HoSo"
+venv\Scripts\python.exe tools\upload_lab\batch_scan.py --folder "D:\HoSo"
 ```
 
 ### Upload dry-run
 
 1. Mo UI.
 2. Vao tab `Upload Playwright`.
-3. Chon manifest trong `UPLOAD/runs/`.
+3. Chon manifest trong `tools/upload_lab/runs/`.
 4. Bam `Refresh Queue`.
 5. Bam `Start Dry-run`.
 6. Bot mo toi da 10 tab, dien xong va dung truoc `Luu`.
@@ -146,7 +146,7 @@ venv\Scripts\python.exe UPLOAD\batch_scan.py --folder "D:\HoSo"
 
 ## Bien moi truong can dung
 
-Tao file `UPLOAD/.env` dua tren `.env.example`:
+Tao file `tools/upload_lab/.env` dua tren `.env.example`:
 
 - `ND_BASE_URL`
 - `ND_LOGIN_URL`
@@ -166,7 +166,7 @@ Mac dinh quan trong:
 
 ## Dieu chua khoa cung 100%
 
-Phan con thieu lon nhat la calibrate selector tren site that. Hien tai `UPLOAD/uploader_selectors.py` chu yeu dua vao:
+Phan con thieu lon nhat la calibrate selector tren site that. Hien tai `tools/upload_lab/uploader_selectors.py` chu yeu dua vao:
 
 - label text
 - input gan label

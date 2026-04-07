@@ -14,7 +14,11 @@ from uuid import uuid4
 try:
     from extract_contract import extract, get_missing_web_form_fields, scan_docx_for_contract_no
 except ImportError:  # pragma: no cover - fallback when imported as package
-    from UPLOAD.extract_contract import extract, get_missing_web_form_fields, scan_docx_for_contract_no
+    from tools.upload_lab.extract_contract import (
+        extract,
+        get_missing_web_form_fields,
+        scan_docx_for_contract_no,
+    )
 
 
 BASE_DIR = Path(__file__).resolve().parent

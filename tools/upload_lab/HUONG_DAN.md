@@ -3,19 +3,19 @@
 ## Cài đặt
 
 ```bash
-double-click UPLOAD\run_ui.bat
+double-click tools\upload_lab\run_ui.bat
 ```
 
 `run_ui.bat` sẽ tự:
-- tạo `UPLOAD/.venv` nếu chưa có
-- cài dependency từ `UPLOAD/requirements.txt`
+- tạo `tools/upload_lab/.venv` nếu chưa có
+- cài dependency từ `tools/upload_lab/requirements.txt`
 - cài `playwright chromium` một lần
 - mở UI sau khi bootstrap xong
 
 Neu muon cai tay:
 
 ```bash
-python -m pip install -r UPLOAD/requirements.txt
+python -m pip install -r tools/upload_lab/requirements.txt
 python -m playwright install chromium
 ```
 
@@ -38,9 +38,9 @@ Script `batch_scan.py` sẽ:
 - Xử lý cả `.docx` và `.doc`, bỏ qua `~$*.docx` và `~$*.doc`
 - Tìm file hợp đồng bằng số công chứng dạng `123/2026/CCGD` trong nội dung Word
 - Gọi `extract_contract.py` để trích xuất JSON
-- Ghi output vào `UPLOAD/output/`
-- Ghi manifest từng lần chạy vào `UPLOAD/runs/`
-- Ghi registry SQLite vào `UPLOAD/registry.sqlite3`
+- Ghi output vào `tools/upload_lab/output/`
+- Ghi manifest từng lần chạy vào `tools/upload_lab/runs/`
+- Ghi registry SQLite vào `tools/upload_lab/registry.sqlite3`
 - Ô `modified since` nhận cả `YYYY-MM-DD` và `DD/MM/YYYY`
 
 ### Cách dùng
@@ -70,15 +70,15 @@ python ui_runner.py
 hoac double-click:
 
 ```text
-UPLOAD/run_ui.bat
+tools/upload_lab/run_ui.bat
 ```
 
 UI hien tai co 3 man hinh:
 - `Batch Scan Folder`: browse folder tong, nhap `modified since` neu can, tick `full rescan`, roi bam `Chay Batch Scan`
 - `Trich Xuat 1 File`: browse 1 file `.docx` hoặc `.doc`, roi bam `Trich Xuat 1 File`
 - `Upload Playwright`: chon manifest, refresh queue, `Start Dry-run`, `Stop`, `Finalize Selected`
-- Log tong cua uploader: `UPLOAD/logs/playwright_uploader.log`
-- Moi dry-run chunk se ghi them `dry_run_trace.log` va `debug_<so_cong_chung>.json` trong thu muc artifact `UPLOAD/upload_runs/...`
+- Log tong cua uploader: `tools/upload_lab/logs/playwright_uploader.log`
+- Moi dry-run chunk se ghi them `dry_run_trace.log` va `debug_<so_cong_chung>.json` trong thu muc artifact `tools/upload_lab/upload_runs/...`
 
 UI se hien log ngay trong cua so, thanh tien do batch, toc do xu ly, ETA va thong bao duong dan output khi chay xong.
 
@@ -87,7 +87,7 @@ UI se hien log ngay trong cua so, thanh tien do batch, toc do xu ly, ETA va thon
 Luong su dung:
 - Chay `Batch Scan Folder` truoc de tao `manifest` va `output`
 - Mo tab `Upload Playwright`
-- Browse file manifest trong `UPLOAD/runs/`
+- Browse file manifest trong `tools/upload_lab/runs/`
 - Bam `Refresh Queue`
 - Bam `Start Dry-run`
 
@@ -110,7 +110,7 @@ Neu batch con ho so chua xu ly:
 
 ## 5. Cau hinh uploader
 
-Tao file `.env` trong `UPLOAD/` dua theo mau `.env.example`:
+Tao file `.env` trong `tools/upload_lab/` dua theo mau `.env.example`:
 
 ```env
 ND_BASE_URL=https://congchung.namdinh.gov.vn
@@ -118,7 +118,7 @@ ND_LOGIN_URL=https://congchung.namdinh.gov.vn
 ND_CREATE_URL=https://congchung.namdinh.gov.vn/ho-so-cong-chung/tao-moi-nhanh
 ND_USERNAME=
 ND_PASSWORD=
-ND_STORAGE_STATE_PATH=UPLOAD/nd_storage_state.json
+ND_STORAGE_STATE_PATH=tools/upload_lab/nd_storage_state.json
 ND_BROWSER_CHANNEL=chromium
 ND_MAX_PREPARED_TABS=10
 ND_POST_PREPARE_DELAY_MS=1500
@@ -132,15 +132,15 @@ ND_POST_PREPARE_DELAY_MS=1500
 
 ## Output batch scan
 
-- `UPLOAD/output/<contract_no>_<hash>.json`
-- `UPLOAD/runs/<timestamp>.json`
-- `UPLOAD/registry.sqlite3`
-- `UPLOAD/upload_runs/<timestamp_runid>/`
+- `tools/upload_lab/output/<contract_no>_<hash>.json`
+- `tools/upload_lab/runs/<timestamp>.json`
+- `tools/upload_lab/registry.sqlite3`
+- `tools/upload_lab/upload_runs/<timestamp_runid>/`
 
 Ví dụ:
 
 ```text
-UPLOAD/
+tools/upload_lab/
 ├── batch_scan.py
 ├── extract_contract.py
 ├── output/

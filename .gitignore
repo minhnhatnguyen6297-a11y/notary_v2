@@ -28,3 +28,6 @@ ID template/
 
 # Runtime dirs
 runtime/
+
+# Legacy accidental path after upload tool move
+tools/UPLOAD/

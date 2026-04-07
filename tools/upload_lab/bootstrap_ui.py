@@ -10,7 +10,7 @@ from pathlib import Path
 BOOTSTRAP_VERSION = 1
 PLAYWRIGHT_BROWSER = "chromium"
 BASE_DIR = Path(__file__).resolve().parent
-REPO_ROOT = BASE_DIR.parent
+REPO_ROOT = BASE_DIR.parents[1]
 REQUIREMENTS_PATH = BASE_DIR / "requirements.txt"
 SETUP_STAMP_PATH = BASE_DIR / ".ui_setup_state.json"
 UI_RUNNER_PATH = BASE_DIR / "ui_runner.py"
@@ -118,7 +118,7 @@ def ensure_dependencies(python_exe: Path) -> None:
     runtime = probe_runtime(python_exe)
 
     if should_install_requirements(state, runtime, requirements_mtime_ns):
-        log("[SETUP] Cai dat dependency tu UPLOAD/requirements.txt...")
+        log("[SETUP] Cai dat dependency tu tools/upload_lab/requirements.txt...")
         run_command([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], cwd=REPO_ROOT)
         run_command([str(python_exe), "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)], cwd=REPO_ROOT)
         runtime = probe_runtime(python_exe)

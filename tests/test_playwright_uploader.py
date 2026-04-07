@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from UPLOAD.batch_scan import connect_registry, get_row_by_id, upsert_registry_record
-from UPLOAD.playwright_uploader import finalize_uploaded_records, load_upload_queue
+from tools.upload_lab.batch_scan import connect_registry, get_row_by_id, upsert_registry_record
+from tools.upload_lab.playwright_uploader import finalize_uploaded_records, load_upload_queue
 
 
 def make_output_json(path: Path, *, contract_no: str, file_goc: str, ten_hop_dong: str = "Hợp đồng chuyển nhượng") -> Path:
@@ -37,7 +37,7 @@ class PlaywrightUploaderQueueTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
         self.root = Path(self.tempdir.name)
-        self.workdir = self.root / "UPLOAD"
+        self.workdir = self.root / "upload_lab"
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.conn = connect_registry(self.workdir / "registry.sqlite3")
         self.addCleanup(self.conn.close)

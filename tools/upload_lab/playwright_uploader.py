@@ -26,7 +26,7 @@ try:
         update_registry_record_by_id,
     )
 except ImportError:  # pragma: no cover
-    from UPLOAD.batch_scan import (
+    from tools.upload_lab.batch_scan import (
         BASE_DIR,
         REGISTRY_DB_PATH,
         connect_registry,
@@ -50,7 +50,7 @@ try:
         VERIFY_FIELDS,
     )
 except ImportError:  # pragma: no cover
-    from UPLOAD.uploader_selectors import (
+    from tools.upload_lab.uploader_selectors import (
         DEFAULT_GHI_CHU,
         DEFAULT_PHI_CONG_CHUNG,
         DEFAULT_STATUS_TEXT,
@@ -66,8 +66,8 @@ except ImportError:  # pragma: no cover
 QUEUE_STATUSES = ("extracted", "upload_failed", "prepared_dry_run", "prepared_partial")
 PLAYWRIGHT_MISSING_MESSAGE = (
     "Chua cai Playwright. Scan/Extract van dung duoc. Muon upload, hay chay "
-    "'UPLOAD\\run_ui.bat' de bootstrap tu dong, hoac cai bang "
-    "'pip install -r UPLOAD/requirements.txt' va 'playwright install chromium'."
+    "'tools\\upload_lab\\run_ui.bat' de bootstrap tu dong, hoac cai bang "
+    "'pip install -r tools/upload_lab/requirements.txt' va 'playwright install chromium'."
 )
 UPLOAD_LOG_PATH = BASE_DIR / "logs" / "playwright_uploader.log"
 

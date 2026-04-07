@@ -21,9 +21,9 @@ try:
         probe_playwright_runtime,
     )
 except ImportError:  # pragma: no cover - fallback when imported as package
-    from UPLOAD.batch_scan import BASE_DIR, finalize_manifest, run_batch_scan
-    from UPLOAD.extract_contract import batch_convert_doc_to_docx, extract
-    from UPLOAD.playwright_uploader import (
+    from tools.upload_lab.batch_scan import BASE_DIR, finalize_manifest, run_batch_scan
+    from tools.upload_lab.extract_contract import batch_convert_doc_to_docx, extract
+    from tools.upload_lab.playwright_uploader import (
         NamDinhUploaderSession,
         finalize_uploaded_records,
         load_upload_queue,
@@ -190,7 +190,7 @@ class App(tk.Tk):
 
         note = ttk.Label(
             self.batch_tab,
-            text="Batch scan se ghi output vao UPLOAD/output, manifest vao UPLOAD/runs. "
+            text="Batch scan se ghi output vao tools/upload_lab/output, manifest vao tools/upload_lab/runs. "
                  "Nut 'Chuyen .doc → .docx' chi can chay 1 lan — file .doc goc giu nguyen.",
         )
         note.grid(row=6, column=0, columnspan=2, sticky="w", pady=(12, 0))
