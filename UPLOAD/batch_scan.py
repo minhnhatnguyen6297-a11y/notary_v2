@@ -5,15 +5,16 @@ import hashlib
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
 try:
-    from extract_contract import extract, scan_docx_for_contract_no
+    from extract_contract import extract, get_missing_web_form_fields, scan_docx_for_contract_no
 except ImportError:  # pragma: no cover - fallback when imported as package
-    from UPLOAD.extract_contract import extract, scan_docx_for_contract_no
+    from UPLOAD.extract_contract import extract, get_missing_web_form_fields, scan_docx_for_contract_no
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -22,7 +23,7 @@ RUNS_DIR = BASE_DIR / "runs"
 REGISTRY_DB_PATH = BASE_DIR / "registry.sqlite3"
 MAX_SCAN_DEPTH = 3
 RETRYABLE_STATUSES = {"extract_failed", "upload_failed"}
-UNSUPPORTED_SUFFIXES = {".doc", ".xls", ".xlsx"}
+UNSUPPORTED_SUFFIXES = {".xls", ".xlsx"}
 SKIP_TEMP_PREFIX = "~$"
 REGISTRY_EXTRA_COLUMNS = {
     "prepared_at": "TEXT",
@@ -36,7 +37,7 @@ def now_iso() -> str:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Batch scan folder hop dong .docx")
+    parser = argparse.ArgumentParser(description="Batch scan folder hop dong Word (.doc/.docx)")
     parser.add_argument("--folder", help="Folder tong can quet")
     parser.add_argument("--modified-since", help="Chi quet file sua tu ngay YYYY-MM-DD hoac DD/MM/YYYY tro di")
     parser.add_argument("--full-rescan", action="store_true", help="Bo qua bo loc ngay va quet lai toan bo")
@@ -404,12 +405,15 @@ def initial_manifest(folder_root: Path, modified_since: Optional[str], full_resc
         "stats": {
             "total_subfolders": 0,
             "total_docx_files": 0,
+            "total_supported_files": 0,
+            "processed_files": 0,
             "total_skipped_temp": 0,
             "total_skipped_unsupported": 0,
             "total_skipped_old": 0,
             "candidates_found": 0,
             "extract_success": 0,
             "extract_failed": 0,
+            "extract_partial": 0,
             "skipped_duplicate": 0,
             "ready_for_upload": 0,
         },
@@ -419,6 +423,85 @@ def initial_manifest(folder_root: Path, modified_since: Optional[str], full_resc
 
 def append_error(manifest: dict, file_path: Path, error: str) -> None:
     manifest["errors"].append({"file": str(file_path), "error": error})
+
+
+def collect_batch_files(folder_root: Path, manifest: dict) -> tuple[list[Path], list[Path]]:
+    supported_files: list[Path] = []
+    unsupported_files: list[Path] = []
+
+    for current_root, dirs, files in os.walk(str(folder_root)):
+        current_path = Path(current_root)
+        relative_dir = current_path.relative_to(folder_root)
+        depth = len(relative_dir.parts)
+        if depth > 0:
+            manifest["stats"]["total_subfolders"] += 1
+        if depth >= MAX_SCAN_DEPTH:
+            dirs[:] = []
+
+        for name in files:
+            file_path = current_path / name
+            suffix = file_path.suffix.lower()
+
+            if suffix in (".docx", ".doc"):
+                manifest["stats"]["total_docx_files"] += 1
+
+            if name.startswith(SKIP_TEMP_PREFIX) and suffix in (".docx", ".doc"):
+                manifest["stats"]["total_skipped_temp"] += 1
+                continue
+
+            if suffix in UNSUPPORTED_SUFFIXES:
+                unsupported_files.append(file_path)
+                manifest["stats"]["total_skipped_unsupported"] += 1
+                continue
+
+            if suffix in (".docx", ".doc"):
+                supported_files.append(file_path)
+
+    manifest["stats"]["total_supported_files"] = len(supported_files)
+    return supported_files, unsupported_files
+
+
+def emit_progress(
+    progress_callback,
+    manifest: dict,
+    *,
+    stage: str,
+    step: str = "",
+    current_file: Optional[Path] = None,
+    process_started_at: Optional[float] = None,
+    last_outcome: str = "",
+    last_reason: str = "",
+    last_contract_no: str = "",
+) -> None:
+    if not progress_callback:
+        return
+
+    processed_files = int(manifest["stats"].get("processed_files", 0) or 0)
+    total_files = int(manifest["stats"].get("total_supported_files", 0) or 0)
+    elapsed_seconds = max(0.0, time.perf_counter() - process_started_at) if process_started_at else 0.0
+    files_per_second = (processed_files / elapsed_seconds) if elapsed_seconds > 0 and processed_files > 0 else 0.0
+    eta_seconds = None
+    if total_files > processed_files and files_per_second > 0:
+        eta_seconds = (total_files - processed_files) / files_per_second
+
+    snapshot = {
+        "stage": stage,
+        "step": step,
+        "current_file": str(current_file) if current_file else "",
+        "processed_files": processed_files,
+        "total_files": total_files,
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "files_per_second": round(files_per_second, 3),
+        "eta_seconds": round(eta_seconds, 3) if eta_seconds is not None else None,
+        "last_outcome": last_outcome,
+        "last_reason": last_reason,
+        "last_contract_no": last_contract_no,
+        "stats": dict(manifest["stats"]),
+    }
+    try:
+        progress_callback(snapshot)
+    except Exception:
+        pass
 
 
 def finalize_manifest(manifest: dict, runs_dir: Path) -> Path:
@@ -439,6 +522,7 @@ def run_batch_scan(
     modified_since: Optional[str] = None,
     full_rescan: bool = False,
     working_dir: Optional[Path] = None,
+    progress_callback=None,
 ) -> dict:
     folder_root = Path(folder_root)
     if not folder_root.exists() or not folder_root.is_dir():
@@ -446,114 +530,195 @@ def run_batch_scan(
 
     working_dir = Path(working_dir or BASE_DIR)
     output_dir = working_dir / "output"
-    runs_dir = working_dir / "runs"
     registry_db = working_dir / "registry.sqlite3"
     modified_since_date = parse_modified_since(modified_since)
     run_id = uuid4().hex[:8]
     manifest = initial_manifest(folder_root.resolve(), modified_since, full_rescan, run_id)
     conn = connect_registry(registry_db)
+    process_started_at: Optional[float] = None
 
     try:
-        for current_root, dirs, files in os.walk(str(folder_root)):
-            current_path = Path(current_root)
-            relative_dir = current_path.relative_to(folder_root)
-            depth = len(relative_dir.parts)
-            if depth > 0:
-                manifest["stats"]["total_subfolders"] += 1
-            if depth >= MAX_SCAN_DEPTH:
-                dirs[:] = []
+        emit_progress(progress_callback, manifest, stage="indexing", step="collect_files")
+        supported_files, unsupported_files = collect_batch_files(folder_root, manifest)
+        emit_progress(progress_callback, manifest, stage="indexing", step="collected")
 
-            for name in files:
-                file_path = current_path / name
-                suffix = file_path.suffix.lower()
+        for file_path in unsupported_files:
+            try:
+                stat_result = file_path.stat()
+            except OSError as exc:
+                append_error(manifest, file_path, f"Khong doc duoc stat file: {exc}")
+                continue
 
-                if suffix == ".docx":
-                    manifest["stats"]["total_docx_files"] += 1
+            file_key = file_identity_key(file_path, stat_result)
+            customer_folder = resolve_customer_folder(folder_root, file_path)
+            upsert_registry_record(
+                conn,
+                file_key=file_key,
+                file_path=file_path,
+                stat_result=stat_result,
+                customer_folder=customer_folder,
+                status="skipped_unsupported",
+                run_id=run_id,
+                last_error="unsupported",
+                reason="File khong duoc ho tro",
+            )
 
-                if name.startswith(SKIP_TEMP_PREFIX) and suffix == ".docx":
-                    manifest["stats"]["total_skipped_temp"] += 1
-                    continue
+        process_started_at = time.perf_counter()
+        emit_progress(progress_callback, manifest, stage="processing", step="start", process_started_at=process_started_at)
 
-                if suffix in UNSUPPORTED_SUFFIXES:
-                    stat_result = file_path.stat()
-                    file_key = file_identity_key(file_path, stat_result)
-                    customer_folder = resolve_customer_folder(folder_root, file_path)
-                    upsert_registry_record(
-                        conn,
-                        file_key=file_key,
-                        file_path=file_path,
-                        stat_result=stat_result,
-                        customer_folder=customer_folder,
-                        status="skipped_unsupported",
-                        run_id=run_id,
-                        last_error="unsupported",
-                        reason="File khong duoc ho tro",
-                    )
-                    manifest["stats"]["total_skipped_unsupported"] += 1
-                    continue
+        for file_path in supported_files:
+            emit_progress(
+                progress_callback,
+                manifest,
+                stage="processing",
+                step="scan",
+                current_file=file_path,
+                process_started_at=process_started_at,
+            )
 
-                if suffix != ".docx":
-                    continue
+            try:
+                stat_result = file_path.stat()
+            except OSError as exc:
+                append_error(manifest, file_path, f"Khong doc duoc stat file: {exc}")
+                manifest["stats"]["processed_files"] += 1
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="stat_error",
+                    last_reason=str(exc),
+                )
+                continue
 
-                try:
-                    stat_result = file_path.stat()
-                except OSError as exc:
-                    append_error(manifest, file_path, f"Khong doc duoc stat file: {exc}")
-                    continue
+            file_key = file_identity_key(file_path, stat_result)
+            customer_folder = resolve_customer_folder(folder_root, file_path)
 
-                file_key = file_identity_key(file_path, stat_result)
-                customer_folder = resolve_customer_folder(folder_root, file_path)
-
-                if should_skip_by_modified_since(
+            if should_skip_by_modified_since(
+                conn,
+                file_path,
+                stat_result,
+                modified_since_date,
+                full_rescan=full_rescan,
+            ):
+                upsert_registry_record(
                     conn,
+                    file_key=file_key,
+                    file_path=file_path,
+                    stat_result=stat_result,
+                    customer_folder=customer_folder,
+                    status="skipped_old_file",
+                    run_id=run_id,
+                    last_error=None,
+                    reason="File cu hon modified_since",
+                )
+                manifest["stats"]["total_skipped_old"] += 1
+                manifest["stats"]["processed_files"] += 1
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="skipped_old",
+                )
+                continue
+
+            scan_result = scan_docx_for_contract_no(file_path, include_text=True)
+            if not scan_result.get("is_contract"):
+                reason = scan_result.get("reason", "Khong thay so cong chung")
+                if reason.lower().startswith("khong doc duoc file"):
+                    append_error(manifest, file_path, reason)
+                manifest["stats"]["processed_files"] += 1
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="not_contract",
+                    last_reason=reason,
+                )
+                continue
+
+            contract_no = str(scan_result.get("contract_no", "")).strip()
+            if not contract_no:
+                manifest["stats"]["processed_files"] += 1
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="empty_contract_no",
+                )
+                continue
+
+            manifest["stats"]["candidates_found"] += 1
+
+            if has_uploaded_success(conn, contract_no):
+                upsert_registry_record(
+                    conn,
+                    file_key=file_key,
+                    file_path=file_path,
+                    stat_result=stat_result,
+                    customer_folder=customer_folder,
+                    contract_no=contract_no,
+                    status="skipped_duplicate",
+                    run_id=run_id,
+                    reason="Contract_no da co uploaded_success",
+                )
+                manifest["stats"]["skipped_duplicate"] += 1
+                manifest["stats"]["processed_files"] += 1
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="skipped_duplicate",
+                    last_contract_no=contract_no,
+                )
+                continue
+
+            matched_at = now_iso()
+            upsert_registry_record(
+                conn,
+                file_key=file_key,
+                file_path=file_path,
+                stat_result=stat_result,
+                customer_folder=customer_folder,
+                contract_no=contract_no,
+                status="matched",
+                run_id=run_id,
+                matched_at=matched_at,
+                reason=scan_result.get("reason", ""),
+            )
+
+            emit_progress(
+                progress_callback,
+                manifest,
+                stage="processing",
+                step="extract",
+                current_file=file_path,
+                process_started_at=process_started_at,
+                last_contract_no=contract_no,
+            )
+
+            try:
+                payload = extract(
                     file_path,
-                    stat_result,
-                    modified_since_date,
-                    full_rescan=full_rescan,
-                ):
-                    upsert_registry_record(
-                        conn,
-                        file_key=file_key,
-                        file_path=file_path,
-                        stat_result=stat_result,
-                        customer_folder=customer_folder,
-                        status="skipped_old_file",
-                        run_id=run_id,
-                        last_error=None,
-                        reason="File cu hon modified_since",
-                    )
-                    manifest["stats"]["total_skipped_old"] += 1
-                    continue
-
-                scan_result = scan_docx_for_contract_no(file_path)
-                if not scan_result.get("is_contract"):
-                    reason = scan_result.get("reason", "Khong thay so cong chung")
-                    if reason.lower().startswith("khong doc duoc file"):
-                        append_error(manifest, file_path, reason)
-                    continue
-
-                contract_no = str(scan_result.get("contract_no", "")).strip()
-                if not contract_no:
-                    continue
-
-                manifest["stats"]["candidates_found"] += 1
-
-                if has_uploaded_success(conn, contract_no):
-                    upsert_registry_record(
-                        conn,
-                        file_key=file_key,
-                        file_path=file_path,
-                        stat_result=stat_result,
-                        customer_folder=customer_folder,
-                        contract_no=contract_no,
-                        status="skipped_duplicate",
-                        run_id=run_id,
-                        reason="Contract_no da co uploaded_success",
-                    )
-                    manifest["stats"]["skipped_duplicate"] += 1
-                    continue
-
-                matched_at = now_iso()
+                    scan_result=scan_result,
+                    preloaded_text=scan_result.get("text"),
+                )
+                output_path = save_output_json(output_dir, contract_no, file_key, payload)
+            except Exception as exc:
                 upsert_registry_record(
                     conn,
                     file_key=file_key,
@@ -561,53 +726,73 @@ def run_batch_scan(
                     stat_result=stat_result,
                     customer_folder=customer_folder,
                     contract_no=contract_no,
-                    status="matched",
+                    status="extract_failed",
                     run_id=run_id,
                     matched_at=matched_at,
-                    reason=scan_result.get("reason", ""),
+                    last_error=str(exc),
+                    reason="Extract that bai",
                 )
-
-                try:
-                    payload = extract(file_path)
-                    output_path = save_output_json(output_dir, contract_no, file_key, payload)
-                except Exception as exc:
-                    upsert_registry_record(
-                        conn,
-                        file_key=file_key,
-                        file_path=file_path,
-                        stat_result=stat_result,
-                        customer_folder=customer_folder,
-                        contract_no=contract_no,
-                        status="extract_failed",
-                        run_id=run_id,
-                        matched_at=matched_at,
-                        last_error=str(exc),
-                        reason="Extract that bai",
-                    )
-                    manifest["stats"]["extract_failed"] += 1
-                    append_error(manifest, file_path, f"Extract loi: {exc}")
-                    continue
-
-                extracted_at = now_iso()
-                upsert_registry_record(
-                    conn,
-                    file_key=file_key,
-                    file_path=file_path,
-                    stat_result=stat_result,
-                    customer_folder=customer_folder,
-                    contract_no=contract_no,
-                    status="extracted",
-                    run_id=run_id,
-                    matched_at=matched_at,
-                    extracted_at=extracted_at,
-                    output_json_path=str(output_path),
-                    reason="Extract thanh cong",
+                manifest["stats"]["extract_failed"] += 1
+                manifest["stats"]["processed_files"] += 1
+                append_error(manifest, file_path, f"Extract loi: {exc}")
+                emit_progress(
+                    progress_callback,
+                    manifest,
+                    stage="processing",
+                    step="file_done",
+                    current_file=file_path,
+                    process_started_at=process_started_at,
+                    last_outcome="extract_failed",
+                    last_reason=str(exc),
+                    last_contract_no=contract_no,
                 )
-                manifest["stats"]["extract_success"] += 1
-                manifest["stats"]["ready_for_upload"] += 1
+                continue
+
+            missing_fields = payload.get("raw", {}).get("missing_web_form_fields") or []
+            if not missing_fields:
+                missing_fields = get_missing_web_form_fields(
+                    payload.get("web_form") or {},
+                    file_hop_dong=payload.get("raw", {}).get("file_goc", ""),
+                )
+            if missing_fields:
+                manifest["stats"]["extract_partial"] += 1
+
+            extracted_at = now_iso()
+            reason = "Extract thanh cong"
+            if missing_fields:
+                reason = f"Extract thanh cong (partial: {', '.join(missing_fields)})"
+            upsert_registry_record(
+                conn,
+                file_key=file_key,
+                file_path=file_path,
+                stat_result=stat_result,
+                customer_folder=customer_folder,
+                contract_no=contract_no,
+                status="extracted",
+                run_id=run_id,
+                matched_at=matched_at,
+                extracted_at=extracted_at,
+                output_json_path=str(output_path),
+                reason=reason,
+            )
+            manifest["stats"]["extract_success"] += 1
+            manifest["stats"]["ready_for_upload"] += 1
+            manifest["stats"]["processed_files"] += 1
+            emit_progress(
+                progress_callback,
+                manifest,
+                stage="processing",
+                step="file_done",
+                current_file=file_path,
+                process_started_at=process_started_at,
+                last_outcome="extract_partial" if missing_fields else "extracted",
+                last_reason=reason,
+                last_contract_no=contract_no,
+            )
     finally:
         conn.close()
 
+    emit_progress(progress_callback, manifest, stage="done", step="done", process_started_at=process_started_at)
     return manifest
 
 

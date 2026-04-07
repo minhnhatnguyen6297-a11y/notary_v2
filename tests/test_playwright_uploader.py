@@ -4,9 +4,16 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from UPLOAD.batch_scan import connect_registry, get_row_by_id, upsert_registry_record
-from UPLOAD.playwright_uploader import finalize_uploaded_records, load_upload_queue
+from UPLOAD.playwright_uploader import (
+    build_upload_form_data,
+    finalize_uploaded_records,
+    identify_missing_fields,
+    load_upload_queue,
+    probe_playwright_runtime,
+)
 
 
 def make_output_json(path: Path, *, contract_no: str, file_goc: str, ten_hop_dong: str = "Hợp đồng chuyển nhượng") -> Path:
@@ -83,7 +90,7 @@ class PlaywrightUploaderQueueTests(unittest.TestCase):
 
         self.assertEqual(manifest["run_id"], run_id)
         self.assertEqual(total_pending, 2)
-        self.assertEqual([record.contract_no for record in records], ["111/2026/CCGD", "222/2026/CCGD"])
+        self.assertEqual([record.contract_no for record in records], ["111/2026", "222/2026"])
 
     def test_finalize_uploaded_records_marks_selected_rows(self):
         run_id = "run123"
@@ -104,6 +111,43 @@ class PlaywrightUploaderQueueTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(row["status"], "uploaded_success")
         self.assertTrue(row["uploaded_success_at"])
+
+    def test_upload_form_normalizes_contract_no_and_does_not_require_source_file(self):
+        payload = {
+            "web_form": {
+                "ten_hop_dong": "Hop dong",
+                "ngay_cong_chung": "06/04/2026",
+                "so_cong_chung": "555/2026/CCGD",
+                "nhom_hop_dong": "Khac",
+                "loai_tai_san": "Tai san khac",
+                "tai_san": "Tai san ...",
+            },
+            "raw": {
+                "file_goc": "",
+            },
+        }
+
+        upload_form = build_upload_form_data(payload)
+
+        self.assertEqual(upload_form["so_cong_chung"], "555/2026")
+        self.assertEqual(identify_missing_fields(upload_form), [])
+
+
+class PlaywrightRuntimeProbeTests(unittest.TestCase):
+    def test_probe_reports_missing_package(self):
+        with mock.patch("UPLOAD.playwright_uploader.importlib_util.find_spec", return_value=None):
+            ready, message = probe_playwright_runtime()
+
+        self.assertFalse(ready)
+        self.assertIn("Chua cai Playwright", message)
+
+    def test_probe_reports_ready_when_sync_api_imports(self):
+        with mock.patch("UPLOAD.playwright_uploader.importlib_util.find_spec", return_value=object()):
+            with mock.patch("UPLOAD.playwright_uploader.importlib.import_module", return_value=object()):
+                ready, message = probe_playwright_runtime()
+
+        self.assertTrue(ready)
+        self.assertIn("san sang", message.lower())
 
 
 if __name__ == "__main__":

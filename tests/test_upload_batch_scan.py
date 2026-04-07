@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from docx import Document
 
@@ -110,6 +111,90 @@ class UploadBatchScanTests(unittest.TestCase):
 
         self.assertEqual(manifest["stats"]["skipped_duplicate"], 1)
         self.assertFalse((workdir / "output").exists())
+
+    def test_batch_scan_accepts_doc_files(self):
+        batch_root = self.root / "hoso"
+        doc_path = batch_root / "KhachDoc" / "hop_dong.doc"
+        doc_path.parent.mkdir(parents=True, exist_ok=True)
+        doc_path.write_text("legacy doc placeholder", encoding="utf-8")
+        workdir = self.root / "work"
+
+        with patch(
+            "UPLOAD.batch_scan.scan_docx_for_contract_no",
+            return_value={
+                "is_contract": True,
+                "contract_no": "777/2026/CCGD",
+                "reason": "Tim thay so CC: 777/2026/CCGD",
+                "text": "dummy preloaded text",
+            },
+        ) as scan_mock, patch(
+            "UPLOAD.batch_scan.extract",
+            return_value={
+                "web_form": {
+                    "ten_hop_dong": "Hop dong chuyen nhuong",
+                    "so_cong_chung": "777/2026/CCGD",
+                    "nhom_hop_dong": "Chuyen nhuong - Mua ban",
+                    "loai_tai_san": "Dat dai khong co tai san",
+                    "tai_san": "Thua dat ...",
+                },
+                "raw": {"file_goc": str(doc_path), "missing_web_form_fields": []},
+            },
+        ) as extract_mock:
+            manifest = run_batch_scan(batch_root, working_dir=workdir)
+
+        output_files = sorted((workdir / "output").glob("*.json"))
+        self.assertEqual(manifest["stats"]["candidates_found"], 1)
+        self.assertEqual(manifest["stats"]["extract_success"], 1)
+        self.assertEqual(manifest["stats"]["ready_for_upload"], 1)
+        self.assertEqual(len(output_files), 1)
+        self.assertIn("777_2026_CCGD", output_files[0].name)
+        scan_mock.assert_called_once_with(doc_path, include_text=True)
+        self.assertEqual(extract_mock.call_args.args[0], doc_path)
+        self.assertEqual(extract_mock.call_args.kwargs["scan_result"]["contract_no"], "777/2026/CCGD")
+        self.assertEqual(extract_mock.call_args.kwargs["preloaded_text"], "dummy preloaded text")
+
+    def test_batch_scan_progress_callback_reports_processing(self):
+        batch_root = self.root / "hoso"
+        docx_path = make_docx(
+            batch_root / "KhachTienDo" / "hop_dong.docx",
+            "So cong chung 888/2026/CCGD",
+        )
+        workdir = self.root / "work"
+        snapshots: list[dict] = []
+
+        with patch(
+            "UPLOAD.batch_scan.scan_docx_for_contract_no",
+            return_value={
+                "is_contract": True,
+                "contract_no": "888/2026/CCGD",
+                "reason": "Tim thay so CC: 888/2026/CCGD",
+                "text": "dummy text",
+            },
+        ), patch(
+            "UPLOAD.batch_scan.extract",
+            return_value={
+                "web_form": {
+                    "ten_hop_dong": "Hop dong",
+                    "so_cong_chung": "888/2026/CCGD",
+                    "nhom_hop_dong": "Khac",
+                    "loai_tai_san": "Tai san khac",
+                    "tai_san": "Tai san ...",
+                },
+                "raw": {"file_goc": str(docx_path), "missing_web_form_fields": []},
+            },
+        ):
+            manifest = run_batch_scan(
+                batch_root,
+                working_dir=workdir,
+                progress_callback=lambda snapshot: snapshots.append(snapshot),
+            )
+
+        self.assertEqual(manifest["stats"]["processed_files"], 1)
+        self.assertGreaterEqual(len(snapshots), 3)
+        self.assertEqual(snapshots[0]["stage"], "indexing")
+        self.assertEqual(snapshots[-1]["stage"], "done")
+        self.assertEqual(snapshots[-1]["processed_files"], 1)
+        self.assertEqual(snapshots[-1]["total_files"], 1)
 
     def test_batch_scan_retries_failed_file_even_if_older_than_modified_since(self):
         batch_root = self.root / "hoso"

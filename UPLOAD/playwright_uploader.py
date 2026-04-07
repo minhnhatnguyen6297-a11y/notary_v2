@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+from importlib import util as importlib_util
 import json
 import os
 import time
@@ -62,6 +64,12 @@ except ImportError:  # pragma: no cover
 
 
 QUEUE_STATUSES = ("extracted", "upload_failed", "prepared_dry_run", "prepared_partial")
+PLAYWRIGHT_MISSING_MESSAGE = (
+    "Chua cai Playwright. Scan/Extract van dung duoc. Muon upload, hay chay "
+    "'UPLOAD\\run_ui.bat' de bootstrap tu dong, hoac cai bang "
+    "'pip install -r UPLOAD/requirements.txt' va 'playwright install chromium'."
+)
+UPLOAD_LOG_PATH = BASE_DIR / "logs" / "playwright_uploader.log"
 
 
 @dataclass
@@ -95,9 +103,35 @@ def _default_log(message: str) -> None:
     print(message)
 
 
+def append_log_line(path: Path, message: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = f"{now_iso()} {message}\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
+def probe_playwright_runtime() -> tuple[bool, str]:
+    if importlib_util.find_spec("playwright") is None:
+        return False, PLAYWRIGHT_MISSING_MESSAGE
+
+    try:
+        importlib.import_module("playwright.sync_api")
+    except Exception as exc:
+        return False, f"Playwright chua san sang: {exc}"
+
+    return True, "Playwright package san sang cho dry-run upload."
+
+
 def sanitize_contract_no(value: str) -> str:
     text = str(value or "").strip()
     return text.replace("/", "_").replace("\\", "_")
+
+
+def normalize_web_contract_no(value: str) -> str:
+    text = str(value or "").strip().upper()
+    if text.endswith("/CCGD"):
+        text = text[:-5]
+    return text
 
 
 def load_uploader_settings(base_dir: Path = BASE_DIR) -> UploaderSettings:
@@ -160,7 +194,7 @@ def load_upload_queue(
             UploadRecord(
                 record_id=int(row_dict["id"]),
                 run_id=run_id,
-                contract_no=str(row_dict.get("contract_no") or upload_form.get("so_cong_chung") or ""),
+                contract_no=str(upload_form.get("so_cong_chung") or row_dict.get("contract_no") or ""),
                 status=str(row_dict.get("status") or ""),
                 output_json_path=output_json_path,
                 source_file=source_file,
@@ -194,7 +228,7 @@ def build_upload_form_data(payload: dict) -> dict:
     return {
         "ten_hop_dong": str(web_form.get("ten_hop_dong") or "").strip(),
         "ngay_cong_chung": str(web_form.get("ngay_cong_chung") or "").strip(),
-        "so_cong_chung": str(web_form.get("so_cong_chung") or "").strip(),
+        "so_cong_chung": normalize_web_contract_no(web_form.get("so_cong_chung") or ""),
         "tinh_trang": DEFAULT_STATUS_TEXT,
         "nhom_hop_dong": str(web_form.get("nhom_hop_dong") or "").strip(),
         "loai_tai_san": str(web_form.get("loai_tai_san") or "").strip(),
@@ -211,7 +245,7 @@ def build_upload_form_data(payload: dict) -> dict:
 
 
 def identify_missing_fields(upload_form: dict) -> list[str]:
-    critical_fields = ("ten_hop_dong", "so_cong_chung", "nhom_hop_dong", "loai_tai_san", "tai_san", "file_hop_dong")
+    critical_fields = ("ten_hop_dong", "so_cong_chung", "nhom_hop_dong", "loai_tai_san", "tai_san")
     return [field for field in critical_fields if not str(upload_form.get(field) or "").strip()]
 
 
@@ -225,10 +259,27 @@ class NamDinhUploaderSession:
     ):
         self.settings = settings
         self.working_dir = Path(working_dir)
-        self.log = log_callback or _default_log
+        self._log_callback = log_callback or _default_log
+        self.log_path = self.working_dir / "logs" / "playwright_uploader.log"
+        self.run_log_path: Path | None = None
         self._playwright = None
         self.browser = None
         self.context = None
+
+    def log(self, message: str) -> None:
+        append_log_line(self.log_path, message)
+        if self.run_log_path is not None:
+            append_log_line(self.run_log_path, message)
+        self._log_callback(message)
+
+    @staticmethod
+    def _literal_xpath(text: str) -> str:
+        if "'" not in text:
+            return f"'{text}'"
+        if '"' not in text:
+            return f'"{text}"'
+        parts = text.split("'")
+        return "concat(" + ", \"'\", ".join(f"'{part}'" for part in parts) + ")"
 
     def close(self) -> None:
         if self.context is not None:
@@ -255,9 +306,7 @@ class NamDinhUploaderSession:
             from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
             from playwright.sync_api import sync_playwright
         except Exception as exc:
-            raise RuntimeError(
-                "Chua cai Playwright. Hay cai 'playwright' va chay 'playwright install chromium'."
-            ) from exc
+            raise RuntimeError(PLAYWRIGHT_MISSING_MESSAGE) from exc
         return sync_playwright, PlaywrightTimeoutError
 
     def _ensure_context(self) -> None:
@@ -291,6 +340,8 @@ class NamDinhUploaderSession:
         stype = strategy.get("type")
         if stype == "css":
             return page.locator(strategy["value"]).first
+        if stype == "xpath":
+            return page.locator(strategy["value"]).first
         if stype == "text":
             return page.get_by_text(strategy["value"], exact=False).first
         if stype == "role":
@@ -300,57 +351,61 @@ class NamDinhUploaderSession:
                 return page.get_by_text(dynamic_text, exact=False).first
         return None
 
-    @staticmethod
-    def _xpath_literal(text: str) -> str:
-        if "'" not in text:
-            return f"'{text}'"
-        if '"' not in text:
-            return f'"{text}"'
-        parts = text.split("'")
-        return "concat(" + ", \"'\", ".join(f"'{part}'" for part in parts) + ")"
-
     def _label_locator_xpath(self, label_text: str, suffix_xpath: str):
-        literal = self._xpath_literal(label_text)
+        literal = self._literal_xpath(label_text)
         return (
-            f"xpath=(//*[self::label or self::span or self::div or self::p or self::small]"
-            f"[contains(normalize-space(.), {literal})])[1]/{suffix_xpath}"
+            f"xpath=((//label[contains(normalize-space(.), {literal})])[1])/{suffix_xpath}"
         )
 
-    def _find_control_locator(self, page, field_name: str, *, dynamic_text: str = ""):
-        conf = FORM_SELECTORS[field_name]
-        for strategy in conf.get("strategies", []):
-            locator = self._locator_from_strategy(page, strategy, dynamic_text=dynamic_text)
-            if locator is not None and locator.count() > 0:
-                return locator
-
-        label = conf.get("label", "")
-        kind = conf.get("kind")
-        if kind in {"text", "dropdown"}:
-            xpath = self._label_locator_xpath(
-                label,
-                "following::*[self::input and not(@type='hidden') and not(@type='file')][1]",
-            )
-            locator = page.locator(xpath).first
-            if locator.count() > 0:
-                return locator
-        if kind == "editor":
-            textarea = page.locator(
-                self._label_locator_xpath(label, "following::*[self::textarea][1]")
-            ).first
-            if textarea.count() > 0:
-                return textarea
-            editable = page.locator(
-                self._label_locator_xpath(label, "following::*[@contenteditable='true'][1]")
-            ).first
-            if editable.count() > 0:
-                return editable
-        if kind == "file":
-            locator = page.locator(
-                self._label_locator_xpath(label, "following::*[self::input and @type='file'][1]")
-            ).first
+    def _find_label_locator(self, page, label_text: str):
+        literal = self._literal_xpath(label_text)
+        candidates = [
+            f"xpath=(//label[contains(normalize-space(.), {literal})])[1]",
+            f"xpath=(//span[not(*) and contains(normalize-space(.), {literal})])[1]",
+            f"xpath=(//p[not(*) and contains(normalize-space(.), {literal})])[1]",
+            f"xpath=(//small[not(*) and contains(normalize-space(.), {literal})])[1]",
+        ]
+        for candidate in candidates:
+            locator = page.locator(candidate).first
             if locator.count() > 0:
                 return locator
         return None
+
+    def _resolve_control_locator(self, page, field_name: str, *, dynamic_text: str = ""):
+        conf = FORM_SELECTORS[field_name]
+        for index, strategy in enumerate(conf.get("strategies", []), start=1):
+            locator = self._locator_from_strategy(page, strategy, dynamic_text=dynamic_text)
+            if locator is not None and locator.count() > 0:
+                return locator, f"strategy#{index}:{strategy.get('type')}"
+
+        label = conf.get("label", "")
+        kind = conf.get("kind")
+        label_locator = self._find_label_locator(page, label)
+        if label_locator is None or label_locator.count() == 0:
+            return None, f"label_not_found:{label}"
+
+        if kind in {"text", "dropdown"}:
+            locator = label_locator.locator(
+                "xpath=following::*[self::input and not(@type='hidden') and not(@type='file')][1]"
+            ).first
+            if locator.count() > 0:
+                return locator, "label_following_input"
+        if kind == "editor":
+            editable = label_locator.locator("xpath=following::*[@contenteditable='true'][1]").first
+            if editable.count() > 0:
+                return editable, "label_following_editor"
+            textarea = label_locator.locator("xpath=following::*[self::textarea][1]").first
+            if textarea.count() > 0:
+                return textarea, "label_following_textarea"
+        if kind == "file":
+            locator = label_locator.locator("xpath=following::*[self::input and @type='file'][1]").first
+            if locator.count() > 0:
+                return locator, "label_following_file"
+        return None, f"locator_not_found:{field_name}"
+
+    def _find_control_locator(self, page, field_name: str, *, dynamic_text: str = ""):
+        locator, _ = self._resolve_control_locator(page, field_name, dynamic_text=dynamic_text)
+        return locator
 
     def _is_login_page(self, page) -> bool:
         if "dang-nhap" in page.url.lower():
@@ -419,42 +474,65 @@ class NamDinhUploaderSession:
             page.close()
 
     def _fill_text(self, page, field_name: str, value: str) -> bool:
-        locator = self._find_control_locator(page, field_name)
+        locator, source = self._resolve_control_locator(page, field_name)
         if locator is None or locator.count() == 0:
+            self.log(f"[UPLOAD][FIELD] {field_name}: locator not found ({source})")
             return False
-        locator.click()
-        locator.fill(value)
-        locator.press("Tab")
-        return True
+        try:
+            locator.click()
+            locator.fill(value)
+            locator.press("Tab")
+            self.log(f"[UPLOAD][FIELD] {field_name}: filled via {source}")
+            return True
+        except Exception as exc:
+            self.log(f"[UPLOAD][FIELD] {field_name}: fill_text failed via {source}: {exc}")
+            return False
 
     def _fill_dropdown(self, page, field_name: str, value: str) -> bool:
-        locator = self._find_control_locator(page, field_name)
+        locator, source = self._resolve_control_locator(page, field_name)
         if locator is None or locator.count() == 0:
+            self.log(f"[UPLOAD][FIELD] {field_name}: locator not found ({source})")
             return False
-        locator.click()
         try:
+            try:
+                tag_name = locator.evaluate("(el) => el.tagName.toLowerCase()")
+            except Exception:
+                tag_name = ""
+            current_text = self._read_field_value(page, field_name).strip()
+            if tag_name != "input" and current_text and current_text.lower() == value.strip().lower():
+                self.log(f"[UPLOAD][FIELD] {field_name}: already set via {source}")
+                return True
+            try:
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(100)
+            except Exception:
+                pass
+            locator.click()
             locator.fill("")
-        except Exception:
-            pass
-        try:
             locator.type(value, delay=25)
         except Exception:
             try:
+                locator.click()
                 locator.fill(value)
-            except Exception:
+            except Exception as exc:
+                self.log(f"[UPLOAD][FIELD] {field_name}: fill_dropdown typing failed via {source}: {exc}")
                 return False
         page.wait_for_timeout(300)
-        option = page.get_by_text(value, exact=False).first
+        option = page.get_by_role("option", name=value, exact=False).first
+        if option.count() == 0:
+            option = page.get_by_text(value, exact=False).first
         if option.count() > 0:
             option.click()
         else:
             locator.press("Enter")
         page.wait_for_timeout(200)
+        self.log(f"[UPLOAD][FIELD] {field_name}: dropdown filled via {source}")
         return True
 
     def _fill_editor(self, page, field_name: str, value: str) -> bool:
-        locator = self._find_control_locator(page, field_name)
+        locator, source = self._resolve_control_locator(page, field_name)
         if locator is None or locator.count() == 0:
+            self.log(f"[UPLOAD][FIELD] {field_name}: locator not found ({source})")
             return False
         try:
             tag_name = locator.evaluate("(el) => el.tagName.toLowerCase()")
@@ -462,51 +540,51 @@ class NamDinhUploaderSession:
             tag_name = ""
 
         if tag_name == "textarea":
-            locator.fill(value)
-            return True
+            try:
+                locator.fill(value)
+                self.log(f"[UPLOAD][FIELD] {field_name}: textarea filled via {source}")
+                return True
+            except Exception as exc:
+                self.log(f"[UPLOAD][FIELD] {field_name}: textarea fill failed via {source}: {exc}")
+                return False
 
         try:
             locator.click()
-            locator.evaluate(
-                """(el, val) => {
-                    el.focus();
-                    if (el.tagName.toLowerCase() === 'textarea') {
-                        el.value = val;
-                    } else {
-                        el.innerHTML = '';
-                        el.textContent = val;
-                    }
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    el.dispatchEvent(new Event('blur', { bubbles: true }));
-                }""",
-                value,
-            )
+            locator.fill(value)
+            locator.press("Tab")
+            self.log(f"[UPLOAD][FIELD] {field_name}: editor filled via {source}")
             return True
-        except Exception:
+        except Exception as exc:
+            self.log(f"[UPLOAD][FIELD] {field_name}: editor fill failed via {source}: {exc}")
             return False
 
     def _upload_file(self, page, file_path: Path) -> bool:
-        locator = self._find_control_locator(page, "file_hop_dong", dynamic_text=file_path.name)
+        locator, source = self._resolve_control_locator(page, "file_hop_dong", dynamic_text=file_path.name)
         if locator is None or locator.count() == 0:
+            self.log(f"[UPLOAD][FIELD] file_hop_dong: locator not found ({source})")
             return False
-        locator.set_input_files(str(file_path))
         try:
+            locator.set_input_files(str(file_path))
             page.wait_for_function(
                 """(selector) => {
                     const el = document.querySelector(selector);
                     return !!(el && el.files && el.files.length > 0);
                 }""",
-                "input[type='file']",
+                arg="#hopdong\\.fileHopdong",
                 timeout=5000,
             )
+            self.log(f"[UPLOAD][FIELD] file_hop_dong: uploaded via {source} -> {file_path.name}")
             return True
-        except Exception:
-            return page.get_by_text(file_path.name, exact=False).count() > 0
+        except Exception as exc:
+            success = page.get_by_text(file_path.name, exact=False).count() > 0
+            self.log(
+                f"[UPLOAD][FIELD] file_hop_dong: upload {'ok' if success else 'failed'} via {source}: {exc}"
+            )
+            return success
 
     def _read_field_value(self, page, field_name: str) -> str:
         if field_name == "file_hop_dong":
-            locator = self._find_control_locator(page, field_name)
+            locator, _ = self._resolve_control_locator(page, field_name)
             if locator is None or locator.count() == 0:
                 return ""
             try:
@@ -514,7 +592,7 @@ class NamDinhUploaderSession:
             except Exception:
                 return ""
 
-        locator = self._find_control_locator(page, field_name)
+        locator, _ = self._resolve_control_locator(page, field_name)
         if locator is None or locator.count() == 0:
             return ""
         try:
@@ -552,13 +630,17 @@ class NamDinhUploaderSession:
                 "actual": actual,
                 "success": success,
             }
+            self.log(
+                f"[UPLOAD][VERIFY] {record.contract_no} {field_name}: "
+                f"expected={expected_value!r} actual={actual!r} success={success}"
+            )
             if not success:
                 partial = True
         return verify_data, partial
 
     def _prepare_record(self, record: UploadRecord, artifact_dir: Path):
         if not record.source_file.exists():
-            raise FileNotFoundError(f"File goc khong ton tai: {record.source_file}")
+            self.log(f"[UPLOAD] File goc khong ton tai, tiep tuc khong upload file: {record.source_file}")
 
         page = self.context.new_page()
         page.goto(self.settings.create_url, wait_until="domcontentloaded")
@@ -568,25 +650,36 @@ class NamDinhUploaderSession:
             page.goto(self.settings.create_url, wait_until="domcontentloaded")
             page.wait_for_load_state("networkidle")
 
+        field_results: dict[str, dict] = {}
         for field_name in FORM_FIELD_ORDER:
             value = str(record.upload_form.get(field_name, "") or "")
             if field_name == "file_hop_dong":
                 if value:
-                    self._upload_file(page, Path(value))
+                    field_results[field_name] = {"value": Path(value).name, "success": self._upload_file(page, Path(value))}
                 continue
             if not value:
+                field_results[field_name] = {"value": "", "success": False, "reason": "empty_value"}
                 continue
             field_kind = FORM_SELECTORS[field_name]["kind"]
             if field_kind == "text":
-                self._fill_text(page, field_name, value)
+                field_results[field_name] = {"value": value, "success": self._fill_text(page, field_name, value)}
             elif field_kind == "dropdown":
-                self._fill_dropdown(page, field_name, value)
+                field_results[field_name] = {"value": value, "success": self._fill_dropdown(page, field_name, value)}
             elif field_kind == "editor":
-                self._fill_editor(page, field_name, value)
+                field_results[field_name] = {"value": value, "success": self._fill_editor(page, field_name, value)}
 
         verify_data, partial = self._verify_record(page, record)
         screenshot_path = artifact_dir / f"before_save_{sanitize_contract_no(record.contract_no)}.png"
+        debug_json_path = artifact_dir / f"debug_{sanitize_contract_no(record.contract_no)}.json"
         page.screenshot(path=str(screenshot_path), full_page=True)
+        debug_payload = {
+            "contract_no": record.contract_no,
+            "source_file": str(record.source_file),
+            "page_url": page.url,
+            "field_results": field_results,
+            "verify": verify_data,
+        }
+        debug_json_path.write_text(json.dumps(debug_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         if self.settings.post_prepare_delay_ms > 0:
             page.wait_for_timeout(self.settings.post_prepare_delay_ms)
 
@@ -595,6 +688,7 @@ class NamDinhUploaderSession:
             "verify_json": json.dumps(verify_data, ensure_ascii=False, indent=2),
             "artifact_dir": str(artifact_dir),
             "screenshot": str(screenshot_path),
+            "debug_json": str(debug_json_path),
         }
 
     def prepare_manifest(self, manifest_path: Path | str, stop_event) -> dict:
@@ -616,6 +710,8 @@ class NamDinhUploaderSession:
 
         artifact_dir = self.working_dir / "upload_runs" / f"{now_iso().replace(':', '').replace('-', '')}_{run_id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
+        self.run_log_path = artifact_dir / "dry_run_trace.log"
+        self.log(f"[UPLOAD] Artifact dir: {artifact_dir}")
         self.ensure_authenticated()
 
         prepared_count = 0
@@ -640,7 +736,7 @@ class NamDinhUploaderSession:
                     )
                     prepared_count += 1
                     self.log(
-                        f"[UPLOAD] {record.contract_no}: {result['status']} -> {result['screenshot']}"
+                        f"[UPLOAD] {record.contract_no}: {result['status']} -> {result['screenshot']} | debug={result['debug_json']}"
                     )
                 except Exception as exc:
                     errors.append({"record_id": record.record_id, "contract_no": record.contract_no, "error": str(exc)})
@@ -671,4 +767,5 @@ class NamDinhUploaderSession:
             )
             return summary
         finally:
+            self.run_log_path = None
             conn.close()
