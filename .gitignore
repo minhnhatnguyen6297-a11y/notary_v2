@@ -10,3 +10,21 @@ logs/
 tmp/
 deploy/vps/ssh_credentials.env
 deploy/vps/bin/
+
+# UPLOAD tool - generated outputs
+UPLOAD/output/
+UPLOAD/runs/
+UPLOAD/upload_runs/
+UPLOAD/*.json
+UPLOAD/.ui_setup_state.json
+UPLOAD/nd_storage_state.json
+
+# Claude local config
+.claude/settings.local.json
+
+# Test data / fixtures (không phải source code)
+ocr test/
+ID template/
+
+# Runtime dirs
+runtime/
