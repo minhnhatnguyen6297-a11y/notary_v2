@@ -7,7 +7,7 @@ from pathlib import Path
 
 from docx import Document
 
-from tools.upload_lab.extract_contract import extract, find_tai_san
+from tools.upload_lab.extract_contract import extract, find_tai_san, guess_loai_tai_san
 
 
 def make_docx(path: Path, *paragraphs: str) -> Path:
@@ -68,7 +68,7 @@ class UploadLabExtractContractTests(unittest.TestCase):
         self.assertIn("Thửa đất số: 20", tai_san)
         self.assertNotIn("Hai vợ chồng chúng tôi cam kết", tai_san)
 
-    def test_extract_commitment_keeps_both_spouses_and_asset_type(self):
+    def test_extract_commitment_keeps_both_spouses_and_classifies_land_only(self):
         docx_path = make_docx(
             self.root / "cam_ket_tai_san_rieng.docx",
             "VĂN BẢN CAM KẾT TÀI SẢN RIÊNG",
@@ -94,10 +94,27 @@ class UploadLabExtractContractTests(unittest.TestCase):
 
         self.assertEqual(payload["raw"]["document_kind"], "asset_commitment")
         self.assertEqual(payload["web_form"]["ten_hop_dong"], "Văn bản cam kết tài sản riêng")
-        self.assertEqual(payload["web_form"]["loai_tai_san"], "Đất đai có tài sản")
+        self.assertEqual(payload["web_form"]["nhom_hop_dong"], "Thoả thuận - Cam kết")
+        self.assertEqual(payload["web_form"]["loai_tai_san"], "Đất đai không có tài sản")
         self.assertIn("Nguyễn Văn Nam", duong_su)
         self.assertIn("Nguyễn Thị Oanh", duong_su)
         self.assertNotIn("Hai vợ chồng chúng tôi cam kết", tai_san)
+
+    def test_guess_loai_tai_san_detects_real_attached_asset_details_after_stripping_certificate_heading_noise(self):
+        tai_san = "\n".join(
+            [
+                "Quyền sử dụng đất có địa chỉ tại: thôn A, xã B.",
+                "Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất số: AB 123456.",
+                "Nhà ở:",
+                "- Diện tích xây dựng: 120 m2",
+                "- Diện tích sàn: 240 m2",
+                "- Kết cấu: Tường gạch, mái bê tông cốt thép",
+            ]
+        )
+
+        loai_tai_san = guess_loai_tai_san(tai_san, "Văn bản cam kết tài sản riêng")
+
+        self.assertEqual(loai_tai_san, "Đất đai có tài sản")
 
     def test_generic_title_strips_duoc_giao_ket_boi_suffix(self):
         docx_path = make_docx(

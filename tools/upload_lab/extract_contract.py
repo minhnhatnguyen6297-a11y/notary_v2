@@ -10,7 +10,7 @@ Ket qua:
     - Luu file .json cung thu muc
 
 Cai dat:
-    pip install python-docx pywin32
+    pip install python-docx
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ NHOM_HD_MAP = {
     "ủy quền": "Ủy quyền",
     "di chúc": "Di chúc",
     "đặt cọc": "Đặt cọc",
-    "thỏa thuận": "Thỏa thuận - Cam kết",
-    "cam kết": "Thỏa thuận - Cam kết",
+    "thỏa thuận": "Thoả thuận - Cam kết",
+    "cam kết": "Thoả thuận - Cam kết",
     "góp vốn": "Góp vốn - Hợp tác",
     "hợp tác": "Góp vốn - Hợp tác",
     "thừa kế": "Thừa kế (khai nhận - phân chia di sản thừa kế )",
@@ -101,10 +101,10 @@ def _append_table_lines(lines: list[str], tables) -> None:
 # ============================================================
 def read_doc_via_ifilter(filepath) -> str:
     """Trich xuat text tu .doc bang Windows IFilter (cung co che voi Agent Ransack).
-    WHY: Nhanh hon Word COM 10-20x (0.1-0.3s/file vs 3-5s/file), khong can mo Word UI.
+    WHY: Doc .doc tren Windows ma khong can Word/Office.
          Dung cho scan (tim so hop dong) — chi can plain text, khong can table structure.
     RISK: IFilter tra plain text thuan — mat cau truc bang va header/footer.
-          Khong dung cho extract() (can table), chi dung cho scan_docx_for_contract_no().
+          Flow extract() cho .doc se chay theo plain text nay.
     REQUIRE: query.dll (co san tren Windows 7+, khong can cai them).
     """
     import ctypes
@@ -213,72 +213,14 @@ def read_doc_via_ifilter(filepath) -> str:
         ole32.CoUninitialize()
 
 
-def read_doc_via_word_com(filepath) -> str:
-    """Doc .doc bang Word COM — lay ca table + header/footer.
-    WHY: Dung cho extract() can cau truc day du. Cham (3-5s/file) nhung chinh xac nhat.
-    RISK: neu Word dang bi lock file thi se raise; caller nen catch Exception.
-    """
-    import tempfile
-    import pythoncom
-    import win32com.client as win32
-
-    abs_path = str(Path(filepath).resolve())
-    pythoncom.CoInitialize()
-    word = None
-    doc = None
-    tmp_path = None
-    try:
-        word = win32.Dispatch("Word.Application")
-        word.Visible = False
-        word.DisplayAlerts = False
-        doc = word.Documents.Open(abs_path, ReadOnly=True, AddToRecentFiles=False)
-
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".docx")
-        os.close(tmp_fd)
-        # wdFormatXMLDocument = 12
-        doc.SaveAs2(tmp_path, FileFormat=12)
-        doc.Close(SaveChanges=False)
-        doc = None
-
-        from docx import Document
-        d = Document(tmp_path)
-        lines: list[str] = []
-        _append_text_lines(lines, (p.text for p in d.paragraphs))
-        _append_table_lines(lines, d.tables)
-        for section in d.sections:
-            _append_text_lines(lines, (p.text for p in section.header.paragraphs))
-            _append_text_lines(lines, (p.text for p in section.footer.paragraphs))
-        return "\n".join(lines)
-    finally:
-        if doc is not None:
-            try:
-                doc.Close(SaveChanges=False)
-            except Exception:
-                pass
-        if word is not None:
-            try:
-                word.Quit()
-            except Exception:
-                pass
-        if tmp_path and Path(tmp_path).exists():
-            try:
-                Path(tmp_path).unlink()
-            except Exception:
-                pass
-        pythoncom.CoUninitialize()
-
-
 def read_docx(filepath, *, use_ifilter_for_doc: bool = False):
     """Doc .docx hoac .doc -> text thuan.
     - .docx: dung python-docx truc tiep (nhanh).
-    - .doc + use_ifilter_for_doc=True: IFilter (nhanh, plain text).
-    - .doc + use_ifilter_for_doc=False: Word COM (cham, day du cau truc).
+    - .doc: dung IFilter/plain text tren Windows, khong can Word.
     """
     path = Path(filepath)
     if path.suffix.lower() == ".doc":
-        if use_ifilter_for_doc:
-            return read_doc_via_ifilter(filepath)
-        return read_doc_via_word_com(filepath)
+        return read_doc_via_ifilter(filepath)
 
     from docx import Document
     doc = Document(str(filepath))
@@ -289,92 +231,6 @@ def read_docx(filepath, *, use_ifilter_for_doc: bool = False):
         _append_text_lines(lines, (p.text for p in section.header.paragraphs))
         _append_text_lines(lines, (p.text for p in section.footer.paragraphs))
     return "\n".join(lines)
-
-
-def batch_convert_doc_to_docx(
-    folder: Path,
-    *,
-    skip_existing: bool = True,
-    log_callback=None,
-) -> dict:
-    """Convert toan bo .doc trong folder sang .docx cung vi tri, dung 1 Word instance.
-    WHY: Sau khi convert 1 lan, moi lan scan sau doc .docx truc tiep (khong can Word/IFilter).
-    File .doc goc giu nguyen. Bo qua ~$ temp file.
-    Returns: {"converted": int, "skipped": int, "failed": int, "errors": list}
-    """
-    import pythoncom
-    import win32com.client as win32
-
-    def log(msg: str) -> None:
-        if log_callback:
-            log_callback(msg)
-
-    folder = Path(folder)
-    doc_files = sorted(
-        f for f in folder.rglob("*.doc")
-        if not f.name.startswith("~$")
-    )
-    total = len(doc_files)
-    if total == 0:
-        log("[CONVERT] Khong tim thay file .doc nao.")
-        return {"converted": 0, "skipped": 0, "failed": 0, "errors": []}
-
-    log(f"[CONVERT] Tim thay {total} file .doc. Bat dau chuyen doi...")
-
-    stats = {"converted": 0, "skipped": 0, "failed": 0, "errors": []}
-
-    pythoncom.CoInitialize()
-    word = None
-    try:
-        word = win32.Dispatch("Word.Application")
-        word.Visible = False
-        word.DisplayAlerts = False
-
-        for idx, doc_path in enumerate(doc_files, start=1):
-            prefix = f"[CONVERT] {idx}/{total}"
-            docx_path = doc_path.with_suffix(".docx")
-            doc = None
-
-            if skip_existing and docx_path.exists():
-                log(f"{prefix} skip (da co docx): {doc_path.name}")
-                stats["skipped"] += 1
-                continue
-
-            try:
-                doc = word.Documents.Open(
-                    str(doc_path.resolve()),
-                    ReadOnly=True,
-                    AddToRecentFiles=False,
-                )
-                # wdFormatXMLDocument = 12
-                doc.SaveAs2(str(docx_path.resolve()), FileFormat=12)
-                doc.Close(SaveChanges=False)
-                doc = None
-                log(f"{prefix} OK: {doc_path.name} -> {docx_path.name}")
-                stats["converted"] += 1
-            except Exception as exc:
-                log(f"{prefix} LOI: {doc_path.name} — {exc}")
-                stats["errors"].append({"file": str(doc_path), "error": str(exc)})
-                stats["failed"] += 1
-            finally:
-                if doc is not None:
-                    try:
-                        doc.Close(SaveChanges=False)
-                    except Exception:
-                        pass
-    finally:
-        if word is not None:
-            try:
-                word.Quit()
-            except Exception:
-                pass
-        pythoncom.CoUninitialize()
-
-    log(
-        f"[CONVERT] Xong. converted={stats['converted']}, "
-        f"skipped={stats['skipped']}, failed={stats['failed']}"
-    )
-    return stats
 
 
 def _normalize_scan_contract_no(contract_no: str) -> str:
@@ -814,22 +670,59 @@ def guess_nhom_hd(ten_hd):
     return "Khác"
 
 
+LAND_CERTIFICATE_HEADING_NOISE_PATTERNS = (
+    r"giay chung nhan quyen su dung dat\s*,?\s*quyen so huu nha o va tai san khac gan lien voi dat",
+    r"giay chung nhan quyen su dung dat\s*,?\s*quyen so huu tai san gan lien voi dat",
+    r"giay chung nhan quyen su dung dat\s*,?\s*quyen so huu nha o",
+)
+
+LAND_WITH_ASSET_TITLE_MARKERS = (
+    "quyen su dung dat va tai san gan lien voi dat",
+    "nha o va quyen su dung dat o",
+    "mua ban nha o",
+)
+
+LAND_ATTACHED_ASSET_DETAIL_PATTERNS = (
+    r"\bnha o\b\s*:",
+    r"\bquyen so huu nha o\b",
+    r"\bnha o va quyen su dung dat o\b",
+    r"\bcong trinh xay dung\b\s*:",
+    r"\btai san gan lien voi dat\b\s*:",
+    r"\btai san khac gan lien voi dat\b\s*:",
+    r"\bdien tich xay dung\b",
+    r"\bdien tich san\b",
+    r"\bket cau\b",
+    r"\bso tang\b",
+    r"\bhinh thuc so huu\b",
+    r"\bcap \(hang\)\b",
+    r"\bcap cong trinh\b",
+)
+
+
+def _strip_land_certificate_heading_noise(text_folded: str) -> str:
+    cleaned = str(text_folded or "")
+    for pattern in LAND_CERTIFICATE_HEADING_NOISE_PATTERNS:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _has_attached_land_asset_details(text_folded: str) -> bool:
+    cleaned = _strip_land_certificate_heading_noise(text_folded)
+    return any(
+        re.search(pattern, cleaned, re.IGNORECASE)
+        for pattern in LAND_ATTACHED_ASSET_DETAIL_PATTERNS
+    )
+
+
 def guess_loai_tai_san(tai_san, ten_hd):
-    combined = _fold_text(f"{tai_san} {ten_hd}")
+    tai_san_fold = _fold_text(tai_san)
+    title_fold = _fold_text(ten_hd)
+    combined = f"{tai_san_fold} {title_fold}".strip()
 
     if "quyen su dung dat" in combined:
-        indicators = (
-            "va nha o",
-            "va tai san",
-            "nha o gan lien",
-            "cong trinh xay dung",
-            "tai san tren dat",
-            "tai san gan lien voi dat",
-            "tai san khac gan lien voi dat",
-            "nha o va quyen su dung dat o",
-            "quyen so huu nha o",
-        )
-        if any(keyword in combined for keyword in indicators):
+        if any(marker in title_fold for marker in LAND_WITH_ASSET_TITLE_MARKERS):
+            return "Đất đai có tài sản"
+        if _has_attached_land_asset_details(tai_san_fold):
             return "Đất đai có tài sản"
         return "Đất đai không có tài sản"
 

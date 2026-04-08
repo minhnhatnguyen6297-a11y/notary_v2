@@ -1,116 +1,99 @@
-# Trích xuất Hợp đồng và Batch Scan Folder
+# Upload Tool Standalone
 
-## Cài đặt
+## Chay lan dau
 
-```bash
-double-click tools\upload_lab\run_ui.bat
+Double-click `run_ui.bat`.
+
+Launcher se tu:
+- tim Python 3.10+ san co
+- neu chua co thi thu cai qua `winget`, neu that bai se tai installer Python tu `python.org`
+- tao `.venv`
+- cai dependency tu `requirements.txt`
+- cai `playwright chromium`
+- mo giao dien
+
+Luu y:
+- Lan dau can Internet
+- Khong can Microsoft Word/Office
+- Moi du lieu runtime duoc tao ngay trong thu muc tool: `output`, `runs`, `logs`, `downloads`, `upload_runs`, `registry.sqlite3`
+
+Neu can tao bo phat hanh sach:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_standalone_release.ps1
 ```
 
-`run_ui.bat` sẽ tự:
-- tạo `tools/upload_lab/.venv` nếu chưa có
-- cài dependency từ `tools/upload_lab/requirements.txt`
-- cài `playwright chromium` một lần
-- mở UI sau khi bootstrap xong
+## Cau hinh uploader lan dau
 
-Neu muon cai tay:
+Tab `Upload Playwright` se tu nhac cau hinh neu:
+- chua co `.env`
+- thieu `ND_USERNAME` hoac `ND_PASSWORD`
+- chua co `nd_storage_state.json`
 
-```bash
-python -m pip install -r tools/upload_lab/requirements.txt
-python -m playwright install chromium
-```
+Flow dung:
+1. Mo tab `Upload Playwright`
+2. Bam `Cau hinh uploader`
+3. Dien `Base URL`, `Login URL`, `Create URL`, tai khoan, mat khau
+4. Bam `Luu va dang nhap`
+5. Tool se tu dang nhap va tao `nd_storage_state.json`
 
-## 1. Trích xuất một file `.docx` hoặc `.doc`
+File `.env` duoc tao tu `.env.example` neu thieu.
 
-```bash
-python extract_contract.py "D:\hoso\hop_dong.docx"
-python extract_contract.py "D:\hoso\hop_dong.doc"
-```
+## Batch scan
 
-Kết quả:
-- In JSON ra màn hình
-- Tự lưu file `*_extracted.json` cùng thư mục với file gốc
+Tab `Batch Scan Folder`:
+- browse folder tong
+- nhap `modified since` neu can (`YYYY-MM-DD` hoac `DD/MM/YYYY`)
+- tick `full rescan` neu muon quet lai toan bo
+- bam `Chay Batch Scan`
 
-## 2. Batch scan cả folder tổng
+Batch scan:
+- ho tro ca `.docx` va `.doc`
+- bo qua `~$*.docx` va `~$*.doc`
+- tim so cong chung trong noi dung file Word
+- trich xuat JSON
+- ghi output vao `output/`
+- ghi manifest vao `runs/`
+- ghi registry vao `registry.sqlite3`
 
-Script `batch_scan.py` sẽ:
-- Cho chọn folder tổng bằng hộp thoại Windows, hoặc nhận `--folder`
-- Quét đệ quy tối đa 3 tầng
-- Xử lý cả `.docx` và `.doc`, bỏ qua `~$*.docx` và `~$*.doc`
-- Tìm file hợp đồng bằng số công chứng dạng `123/2026/CCGD` trong nội dung Word
-- Gọi `extract_contract.py` để trích xuất JSON
-- Ghi output vào `tools/upload_lab/output/`
-- Ghi manifest từng lần chạy vào `tools/upload_lab/runs/`
-- Ghi registry SQLite vào `tools/upload_lab/registry.sqlite3`
-- Ô `modified since` nhận cả `YYYY-MM-DD` và `DD/MM/YYYY`
+## Trich xuat 1 file
 
-### Cách dùng
+Tab `Trich Xuat 1 File`:
+- chon 1 file Word (`.docx` hoac `.doc`)
+- bam `Trich Xuat 1 File`
 
-```bash
-# Mở hộp thoại chọn folder
-python batch_scan.py
+Ket qua:
+- in log trong UI
+- luu file `*_extracted.json` canh file goc
 
-# Chỉ định folder trực tiếp
-python batch_scan.py --folder "D:\HoSo"
+## Upload Playwright
 
-# Chỉ quét file sửa từ ngày 2026-04-01 trở đi
-python batch_scan.py --folder "D:\HoSo" --modified-since 2026-04-01
+Luong dung:
+1. Chay batch scan truoc de tao `manifest`
+2. Mo tab `Upload Playwright`
+3. Chon file manifest trong `runs/`
+4. Chon file Excel doi chieu hoac bam `Tai tu web`
+5. Bam `Refresh Queue`
+6. Bam `Start Dry-run`
 
-# Quét lại toàn bộ, bỏ qua mốc ngày
-python batch_scan.py --folder "D:\HoSo" --full-rescan
-```
+Tool se:
+- doc queue theo `run_id` trong manifest
+- doi chieu cot A cua file Excel so cong chung
+- loai cac ho so trung so da ton tai tren web
+- mo tung tab Playwright va dung truoc nut `Luu`
 
-## 3. Giao diện UI đơn giản
-
-Neu khong muon go lenh, co the mo UI bang 1 trong 2 cach:
-
-```bash
-python ui_runner.py
-```
-
-hoac double-click:
-
-```text
-tools/upload_lab/run_ui.bat
-```
-
-UI hien tai co 3 man hinh:
-- `Batch Scan Folder`: browse folder tong, nhap `modified since` neu can, tick `full rescan`, roi bam `Chay Batch Scan`
-- `Trich Xuat 1 File`: browse 1 file `.docx` hoặc `.doc`, roi bam `Trich Xuat 1 File`
-- `Upload Playwright`: chon manifest, refresh queue, `Start Dry-run`, `Stop`, `Finalize Selected`
-- Log tong cua uploader: `tools/upload_lab/logs/playwright_uploader.log`
-- Moi dry-run chunk se ghi them `dry_run_trace.log` va `debug_<so_cong_chung>.json` trong thu muc artifact `tools/upload_lab/upload_runs/...`
-
-UI se hien log ngay trong cua so, thanh tien do batch, toc do xu ly, ETA va thong bao duong dan output khi chay xong.
-
-## 4. Upload Playwright dry-run
-
-Luong su dung:
-- Chay `Batch Scan Folder` truoc de tao `manifest` va `output`
-- Mo tab `Upload Playwright`
-- Browse file manifest trong `tools/upload_lab/runs/`
-- Bam `Refresh Queue`
-- Bam `Start Dry-run`
-
-Bot se:
-- doc dung batch tu `manifest` duoc chon
-- query `registry.sqlite3` theo `run_id`
-- mo toi da `ND_MAX_PREPARED_TABS` tab
-- tu dien form va upload file
-- dung truoc nut `Luu`
-
-Sau khi nguoi dung da tu ra soat, sua va bam `Luu` xong:
+Sau khi da tu kiem tra va bam `Luu` tren web:
 - quay lai UI
-- chon cac record da luu thanh cong
+- chon cac record da xong
 - bam `Finalize Selected`
 
-Neu batch con ho so chua xu ly:
-- dong cac tab cu neu da xong
+Neu van con record chua xu ly:
 - bam `Start Dry-run` lai tren cung manifest
-- bot se tu bo qua record `uploaded_success` va lay chunk tiep theo
+- tool se lay chunk tiep theo
 
-## 5. Cau hinh uploader
+## File cau hinh
 
-Tao file `.env` trong `tools/upload_lab/` dua theo mau `.env.example`:
+Mau `.env.example`:
 
 ```env
 ND_BASE_URL=https://congchung.namdinh.gov.vn
@@ -118,47 +101,28 @@ ND_LOGIN_URL=https://congchung.namdinh.gov.vn
 ND_CREATE_URL=https://congchung.namdinh.gov.vn/ho-so-cong-chung/tao-moi-nhanh
 ND_USERNAME=
 ND_PASSWORD=
-ND_STORAGE_STATE_PATH=tools/upload_lab/nd_storage_state.json
+ND_STORAGE_STATE_PATH=nd_storage_state.json
 ND_BROWSER_CHANNEL=chromium
 ND_MAX_PREPARED_TABS=10
 ND_POST_PREPARE_DELAY_MS=1500
 ```
 
-## Quy tắc nhận diện file hợp đồng
+## Output va log
 
-- Bắt buộc phải tìm thấy số công chứng trong nội dung Word (`.docx` hoặc `.doc`)
-- Pattern hiện tại đang khóa năm: `\d+/2026/CCGD`
-- Các keyword `HĐ`, `HD`, `hop dong`, `hợp đồng` chỉ là tín hiệu phụ, không đủ để auto flow nếu không có số công chứng
+- `output/<contract_no>_<hash>.json`
+- `runs/<timestamp>.json`
+- `registry.sqlite3`
+- `logs/playwright_uploader.log`
+- `upload_runs/<timestamp_runid>/`
 
-## Output batch scan
+Moi artifact dry-run thuong gom:
+- `dry_run_trace.log`
+- `before_save_<so_cong_chung>.png`
+- `debug_<so_cong_chung>.json`
 
-- `tools/upload_lab/output/<contract_no>_<hash>.json`
-- `tools/upload_lab/runs/<timestamp>.json`
-- `tools/upload_lab/registry.sqlite3`
-- `tools/upload_lab/upload_runs/<timestamp_runid>/`
+## Troubleshooting nhanh
 
-Ví dụ:
-
-```text
-tools/upload_lab/
-├── batch_scan.py
-├── extract_contract.py
-├── output/
-│   └── 428_2026_CCGD_ab12cd34.json
-├── runs/
-│   └── 2026-04-06_143022.json
-├── upload_runs/
-│   └── 20260406T170000_run1234/
-└── registry.sqlite3
-```
-
-## Lưu ý
-
-- Hỗ trợ `.docx` và `.doc`
-- `.doc` khi scan số công chứng dùng IFilter nên nhanh và không cần Word
-- `.doc` khi trích xuất JSON mặc định dùng IFilter/plain text nên nhanh, khong goi Word COM trong flow thuong
-- File đã `upload_failed` hoặc `extract_failed` vẫn được retry, kể cả khi cũ hơn `--modified-since`
-- Nếu một `contract_no` đã có trạng thái `uploaded_success` trong registry thì batch scan sẽ skip các file mới cùng số đó
-- Muốn đổi tên công chứng viên, thư ký mặc định thì sửa trong `extract_contract.py`
-- Upload Playwright hien la `dry-run`: bot khong tu bam `Luu`
-- Queue uploader chi lay record tu `manifest` duoc chon, khong quet ca backlog cu
+- Thieu Python/Playwright: chay lai `run_ui.bat`
+- Thieu `openpyxl`: chay lai `run_ui.bat`
+- Khong upload duoc vi chua dang nhap: mo `Cau hinh uploader` va `Luu va dang nhap`
+- Khong doi chieu duoc Excel: kiem tra file export va cot A
