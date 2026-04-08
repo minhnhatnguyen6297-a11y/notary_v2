@@ -3,6 +3,17 @@
 Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
 Cap nhat: 01/04/2026.
 
+## Nguyen tac van hanh mac dinh
+- Mac dinh phat trien va test tren local.
+- VPS la moi truong chay/deploy; chi thao tac tren VPS khi can cai dat, restart service, xem log hoac dong bo ban da chot.
+- Truoc khi day len VPS, local phai ro trang thai git va commit/push day du.
+- Tai lieu workflow VPS: `docs/VPS_WORKFLOW.md`.
+- Sau khi sua/cai dat tren VPS, phai uu tien restart va kiem tra lai:
+  - `bash install_vps.sh --skip-system-packages` neu co doi dependency
+  - `bash deploy/vps/manage_services.sh restart`
+  - `bash deploy/vps/manage_services.sh logs`
+- Neu commit local va VPS bi lech nhau, phai xac minh ro ben nao la ban moi nhat truoc khi tiep tuc, khong duoc mac dinh local la nguon dung.
+
 ## Tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
@@ -23,8 +34,7 @@ URL mac dinh: `http://127.0.0.1:8000`
 
 ## Session context cho agent
 - Repo nay da co co che session context cho Codex trong `AGENTS.md`.
-- Agent se tu suy ra chuc nang dang lam tu branch, file dirty, va lich su
-  session.
+- Agent se tu suy ra chuc nang dang lam tu branch, file dirty, va lich su session.
 - Lenh bootstrap nhanh cho moi session:
 
 ```powershell
@@ -44,7 +54,12 @@ bash install_vps.sh
 
 Sau khi cai dat:
 - Quan ly service: `bash deploy/vps/manage_services.sh status|restart|logs`
-- Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
+- Tai lieu chi tiet: `docs/VPS_CONNECT_ONE_CLICK.md`
+- Workflow van hanh/mac dinh: `docs/VPS_WORKFLOW.md`
+- Windows wrappers:
+  - `launch_vps_app.bat`
+  - `connect_vps.bat`
+  - `view_vps_logs.bat`
 - Log file tren VPS: `logs/web.log`, `logs/worker.log`
 
 ## Local OCR - RapidOCR Only
@@ -155,6 +170,19 @@ Sau khi cai dat:
 - Bat buoc de lai "future-dev comment" cho logic nghiep vu kho, fallback, workaround, magic number/regex, va state merge. Xem `docs/CODE_COMMENT_POLICY.md`.
 - Khi sua Python/JS/Jinja, uu tien copy template tu `docs/COMMENT_TEMPLATES.md` de comment giai thich WHY/RISK/CHANGE RULE thay vi ghi chu chung chung.
 - Neu sua flow OCR, phai test lai bo anh regression 10 anh CCCD.
+
+## Feature Plans - Doc truoc khi sua code
+
+Moi chuc nang lon co file plan rieng trong `docs/plans/`. Agent phai mo va doc plan truoc khi lam viec voi chuc nang do.
+
+| Lam viec voi... | Doc plan nay truoc |
+|---|---|
+| `routers/ocr.py` (Cloud OCR, AI OCR) | `docs/plans/ocr_ai.md` |
+| `routers/ocr_local.py`, `tasks.py` (Local OCR) | `docs/plans/ocr_local.md` |
+
+Index day du: `docs/plans/_INDEX.md`
+
+**Quy tac:** Sau khi chot quyet dinh thiet ke moi hoac thay doi approach -> cap nhat file plan tuong ung.
 
 ## Kiem tra nhanh truoc khi ban giao
 ```bash

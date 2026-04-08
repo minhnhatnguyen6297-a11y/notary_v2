@@ -10,3 +10,27 @@ logs/
 tmp/
 deploy/vps/ssh_credentials.env
 deploy/vps/bin/
+
+# UPLOAD tool - generated outputs (now at tools/upload_lab/)
+tools/upload_lab/output/
+tools/upload_lab/runs/
+tools/upload_lab/upload_runs/
+tools/upload_lab/*.json
+tools/upload_lab/.ui_setup_state.json
+tools/upload_lab/nd_storage_state.json
+
+# Claude local config
+.claude/settings.local.json
+
+# Test data / fixtures (không phải source code)
+ocr test/
+ID template/
+
+# Runtime dirs
+runtime/
+
+# Legacy accidental path after upload tool move
+tools/UPLOAD/
+
+# Legacy local upload workspace kept only for local data during migration
+UPLOAD/

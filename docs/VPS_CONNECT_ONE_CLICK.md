@@ -1,15 +1,15 @@
 # One-Click Launch (Windows)
 
-For internal team usage, this repo supports true one-click launch from Windows:
+For internal team usage, this repo supports a standard Windows VPS workflow:
 
-1. auto start/restart app on VPS
-2. wait until app is ready
-3. auto open browser to the app URL
+1. launch app on VPS
+2. open SSH shell when needed
+3. stream logs when needed
 
 ## 1) Setup once
 
 1. Copy:
-   - `deploy/vps/ssh_credentials.example`
+  - `deploy/vps/ssh_credentials.example`
    - to `deploy/vps/ssh_credentials.env`
 2. Fill real values in `deploy/vps/ssh_credentials.env`:
    - `VPS_HOST`
@@ -26,22 +26,29 @@ For internal team usage, this repo supports true one-click launch from Windows:
 
 `ssh_credentials.env` is ignored by git by default.
 
-## 2) One click launch
+## 2) Standard entry points
 
 Double-click:
 
+- `launch_vps_app.bat`
 - `connect_vps.bat`
 - `view_vps_logs.bat` (live logs)
 
 Or run:
 
 ```bat
-connect_vps.bat
+launch_vps_app.bat
 ```
 
-On first run, script auto-downloads `plink.exe` to `deploy/vps/bin/`.
-No manual SSH typing is needed.
-`connect_vps.bat` now also opens the configured app URL automatically before handing you the SSH shell.
+Behavior:
+
+- `launch_vps_app.bat`: start/restart app on VPS, wait until ready, open browser
+- `connect_vps.bat`: open interactive SSH shell and auto-open the configured app URL first
+- `view_vps_logs.bat`: stream `logs/web.log` and `logs/worker.log`
+
+On first run, scripts auto-download `plink.exe` to `deploy/vps/bin/`.
+No manual SSH typing is needed after config is filled.
+
 By default, interactive SSH uses a clean shell mode (`TERM=dumb`) so Windows console does not show garbled sequences like `[?2004h`.
 
 If you need the VPS default terminal behavior instead, run:
@@ -76,4 +83,13 @@ If your internal process accepts storing password in repo temporarily:
    - `deploy/vps/ssh_credentials.env`
 2. Commit `deploy/vps/ssh_credentials.env`.
 
-Then new machines can clone and directly double-click `connect_vps.bat`.
+Then new machines can clone and directly use:
+
+- `launch_vps_app.bat`
+- `connect_vps.bat`
+- `view_vps_logs.bat`
+
+## 5) Recommended policy
+
+- Treat VPS repo `~/notary_v2` as the primary running source of truth.
+- Read `docs/VPS_WORKFLOW.md` before starting work on a new machine or in a new chat.

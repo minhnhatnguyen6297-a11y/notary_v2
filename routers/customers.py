@@ -15,7 +15,7 @@ from database import get_db
 from models import Customer
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="frontend/templates")
 
 EXCEL_COLUMNS = ["ho_ten", "gioi_tinh", "ngay_sinh", "ngay_chet", "so_giay_to", "ngay_cap", "dia_chi"]
 DATE_FIELDS = {"ngay_sinh", "ngay_chet", "ngay_cap"}

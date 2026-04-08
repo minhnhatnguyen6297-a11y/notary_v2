@@ -10,7 +10,7 @@ from database import get_db
 from models import Property
 
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="frontend/templates")
 
 
 def parse_date(s):

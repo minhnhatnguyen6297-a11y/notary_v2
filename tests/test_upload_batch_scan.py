@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import unicodedata
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -9,8 +10,8 @@ from unittest.mock import patch
 
 from docx import Document
 
-from UPLOAD.batch_scan import connect_registry, parse_modified_since, run_batch_scan, upsert_registry_record
-from UPLOAD.extract_contract import scan_docx_for_contract_no
+from tools.upload_lab.batch_scan import connect_registry, parse_modified_since, run_batch_scan, upsert_registry_record
+from tools.upload_lab.extract_contract import extract, find_tai_san, scan_docx_for_contract_no
 
 
 def make_docx(path: Path, *paragraphs: str) -> Path:
@@ -63,6 +64,78 @@ class UploadBatchScanTests(unittest.TestCase):
         self.assertFalse(result["is_contract"])
         self.assertEqual(result["contract_no"], "")
         self.assertIn("keyword", result["reason"].lower())
+
+    def test_scan_docx_requires_full_ccgd_suffix_not_short_form_only(self):
+        docx_path = make_docx(
+            self.root / "hop_dong_short_only.docx",
+            "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT",
+            "Số công chứng 428/2026",
+        )
+
+        result = scan_docx_for_contract_no(docx_path)
+
+        self.assertFalse(result["is_contract"])
+        self.assertEqual(result["contract_no"], "")
+
+    def test_extract_shortens_web_contract_no_after_full_ccgd_match(self):
+        docx_path = make_docx(
+            self.root / "hop_dong_full_ccgd.docx",
+            "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT",
+            "Số công chứng 428/2026/CCGD",
+        )
+
+        payload = extract(docx_path)
+
+        self.assertEqual(payload["raw"]["scan_contract_no"], "428/2026/CCGD")
+        self.assertEqual(payload["web_form"]["so_cong_chung"], "428/2026")
+
+    def test_extract_does_not_fill_web_contract_no_from_short_form_only(self):
+        docx_path = make_docx(
+            self.root / "hop_dong_extract_short_only.docx",
+            "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT",
+            "Số công chứng 428/2026",
+        )
+
+        payload = extract(docx_path)
+
+        self.assertEqual(payload["raw"]["scan_contract_no"], "")
+        self.assertEqual(payload["web_form"]["so_cong_chung"], "")
+
+    def test_find_tai_san_uses_common_qsdd_anchor_for_transfer(self):
+        text = "\n".join(
+            [
+                "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT",
+                "ĐIỀU 1: ĐỐI TƯỢNG CỦA HỢP ĐỒNG",
+                "Đối tượng của Hợp đồng này là toàn bộ quyền sử dụng đất của bên A có địa chỉ tại: thôn A, xã B.",
+                "- Thửa đất số: 10",
+                "- Diện tích: 100 m2",
+                "1.2 Bằng Hợp đồng này...",
+            ]
+        )
+
+        tai_san = find_tai_san(text)
+
+        self.assertTrue(tai_san.startswith("quyền sử dụng đất của bên A có địa chỉ tại"))
+        self.assertIn("Thửa đất số: 10", tai_san)
+        self.assertNotIn("1.2 Bằng Hợp đồng này", tai_san)
+
+    def test_find_tai_san_supports_folded_doc_text_for_commitment(self):
+        text = "\n".join(
+            [
+                "VĂN BẢN CAM KẾT TÀI SẢN RIÊNG",
+                "Hiện nay, ông A đang làm các thủ tục để nhận chuyển nhượng quyền sử dụng đất có địa chỉ tại: thôn A, xã B.",
+                "- Thửa đất số: 20",
+                "- Diện tích: 200 m2",
+                "Hai vợ chồng chúng tôi cam đoan:",
+            ]
+        )
+        folded_like_doc_text = unicodedata.normalize("NFD", text)
+
+        tai_san = find_tai_san(folded_like_doc_text)
+
+        self.assertTrue(tai_san.startswith("quyền sử dụng đất có địa chỉ tại"))
+        self.assertIn("Thửa đất số: 20", tai_san)
+        self.assertNotIn("Hai vợ chồng chúng tôi cam đoan", tai_san)
 
     def test_batch_scan_finds_depth_three_and_skips_depth_four(self):
         batch_root = self.root / "hoso"
@@ -120,7 +193,7 @@ class UploadBatchScanTests(unittest.TestCase):
         workdir = self.root / "work"
 
         with patch(
-            "UPLOAD.batch_scan.scan_docx_for_contract_no",
+            "tools.upload_lab.batch_scan.scan_docx_for_contract_no",
             return_value={
                 "is_contract": True,
                 "contract_no": "777/2026/CCGD",
@@ -128,7 +201,7 @@ class UploadBatchScanTests(unittest.TestCase):
                 "text": "dummy preloaded text",
             },
         ) as scan_mock, patch(
-            "UPLOAD.batch_scan.extract",
+            "tools.upload_lab.batch_scan.extract",
             return_value={
                 "web_form": {
                     "ten_hop_dong": "Hop dong chuyen nhuong",
@@ -163,7 +236,7 @@ class UploadBatchScanTests(unittest.TestCase):
         snapshots: list[dict] = []
 
         with patch(
-            "UPLOAD.batch_scan.scan_docx_for_contract_no",
+            "tools.upload_lab.batch_scan.scan_docx_for_contract_no",
             return_value={
                 "is_contract": True,
                 "contract_no": "888/2026/CCGD",
@@ -171,7 +244,7 @@ class UploadBatchScanTests(unittest.TestCase):
                 "text": "dummy text",
             },
         ), patch(
-            "UPLOAD.batch_scan.extract",
+            "tools.upload_lab.batch_scan.extract",
             return_value={
                 "web_form": {
                     "ten_hop_dong": "Hop dong",

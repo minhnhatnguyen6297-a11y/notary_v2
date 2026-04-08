@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from UPLOAD.bootstrap_ui import (
+from tools.upload_lab.bootstrap_ui import (
     BOOTSTRAP_VERSION,
     PLAYWRIGHT_BROWSER,
     should_install_browser,
@@ -12,7 +12,7 @@ from UPLOAD.bootstrap_ui import (
 
 class UploadBootstrapDecisionTests(unittest.TestCase):
     def test_requirements_install_needed_when_state_missing(self):
-        runtime = {"modules": {"docx": True, "win32com": True, "dotenv": True, "playwright": True}}
+        runtime = {"modules": {"docx": True, "dotenv": True, "playwright": True, "openpyxl": True}}
         self.assertTrue(should_install_requirements({}, runtime, 123))
 
     def test_requirements_install_skipped_when_state_and_modules_are_ready(self):
@@ -20,7 +20,7 @@ class UploadBootstrapDecisionTests(unittest.TestCase):
             "bootstrap_version": BOOTSTRAP_VERSION,
             "requirements_mtime_ns": 123,
         }
-        runtime = {"modules": {"docx": True, "win32com": True, "dotenv": True, "playwright": True}}
+        runtime = {"modules": {"docx": True, "dotenv": True, "playwright": True, "openpyxl": True}}
         self.assertFalse(should_install_requirements(state, runtime, 123))
 
     def test_requirements_install_needed_when_any_module_missing(self):
@@ -28,7 +28,7 @@ class UploadBootstrapDecisionTests(unittest.TestCase):
             "bootstrap_version": BOOTSTRAP_VERSION,
             "requirements_mtime_ns": 123,
         }
-        runtime = {"modules": {"docx": True, "win32com": False, "dotenv": True, "playwright": True}}
+        runtime = {"modules": {"docx": True, "dotenv": True, "playwright": True, "openpyxl": False}}
         self.assertTrue(should_install_requirements(state, runtime, 123))
 
     def test_browser_install_needed_when_browser_missing(self):

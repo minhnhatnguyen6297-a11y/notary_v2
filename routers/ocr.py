@@ -1,4 +1,4 @@
-"""
+﻿"""
 OCR Router — nhận ảnh giấy tờ, nhận diện loại, trích xuất dữ liệu.
 
 Pipeline:

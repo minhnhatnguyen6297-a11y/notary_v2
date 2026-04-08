@@ -104,8 +104,8 @@ async def http_timing_log(request: Request, call_next):
     return response
 
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+templates = Jinja2Templates(directory="frontend/templates")
 
 app.include_router(customers.router, prefix="/customers", tags=["Khach hang"])
 app.include_router(properties.router, prefix="/properties", tags=["Tai san"])

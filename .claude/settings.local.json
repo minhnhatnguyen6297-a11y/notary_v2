@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(rm -f templates/cases/layout_editor.html layout_wireframe.html templates/cases/templates.html)",
-      "Bash(rm -rf static/layouts)"
-    ]
-  }
-}

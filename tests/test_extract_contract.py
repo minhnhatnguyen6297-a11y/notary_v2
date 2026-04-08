@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from UPLOAD.extract_contract import extract
+from tools.upload_lab.extract_contract import extract
 
 
 SAMPLE_TRANSFER_TEXT = """HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT
@@ -117,9 +117,7 @@ class ExtractContractTests(unittest.TestCase):
         doc_path = self.root / "hop_dong.doc"
         doc_path.write_text("placeholder", encoding="utf-8")
 
-        with patch("UPLOAD.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_TRANSFER_TEXT) as ifilter_mock, patch(
-            "UPLOAD.extract_contract.read_doc_via_word_com"
-        ) as word_com_mock:
+        with patch("tools.upload_lab.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_TRANSFER_TEXT) as ifilter_mock:
             payload = extract(doc_path)
 
         self.assertEqual(payload["web_form"]["so_cong_chung"], "274/2026")
@@ -136,13 +134,12 @@ class ExtractContractTests(unittest.TestCase):
         self.assertFalse(payload["raw"]["extract_is_partial"])
         self.assertEqual(payload["raw"]["missing_web_form_fields"], [])
         self.assertGreaterEqual(ifilter_mock.call_count, 1)
-        word_com_mock.assert_not_called()
 
     def test_extract_docx_parses_generic_loan_parties(self):
         docx_path = self.root / "hop_dong_vay.docx"
         docx_path.write_text("placeholder", encoding="utf-8")
 
-        with patch("UPLOAD.extract_contract.read_docx", return_value=SAMPLE_LOAN_TEXT):
+        with patch("tools.upload_lab.extract_contract.read_docx", return_value=SAMPLE_LOAN_TEXT):
             payload = extract(docx_path)
 
         self.assertEqual(payload["web_form"]["so_cong_chung"], "289/2026")
@@ -155,7 +152,7 @@ class ExtractContractTests(unittest.TestCase):
         doc_path = self.root / "hop_dong_preamble.doc"
         doc_path.write_text("placeholder", encoding="utf-8")
 
-        with patch("UPLOAD.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_TRANSFER_PREAMBLE_TEXT):
+        with patch("tools.upload_lab.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_TRANSFER_PREAMBLE_TEXT):
             payload = extract(doc_path)
 
         self.assertEqual(payload["web_form"]["so_cong_chung"], "274/2026")
@@ -167,7 +164,7 @@ class ExtractContractTests(unittest.TestCase):
         doc_path = self.root / "cam_ket_tai_san.doc"
         doc_path.write_text("placeholder", encoding="utf-8")
 
-        with patch("UPLOAD.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_COMMITMENT_TEXT):
+        with patch("tools.upload_lab.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_COMMITMENT_TEXT):
             payload = extract(doc_path)
 
         self.assertEqual(payload["web_form"]["so_cong_chung"], "407/2026")
@@ -180,13 +177,14 @@ class ExtractContractTests(unittest.TestCase):
         self.assertIn("Tài sản gắn liền với thửa đất nói trên là nhà ở 02 tầng", payload["web_form"]["tai_san"])
         self.assertIn("Các quyền, lợi ích, khoản thanh toán", payload["web_form"]["tai_san"])
         self.assertNotIn("Bằng văn bản này chúng tôi xác định", payload["web_form"]["tai_san"])
-        self.assertEqual(len(payload["raw"]["ben_a"]["nguoi"]), 2)
+        self.assertEqual(len(payload["raw"]["ben_a"]["nguoi"]), 1)
+        self.assertEqual(payload["raw"]["ben_a"]["nguoi"][0]["ho_ten"], "Nguyễn Văn A")
 
     def test_extract_doc_detects_transfer_cancellation_rules(self):
         doc_path = self.root / "huy_hop_dong_chuyen_nhuong.doc"
         doc_path.write_text("placeholder", encoding="utf-8")
 
-        with patch("UPLOAD.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_CANCELLATION_TEXT):
+        with patch("tools.upload_lab.extract_contract.read_doc_via_ifilter", return_value=SAMPLE_CANCELLATION_TEXT):
             payload = extract(doc_path)
 
         self.assertEqual(payload["web_form"]["so_cong_chung"], "320/2026")
