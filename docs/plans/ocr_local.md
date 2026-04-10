@@ -56,8 +56,8 @@ Không cố gắng 100% tự động — thiết kế có **human-in-the-loop**:
 - Thử 4 hướng (0°, 90°, 180°, 270°).
 - Mỗi hướng: detect Face (Haar cascade) + QR + tính MRZ score (regex `IDVNM\d{10}(\d{12})`).
 - **Logic phân loại:**
-  - Có Face + QR → `front_new` (CCCD mới mặt trước, có cả Face lẫn QR)
-  - Có Face, không QR → `front_old` (CCCD cũ mặt trước)
+  - Có Face + QR → `front_old` (CCCD cũ mặt trước, có cả Face lẫn QR)
+  - Có Face, không QR → `front_new` (CCCD mới mặt trước)
   - Có QR, không Face → `back_new` (CCCD mới mặt sau, có QR)
   - Có MRZ score cao → `back_old` (CCCD cũ mặt sau)
   - Không detect được gì → `unknown`
@@ -176,3 +176,136 @@ Task name là **contract cứng** — nếu đổi tên, các job đang pending 
 - [ ] Không thay đổi DB schema trừ khi bắt buộc.
 - [ ] Sau khi sửa: `python -m py_compile routers/ocr_local.py tasks.py`
 - [ ] Test regression với ít nhất 10 ảnh CCCD.
+
+---
+
+## Redesign Plan (2026-04-09)
+
+### Vấn đề kiến trúc hiện tại
+
+1. **Triage chạy 4 góc không early-exit** — `_triage_crop_orientation` luôn thử đủ 4 hướng kể cả khi đã có QR ở góc 0°
+2. **Pairing xen kẽ extraction** — grouping + re-keying (`_rekey_person_record`) nằm trong vòng lặp OCR (lines 2094–2160), không thể pair 2 ảnh `unknown` của cùng người
+3. **Profile chưa biết khi vào detail phase** — ảnh có face nhưng không có QR vào detail với `DOC_PROFILE_UNKNOWN` → sai label địa chỉ
+
+### Phân loại mặt trước/sau bằng màu sắc
+
+Thay thế Haar cascade face detection + QR orientation bằng **color blob detection** — nhanh hơn, robust hơn với ảnh mờ:
+
+| Đặc điểm | Vị trí trên thẻ | Màu HSV | Chỉ có ở |
+|----------|----------------|---------|----------|
+| **Quốc huy** | Góc trên-trái mặt trước | Đỏ H∈[0°,12°]∪[168°,180°] | **Mặt trước** (cả 2 loại CCCD) |
+| **Chip NFC** | Bên trái giữa mặt sau | Vàng/copper H∈[15°,40°] | **Mặt sau** (cả 2 loại CCCD) |
+
+**Vị trí centroid của blob → xác định cả side lẫn rotation trong 1 phép detect:**
+```
+Blob đỏ (quốc huy) ở góc:
+  trên-trái  → FRONT, xoay 0°    |  trên-phải  → FRONT, xoay 270°
+  dưới-phải  → FRONT, xoay 180°  |  dưới-trái  → FRONT, xoay 90°
+
+Blob vàng (chip NFC) ở cạnh:
+  trái-giữa  → BACK, xoay 0°     |  trên-giữa  → BACK, xoay 90°
+  phải-giữa  → BACK, xoay 180°   |  dưới-giữa  → BACK, xoay 270°
+```
+
+**Quy tắc cứng:** Không detect được cả hai → `unknown`, **không fallback gì thêm**. Ảnh mờ đến mức không nhận ra màu thì face/QR cũng sẽ thất bại.
+
+### Kiến trúc 2-Pass mới
+
+```
+Pass 1 (per image, không VietOCR):
+  smart_crop → color blob detect (side + rotation) → rotate
+  → nếu FRONT: thử QR (front_old) hoặc ghi nhận front_new
+  → nếu BACK:  thử QR (back_new) hoặc MRZ scan (back_old, ~20-30ms, RapidOCR đủ)
+  → trả về: (triage_state, orientation, id_12, id_source)
+
+Grouping (thuần data, sau khi TẤT CẢ ảnh qua Pass 1):
+  group by id_12 (12 số) → ghép cặp front+back
+  2 ảnh không có id_12 → unpaired, KHÔNG đoán
+
+Pass 2 (per group, targeted VietOCR):
+  biết profile từ Pass 1 → ROI chính xác
+  QR đã đủ data → skip VietOCR hoàn toàn
+  merge front+back theo luật nghiệp vụ
+```
+
+**Thay đổi về ghép cặp:**
+- Ghép **sau khi tất cả ảnh đã OCR xong** (batch merge), không rolling, không re-key giữa chừng
+- Chỉ ghép bằng id_12 — không dùng heuristic filename hay "1 front + 1 back còn lại"
+- 2 ảnh đều không có id_12 → cả 2 unpaired + warning, không ghép nhầm
+
+**MRZ:** Detect vùng bằng morphological (đã có, nhanh). Đọc nội dung bằng RapidOCR recognition (không cần VietOCR — MRZ dùng font OCR-B chuẩn, ASCII only).
+
+### Dataclass mới
+
+```python
+@dataclass
+class SignalResult:          # output của Pass 1 per image
+    index: int
+    triage_state: str        # front_old|front_new|back_new|back_old|unknown
+    orientation_angle: int   # 0|90|180|270
+    id_12: str               # 12 số hoặc ""
+    id_source: str           # "qr"|"mrz"|"ocr_roi"|"none"
+    img_native: np.ndarray   # ảnh đã rotate đúng hướng
+    qr_data: dict            # full parsed QR nếu có
+    ...
+
+@dataclass
+class IdentityGroup:         # input/output của Pass 2
+    key: str                 # id_12 hoặc "img:N"
+    images: List[SignalResult]
+    profile: str             # best DOC_PROFILE_* từ Pass 1
+    skip_detail: bool        # True nếu QR đã đủ data
+    data: dict               # person fields
+    ...
+```
+
+### Hàm cần thêm / sửa
+- **Thêm:** `_detect_side_and_rotation(img)` — color blob detect, ~3ms
+- **Thêm:** `_pass1_signal_scan(item, ...) → SignalResult`
+- **Thêm:** `_group_signal_results(results) → List[IdentityGroup]` — pure function
+- **Thêm:** `_pass2_field_extraction(group)` — chỉ re-key nếu OCR tìm ra id mới
+- **Sửa:** `_triage_crop_orientation` — bỏ 4-angle loop, thay bằng blob detect
+- **Sửa:** `_local_ocr_batch_from_inputs_triage_v2` — thay 2 vòng lặp phức tạp bằng 3 bước sạch
+
+### Hàm KHÔNG thay đổi
+`_parse_cccd_fulltext`, `_merge_person_data`, `_apply_delta_merge`, `_run_detail_phase`,
+`_recognize_target_boxes`, `_recognize_target_boxes_rapidocr`, `filter_target_boxes`,
+`_ROI_PRESETS`, `_PHASE_REQUIRED_FIELDS`, `_PROFILE_PRIORITY`, tất cả constants
+
+---
+
+## Feature: Lưu ảnh tạm để đối chiếu (2026-04-09)
+
+### Vấn đề
+Ảnh bị xoá ngay sau OCR → không thể verify kết quả. Ảnh báo `unknown` → không biết ảnh nào.
+
+### Thiết kế
+
+**Storage:** Giữ ảnh sau OCR trong `tmp/ocr_sessions/{job_id}/`, đặt tên `{index}_{triage_state}.jpg`.
+
+**API mới:**
+- `GET /api/ocr/local/image/{job_id}/{index}` — serve ảnh
+- `DELETE /api/ocr/local/session/{job_id}` — xoá session
+
+**UI trong thẻ người:**
+```
+┌─────────────────────────────┐
+│ Nguyễn Huy Hoàng            │
+│ 036084011825                 │
+│                    [MT] [MS] │  ← hover = xem ảnh
+└─────────────────────────────┘
+```
+- `[MT]` / `[MS]` = mặt trước / mặt sau, hover hiện ảnh
+- Icon mờ nếu thiếu mặt
+- Ảnh unknown → panel cảnh báo riêng bên dưới danh sách thẻ
+
+**Xoá ảnh khi:**
+1. User bấm **"Lưu thay đổi"** (nút đã có sẵn trên sơ đồ thừa kế) → hook vào sự kiện click
+2. User đóng hồ sơ không lưu → `beforeunload` JS + gọi `DELETE /session/{job_id}`
+3. **Auto-cleanup:** xoá session cũ hơn 24h lúc startup hoặc cron
+
+**Files cần sửa:**
+- `tasks.py` — không xoá ảnh sau OCR; đổi tên theo triage_state
+- `routers/ocr_local.py` — thêm 2 endpoint mới
+- Frontend template thẻ người — thêm icon MT/MS + popover
+- Frontend JS upload — xoá preview sau OCR; gắn beforeunload

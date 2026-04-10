@@ -11,7 +11,7 @@ from celery_app import celery_app
 from database import SessionLocal
 from models import OCRJob
 from observability import configure_process_logging
-from routers.ocr_local import local_ocr_batch_from_inputs, local_ocr_from_bytes
+from routers.ocr_local import _cleanup_stale_local_ocr_sessions, _load_local_ocr_session_file_items, local_ocr_batch_from_inputs
 
 faulthandler.enable()
 _logger = logging.getLogger("ocr_worker")
@@ -94,19 +94,24 @@ def process_ocr_job(job_id: str, qr_text: str | None = None, client_qr_failed: b
         _logger.info("OCR job %s started", job_id)
         _timing_log("single_job_start", job_id=job_id, client_qr_failed=bool(client_qr_failed), qr_seeded=bool((qr_text or "").strip()))
 
+        t_read = time.perf_counter()
         if not job.temp_file_path or not os.path.exists(job.temp_file_path):
             raise FileNotFoundError("Khong tim thay file tam")
-
-        t_read = time.perf_counter()
-        with open(job.temp_file_path, "rb") as f:
-            file_bytes = f.read()
+        if os.path.isdir(job.temp_file_path):
+            file_items = _load_local_ocr_session_file_items(job.temp_file_path)
+            if not file_items:
+                raise FileNotFoundError("Khong tim thay file OCR session")
+        else:
+            with open(job.temp_file_path, "rb") as f:
+                file_bytes = f.read()
+            file_items = [{"index": 0, "filename": "single_upload.jpg", "bytes": file_bytes}]
         read_file_ms = _ms(time.perf_counter() - t_read)
         t_ocr = time.perf_counter()
 
-        result = local_ocr_from_bytes(
-            file_bytes,
-            qr_text=qr_text,
-            client_qr_failed=client_qr_failed,
+        result = local_ocr_batch_from_inputs(
+            file_items,
+            qr_texts=[qr_text or ""],
+            client_qr_failed=[client_qr_failed],
             trace_id=job_id,
         )
         local_ocr_ms = _ms(time.perf_counter() - t_ocr)
@@ -115,17 +120,18 @@ def process_ocr_job(job_id: str, qr_text: str | None = None, client_qr_failed: b
         job.error_message = None
         db.commit()
         _logger.info("OCR job %s completed in %.2fs", job_id, time.time() - t0)
+        summary_timing = ((result.get("summary", {}) or {}).get("timing_ms", {}) or result.get("timing_ms", {}))
         _timing_log(
             "single_job_done",
             job_id=job_id,
             total_ms=_ms(time.perf_counter() - t_job),
             read_file_ms=read_file_ms,
             local_ocr_ms=local_ocr_ms,
-            triage_phase_ms=(result.get("timing_ms", {}) or {}).get("triage_phase_ms", 0.0),
-            targeted_extract_phase_ms=(result.get("timing_ms", {}) or {}).get("targeted_extract_phase_ms", 0.0),
-            merge_phase_ms=(result.get("timing_ms", {}) or {}).get("merge_phase_ms", 0.0),
-            fallback_phase_ms=(result.get("timing_ms", {}) or {}).get("fallback_phase_ms", 0.0),
-            summary_timing=result.get("timing_ms", {}),
+            triage_phase_ms=summary_timing.get("triage_phase_ms", 0.0),
+            targeted_extract_phase_ms=summary_timing.get("targeted_extract_phase_ms", 0.0),
+            merge_phase_ms=summary_timing.get("merge_phase_ms", 0.0),
+            fallback_phase_ms=summary_timing.get("fallback_phase_ms", 0.0),
+            summary_timing=summary_timing,
         )
     except Exception as e:
         if job:
@@ -138,8 +144,7 @@ def process_ocr_job(job_id: str, qr_text: str | None = None, client_qr_failed: b
         _logger.exception("OCR job %s failed: %s", job_id, e)
         traceback.print_exc()
     finally:
-        if job:
-            _delete_file(job.temp_file_path)
+        _cleanup_stale_local_ocr_sessions(db)
         db.close()
 
 
@@ -173,31 +178,9 @@ def process_ocr_batch_job(
             raise FileNotFoundError("Khong tim thay thu muc batch tam")
 
         t_manifest = time.perf_counter()
-        manifest_path = os.path.join(batch_dir, "manifest.json")
-        if not os.path.exists(manifest_path):
-            raise FileNotFoundError("Khong tim thay manifest batch")
-
-        with open(manifest_path, "r", encoding="utf-8") as fr:
-            manifest = json.load(fr) or {}
         manifest_ms = _ms(time.perf_counter() - t_manifest)
-        items = manifest.get("items") if isinstance(manifest, dict) else []
-        if not isinstance(items, list):
-            items = []
-
         t_read_files = time.perf_counter()
-        file_items = []
-        for item in sorted(items, key=lambda x: int(x.get("index", 0)) if isinstance(x, dict) else 0):
-            if not isinstance(item, dict):
-                continue
-            idx = int(item.get("index", 0))
-            filename = item.get("filename") or f"image_{idx + 1}.jpg"
-            stored_name = item.get("stored_name") or ""
-            file_path = os.path.join(batch_dir, stored_name)
-            if not stored_name or not os.path.exists(file_path):
-                raise FileNotFoundError(f"Khong tim thay file batch: {stored_name}")
-            with open(file_path, "rb") as fr:
-                file_bytes = fr.read()
-            file_items.append({"index": idx, "filename": filename, "bytes": file_bytes})
+        file_items = _load_local_ocr_session_file_items(batch_dir)
         read_files_ms = _ms(time.perf_counter() - t_read_files)
 
         t_parse_flags = time.perf_counter()
@@ -244,6 +227,5 @@ def process_ocr_batch_job(
         _logger.exception("OCR batch job %s failed: %s", job_id, e)
         traceback.print_exc()
     finally:
-        if job:
-            _delete_path(job.temp_file_path)
+        _cleanup_stale_local_ocr_sessions(db)
         db.close()

@@ -3105,6 +3105,51 @@ endif %}
       let imageQueue = [];   // [{id, file, dataUrl, name, status, sizeKB}]
       let ocrResults = [];   // [{person|property|marriage, source, filename}]
       let totalCostUSD = 0;
+      let ocrLocalSessionJobId = '';
+      let ocrLocalImageResults = [];
+
+      function getLocalImageResult(index) {
+        return (ocrLocalImageResults || []).find(row => Number(row?.index) === Number(index)) || null;
+      }
+
+      function getLocalImageUrl(index) {
+        if (!ocrLocalSessionJobId && ocrLocalSessionJobId !== 0) return '';
+        return `/api/ocr/local/image/${encodeURIComponent(ocrLocalSessionJobId)}/${Number(index)}`;
+      }
+
+      async function ocrDeleteLocalSession(reason = '', useKeepalive = false) {
+        const jobId = String(ocrLocalSessionJobId || '').trim();
+        if (!jobId) {
+          ocrLocalImageResults = [];
+          return;
+        }
+        ocrLocalSessionJobId = '';
+        ocrLocalImageResults = [];
+        try {
+          await fetch(`/api/ocr/local/session/${encodeURIComponent(jobId)}`, {
+            method: 'DELETE',
+            keepalive: !!useKeepalive,
+            headers: reason ? { 'X-OCR-Session-Reason': reason } : {},
+          });
+        } catch (_) { }
+      }
+
+      function normalizeImageRefs(value) {
+        if (!Array.isArray(value)) return [];
+        const seen = new Set();
+        const refs = [];
+        value.forEach(ref => {
+          const index = Number(ref?.index);
+          if (!Number.isFinite(index) || seen.has(index)) return;
+          seen.add(index);
+          refs.push({
+            index,
+            side: String(ref?.side || '').toLowerCase() || 'unknown',
+            triage_state: String(ref?.triage_state || '').toLowerCase() || 'unknown',
+          });
+        });
+        return refs.sort((a, b) => a.index - b.index);
+      }
 
       // ── Drag/drop helpers ──────────────────────────────────────────────────
       window.ocrDragOver = e => { e.preventDefault(); document.getElementById('ocr-drop-zone').style.borderColor = '#2563eb'; };
@@ -3427,10 +3472,40 @@ endif %}
         return s;
       }
 
+      function ensureOcrPreviewOverlay() {
+        let overlay = document.getElementById('ocr-preview-overlay');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'ocr-preview-overlay';
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;';
+          overlay.onclick = () => overlay.style.display = 'none';
+          const img = document.createElement('img');
+          img.id = 'ocr-preview-img';
+          img.style.cssText = 'max-width:88vw;max-height:82vh;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.6);';
+          const label = document.createElement('div');
+          label.id = 'ocr-preview-label';
+          label.style.cssText = 'color:#fff;font-size:13px;margin-top:10px;opacity:.8;';
+          overlay.appendChild(img);
+          overlay.appendChild(label);
+          document.body.appendChild(overlay);
+        }
+        return overlay;
+      }
+
+      function showOcrPreview(src, label) {
+        if (!src) return;
+        const overlay = ensureOcrPreviewOverlay();
+        document.getElementById('ocr-preview-img').src = src;
+        document.getElementById('ocr-preview-label').textContent = label || '';
+        overlay.style.display = 'flex';
+      }
+
       window.ocrPreviewImg = function (id) {
         const item = imageQueue.find(i => i.id === id);
         if (!item?.dataUrl) return;
-        let overlay = document.getElementById('ocr-preview-overlay');
+        showOcrPreview(item.dataUrl, item.name + (item.status === 'error' ? ' - ' + (item._errorMsg || 'Loi') : ''));
+        return;
+        let overlay = ensureOcrPreviewOverlay();
         if (!overlay) {
           overlay = document.createElement('div');
           overlay.id = 'ocr-preview-overlay';
@@ -3452,6 +3527,20 @@ endif %}
       };
 
       // ── Bổ sung mặt còn thiếu vào card đã có ─────────────────────────────
+      window.ocrPrimeSessionImage = function (index) {
+        const src = getLocalImageUrl(index);
+        if (!src) return;
+        const img = new Image();
+        img.src = src;
+      };
+
+      window.ocrPreviewSessionImage = function (index, label = '') {
+        const src = getLocalImageUrl(index);
+        const imageMeta = getLocalImageResult(index);
+        if (!src) return;
+        showOcrPreview(src, label || imageMeta?.filename || `Anh #${Number(index) + 1}`);
+      };
+
       window.ocrSupplementCard = async function (idx, neededSide) {
         const persons = ocrResults.filter(r => r.type === 'person');
         const existing = persons[idx];
@@ -3539,8 +3628,10 @@ endif %}
       };
 
       window.ocrClearAll = function () {
+        ocrDeleteLocalSession('clear').catch(() => {});
         imageQueue = [];
         ocrResults = [];
+        ocrLocalImageResults = [];
         document.getElementById('ocr-queue').innerHTML = '';
         document.getElementById('ocr-queue').appendChild(document.getElementById('ocr-queue-empty'));
         document.getElementById('ocr-queue-empty').style.display = '';
@@ -3556,7 +3647,9 @@ endif %}
       };
 
       function resetOcrWorkingResults() {
+        ocrDeleteLocalSession('reset').catch(() => {});
         ocrResults = [];
+        ocrLocalImageResults = [];
         document.getElementById('ocr-results-empty').style.display = 'flex';
         document.getElementById('ocr-results-list').style.display = 'none';
         document.getElementById('ocr-results-list').innerHTML = '';
@@ -3642,6 +3735,10 @@ endif %}
         return value.map(v => String(v || '').trim()).filter(Boolean);
       }
 
+      function mergeImageRefs(first, second) {
+        return normalizeImageRefs([...(first || []), ...(second || [])]);
+      }
+
       function mergeOcrResultsInPlace() {
         const merged = [];
         const personByDoc = new Map();
@@ -3667,7 +3764,7 @@ endif %}
               ...normalizeWarnings(r.warnings),
               ...normalizeWarnings(r.data?.warnings),
             ]));
-            const first = { ...r, data: { ...(r.data || {}) }, warnings };
+            const first = { ...r, data: { ...(r.data || {}) }, warnings, image_refs: normalizeImageRefs(r.image_refs) };
             personByDoc.set(doc, first);
             merged.push(first);
             continue;
@@ -3702,6 +3799,7 @@ endif %}
           if (!target.filename && r.filename) target.filename = r.filename;
           if (!target.document_type && r.document_type) target.document_type = r.document_type;
           target.field_sources = { ...(target.field_sources || {}), ...(r.field_sources || {}) };
+          target.image_refs = mergeImageRefs(target.image_refs, r.image_refs);
           target.warnings = Array.from(new Set([
             ...normalizeWarnings(target.warnings),
             ...normalizeWarnings(target.data?.warnings),
@@ -3900,6 +3998,7 @@ endif %}
           if (!submitResp.ok) throw new Error(`Server lỗi ${submitResp.status}`);
           const submitData = await submitResp.json();
           const jobId = submitData.job_id;
+          ocrLocalSessionJobId = jobId;
           if (!jobId) throw new Error('Không nhận được job_id từ server');
 
           const maxAttempts = 300; // ~10 phút
@@ -3911,6 +4010,7 @@ endif %}
             if (data.status === 'completed') {
               const rjson = data.result_json || {};
               const imageResults = Array.isArray(rjson.image_results) ? rjson.image_results : [];
+              ocrLocalImageResults = imageResults;
               const imageByIndex = new Map();
               imageResults.forEach(ir => imageByIndex.set(Number(ir.index), ir));
 
@@ -3957,11 +4057,13 @@ endif %}
                   side,
                   profile: p.profile || personData.profile || 'unknown',
                   field_sources: p.field_sources || {},
+                  image_refs: normalizeImageRefs(p.image_refs),
                   warnings,
                   raw_text: personData._raw_text || p.raw_text || '',
                   filename: Array.isArray(p._files) && p._files.length ? p._files[0] : ''
                 });
               }
+              imageQueue = [];
 
               const summary = rjson.summary || {};
               const qrHits = Number(summary.qr_hits || 0);
@@ -4033,10 +4135,46 @@ endif %}
       }
 
       // ── Render kết quả ─────────────────────────────────────────────────────
+      function renderLocalUnknownPanel(rows) {
+        if (!rows.length) return '';
+        let html = `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#92400e;margin:14px 0 10px;">
+        <i class="bi bi-exclamation-triangle me-1"></i>Anh can xem tay (${rows.length})
+      </div>`;
+        rows.forEach((row, pos) => {
+          const index = Number(row?.index || pos);
+          const title = String(row?.filename || `Anh #${index + 1}`);
+          const triage = String(row?.triage_state || 'unknown');
+          html += `
+      <div style="border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fffbeb;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:#78350f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+          <div style="font-size:12px;color:#92400e;">triage: ${triage}</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-warning"
+          onmouseenter="ocrPrimeSessionImage(${index})"
+          onclick="ocrPreviewSessionImage(${index}, '${title.replace(/'/g, "\\'")}')">
+          Xem anh
+        </button>
+      </div>`;
+        });
+        return html;
+      }
+
       function renderResults() {
         const empty = document.getElementById('ocr-results-empty');
         const list = document.getElementById('ocr-results-list');
-        if (!ocrResults.length) return;
+        const localUnknownRows = (ocrLocalImageResults || []).filter(row => {
+          const triage = String(row?.triage_state || '').toLowerCase();
+          const src = String(row?.source_type || '').toUpperCase();
+          return triage === 'unknown' || src === 'ERROR';
+        });
+        if (!ocrResults.length && !localUnknownRows.length) {
+          empty.style.display = 'flex';
+          list.style.display = 'none';
+          list.innerHTML = '';
+          document.getElementById('ocr-summary-text').textContent = '';
+          return;
+        }
 
         empty.style.display = 'none';
         list.style.display = '';
@@ -4077,13 +4215,20 @@ endif %}
           });
         }
 
+        if (localUnknownRows.length) {
+          html += renderLocalUnknownPanel(localUnknownRows);
+        }
+
         list.innerHTML = html;
 
         // Summary
+        const unknownCount = localUnknownRows.length;
         const qrCount = persons.filter(personUsesQr).length;
         const aiCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'AI').length;
         const ocrCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'OCR').length;
-        if (aiCount > 0 && ocrCount === 0) {
+        if (!persons.length && !properties.length && !marriages.length) {
+          document.getElementById('ocr-summary-text').textContent = `${unknownCount} anh can xem tay`;
+        } else if (aiCount > 0 && ocrCount === 0) {
           document.getElementById('ocr-summary-text').textContent =
             `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
         } else {
@@ -4121,9 +4266,24 @@ endif %}
         return Object.values(fieldSources).some(v => String(v || '').toLowerCase() === 'qr');
       }
 
+      function renderPersonImageRefs(result) {
+        const refs = normalizeImageRefs(result?.image_refs);
+        if (!refs.length || !ocrLocalSessionJobId) return '';
+        return refs.map(ref => {
+          const label = ref.side === 'front' ? 'MT' : ref.side === 'back' ? 'MS' : `#${ref.index + 1}`;
+          const title = `${label} - ${ref.triage_state || 'unknown'}`;
+          return `<button type="button" class="btn btn-sm btn-outline-secondary"
+            style="font-size:11px;padding:2px 7px;flex-shrink:0;"
+            title="${title}"
+            onmouseenter="ocrPrimeSessionImage(${ref.index})"
+            onclick="ocrPreviewSessionImage(${ref.index}, '${title.replace(/'/g, "\\'")}')">${label}</button>`;
+        }).join('');
+      }
+
       function personCard(d, idx, result) {
         // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
+        const imageRefButtons = renderPersonImageRefs(result);
         const sourceTagForRaw = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
         const rawTextValue = sourceTagForRaw === 'OCR'
           ? String((d._raw_text || d.raw_text || result?.raw_text || '') || '')
@@ -4203,7 +4363,7 @@ endif %}
         ${inp('ngay_sinh', d.ngay_sinh, 'Ngày sinh')}
         ${inp('so_giay_to', d.so_giay_to, 'Số CCCD/CMND', 'flex:1.4;min-width:100px;')}
         ${inp('ngay_cap', d.ngay_cap, 'Ngày cấp', 'flex:1;min-width:80px;')}
-        ${srcBadge}${suppNote}${suppBtn}
+        ${srcBadge}${imageRefButtons}${suppNote}${suppBtn}
       </div>
       <div style="margin-top:5px;">
         ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
@@ -4589,16 +4749,21 @@ endif %}
 
       // ── Khi đóng modal: đẩy người chưa thêm ra staging area ──
       document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal', () => {
+        ocrDeleteLocalSession('modal-hide').catch(() => {});
         ocrResults.filter(r => r.type === 'person').forEach(r => {
           if (!r._staged && !r._added && r.data) {
             const added = window.addToOcrStaging(r.data);
             if (added) r._added = true;
           }
         });
-        ocrResults = []; imageQueue = [];
+        ocrResults = []; imageQueue = []; ocrLocalImageResults = [];
         const st = document.getElementById('ocr-local-status');
         if (st) st.textContent = '';
         renderQueue(); renderResults();
+      });
+
+      window.addEventListener('beforeunload', () => {
+        ocrDeleteLocalSession('beforeunload', true).catch(() => {});
       });
 
       document.getElementById('ocr-btn-confirm-save')?.addEventListener('click', ocrConfirmSave);

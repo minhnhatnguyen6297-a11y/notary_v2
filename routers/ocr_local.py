@@ -17,12 +17,13 @@ import traceback
 import unicodedata
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 _LOCAL_OCR_IMPORT_ERROR = None
 try:
@@ -58,6 +59,7 @@ LOCAL_OCR_DEBUG_LOG = os.getenv("LOCAL_OCR_DEBUG_LOG", "1").strip().lower() not 
 LOCAL_OCR_DEBUG_MAX_BOX_LOG = max(1, int(os.getenv("LOCAL_OCR_DEBUG_MAX_BOX_LOG", "8")))
 LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE = int(os.getenv("LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE", "720"))
 LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE = float(os.getenv("LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE", "0.20"))
+LOCAL_OCR_TRIAGE_EARLY_EXIT = os.getenv("LOCAL_OCR_TRIAGE_EARLY_EXIT", "0").strip().lower() not in {"0", "false", "no", "off"}
 LOCAL_OCR_DET_MAX_SIDE_LEN = int(os.getenv("LOCAL_OCR_DET_MAX_SIDE_LEN", "3000"))
 LOCAL_OCR_VIETOCR_MODEL = os.getenv("LOCAL_OCR_VIETOCR_MODEL", "vgg_transformer").strip() or "vgg_transformer"
 LOCAL_OCR_VIETOCR_BATCH_SIZE = max(1, int(os.getenv("LOCAL_OCR_VIETOCR_BATCH_SIZE", "24")))
@@ -66,6 +68,7 @@ LOCAL_OCR_DENOISE = os.getenv("LOCAL_OCR_DENOISE", "1").strip().lower() not in {
 LOCAL_OCR_REC_PAD_RATIO = max(0.0, float(os.getenv("LOCAL_OCR_REC_PAD_RATIO", "0.10")))
 LOCAL_OCR_REC_MIN_HEIGHT = max(16, int(os.getenv("LOCAL_OCR_REC_MIN_HEIGHT", "48")))
 LOCAL_OCR_REC_MAX_SCALE = max(1.0, float(os.getenv("LOCAL_OCR_REC_MAX_SCALE", "3.0")))
+LOCAL_OCR_SESSION_TTL_HOURS = 24
 
 _rapidocr_detector = None
 _vietocr_engine = None
@@ -112,6 +115,15 @@ _ROI_PRESETS = {
     f"{TRIAGE_STATE_BACK_OLD}:detail": (0.06, 0.18, 0.98, 0.96),
     f"{TRIAGE_STATE_UNKNOWN}:detail": (0.08, 0.14, 0.98, 0.96),
 }
+_LOCAL_OCR_SESSION_MANIFEST = "manifest.json"
+_BLOB_RED_HSV_RANGES = (
+    ((0, 80, 70), (12, 255, 255)),
+    ((165, 80, 70), (179, 255, 255)),
+)
+_BLOB_GOLD_HSV_RANGE = ((8, 50, 70), (35, 255, 255))
+_BLOB_MIN_AREA_RATIO = 0.0018
+_BLOB_FRONT_SCORE_MIN = 0.58
+_BLOB_STRONG_MRZ_REJECT_SCORE = max(LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE + 0.22, 0.46)
 
 
 @dataclass
@@ -293,6 +305,131 @@ def _safe_filename(filename: str, index: int) -> str:
     if not base:
         base = f"image_{index + 1}.jpg"
     return base
+
+
+def _local_ocr_session_root() -> Path:
+    return Path(__file__).resolve().parent.parent / "tmp" / "ocr_sessions"
+
+
+def _local_ocr_session_dir(job_id: str) -> Path:
+    return _local_ocr_session_root() / str(job_id or "").strip()
+
+
+def _local_ocr_session_manifest_path(session_dir: str | Path) -> Path:
+    return Path(session_dir) / _LOCAL_OCR_SESSION_MANIFEST
+
+
+def _load_local_ocr_session_manifest(session_dir: str | Path) -> dict:
+    manifest_path = _local_ocr_session_manifest_path(session_dir)
+    if not manifest_path.exists():
+        raise FileNotFoundError("Khong tim thay manifest OCR session")
+    with open(manifest_path, "r", encoding="utf-8") as fr:
+        manifest = json.load(fr) or {}
+    if not isinstance(manifest, dict):
+        raise ValueError("Manifest OCR session khong hop le")
+    items = manifest.get("items")
+    if not isinstance(items, list):
+        manifest["items"] = []
+    return manifest
+
+
+def _write_local_ocr_session_manifest(session_dir: str | Path, job_id: str, items: List[dict]) -> Path:
+    session_path = Path(session_dir)
+    session_path.mkdir(parents=True, exist_ok=True)
+    manifest_path = _local_ocr_session_manifest_path(session_path)
+    payload = {
+        "job_id": job_id,
+        "created_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "items": items,
+    }
+    with open(manifest_path, "w", encoding="utf-8") as fw:
+        json.dump(payload, fw, ensure_ascii=False)
+    return manifest_path
+
+
+def _resolve_local_ocr_session_item(session_dir: str | Path, index: int) -> tuple[dict, Path]:
+    manifest = _load_local_ocr_session_manifest(session_dir)
+    for item in manifest.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        if int(item.get("index", -1)) != int(index):
+            continue
+        stored_name = str(item.get("stored_name") or "").strip()
+        if not stored_name:
+            raise FileNotFoundError("Khong tim thay file OCR session")
+        file_path = Path(session_dir) / stored_name
+        if not file_path.exists():
+            raise FileNotFoundError("Khong tim thay anh OCR session")
+        return item, file_path
+    raise FileNotFoundError("Khong tim thay anh OCR session")
+
+
+def _load_local_ocr_session_file_items(session_dir: str | Path) -> List[dict]:
+    manifest = _load_local_ocr_session_manifest(session_dir)
+    file_items: List[dict] = []
+    for item in sorted(
+        [item for item in manifest.get("items", []) if isinstance(item, dict)],
+        key=lambda row: int(row.get("index", 0)),
+    ):
+        idx = int(item.get("index", 0))
+        filename = str(item.get("filename") or f"image_{idx + 1}.jpg")
+        _, file_path = _resolve_local_ocr_session_item(session_dir, idx)
+        with open(file_path, "rb") as fr:
+            file_bytes = fr.read()
+        file_items.append({"index": idx, "filename": filename, "bytes": file_bytes})
+    return file_items
+
+
+def _purge_local_ocr_session_path(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path, ignore_errors=True)
+        elif os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def _cleanup_stale_local_ocr_sessions(db=None, ttl_hours: int = LOCAL_OCR_SESSION_TTL_HOURS) -> int:
+    cutoff = datetime.utcnow() - timedelta(hours=max(1, int(ttl_hours)))
+    closed_local_db = False
+    if db is None:
+        db = SessionLocal()
+        closed_local_db = True
+    purged = 0
+    try:
+        stale_jobs = (
+            db.query(OCRJob)
+            .filter(OCRJob.temp_file_path.isnot(None))
+            .filter(OCRJob.updated_at < cutoff)
+            .all()
+        )
+        for job in stale_jobs:
+            path = str(job.temp_file_path or "").strip()
+            if not path:
+                continue
+            _purge_local_ocr_session_path(path)
+            job.temp_file_path = None
+            purged += 1
+        if stale_jobs:
+            db.commit()
+        session_root = _local_ocr_session_root()
+        if session_root.exists():
+            for child in session_root.iterdir():
+                try:
+                    if not child.exists():
+                        continue
+                    if datetime.utcfromtimestamp(child.stat().st_mtime) >= cutoff:
+                        continue
+                    _purge_local_ocr_session_path(str(child))
+                except Exception:
+                    continue
+    finally:
+        if closed_local_db:
+            db.close()
+    return purged
 
 
 def _empty_person_data() -> dict:
@@ -1240,6 +1377,25 @@ def _coarse_doc_type_from_profile(profile: str, model_doc_type: str = "unknown")
     return "unknown"
 
 
+def _has_strong_back_signals(text: str) -> bool:
+    full_norm = _ascii_fold(text or "").lower()
+    return any(
+        token in full_norm
+        for token in (
+            "ngon tro",
+            "dau ngon",
+            "dac diem nhan dang",
+            "date of issue",
+            "date of expiry",
+            "ngay thang nam cap",
+            "co gia tri den",
+            "left index finger",
+            "right index finger",
+            "idvnm",
+        )
+    )
+
+
 def _infer_doc_profile(normalized_lines: List[str], model_doc_type: str = "unknown") -> str:
     full_norm = " ".join([line for line in normalized_lines if line])
     has_mrz = "idvnm" in full_norm
@@ -1252,7 +1408,6 @@ def _infer_doc_profile(normalized_lines: List[str], model_doc_type: str = "unkno
             "date of issue",
             "date of expiry",
             "ngay thang nam cap",
-            "personal identification",
             "left index finger",
             "right index finger",
         )
@@ -1300,6 +1455,16 @@ def _triage_profile_from_state(state: str) -> str:
     return mapping.get(state, DOC_PROFILE_UNKNOWN)
 
 
+def _triage_state_from_profile(profile: str) -> str:
+    mapping = {
+        DOC_PROFILE_FRONT_OLD: TRIAGE_STATE_FRONT_OLD,
+        DOC_PROFILE_FRONT_NEW: TRIAGE_STATE_FRONT_NEW,
+        DOC_PROFILE_BACK_NEW: TRIAGE_STATE_BACK_NEW,
+        DOC_PROFILE_BACK_OLD: TRIAGE_STATE_BACK_OLD,
+    }
+    return mapping.get(profile, TRIAGE_STATE_UNKNOWN)
+
+
 def _triage_side_from_state(state: str) -> str:
     if state in {TRIAGE_STATE_FRONT_OLD, TRIAGE_STATE_FRONT_NEW}:
         return "front"
@@ -1310,6 +1475,12 @@ def _triage_side_from_state(state: str) -> str:
 
 def _triage_state_has_qr(state: str) -> bool:
     return state in {TRIAGE_STATE_FRONT_OLD, TRIAGE_STATE_BACK_NEW}
+
+
+def _should_attempt_qr_rescue(state: str, qr_detected: bool) -> bool:
+    if qr_detected:
+        return True
+    return state in {TRIAGE_STATE_FRONT_OLD, TRIAGE_STATE_BACK_NEW, TRIAGE_STATE_BACK_OLD}
 
 
 def _rotate_by_angle(img_bgr: np.ndarray, angle: int) -> np.ndarray:
@@ -1443,67 +1614,276 @@ def _triage_confidence(face_detected: bool, qr_detected: bool, mrz_score: float,
     return float(max(0.0, min(1.0, score)))
 
 
-def _triage_crop_orientation(crop_img: np.ndarray) -> dict:
-    t_triage = perf_counter()
-    proxy = _make_proxy_image(crop_img, LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE)
-    angle_rows: List[dict] = []
-    total_qr_detect_ms = 0.0
+def _largest_blob_metrics(mask: np.ndarray) -> dict | None:
+    try:
+        cleaned = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), dtype=np.uint8))
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, np.ones((7, 7), dtype=np.uint8))
+        contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    except Exception:
+        return None
+    if not contours:
+        return None
+    h, w = mask.shape[:2]
+    total_area = float(max(1, h * w))
+    best = None
+    best_score = -1.0
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        area_ratio = area / total_area
+        if area_ratio < _BLOB_MIN_AREA_RATIO:
+            continue
+        x, y, bw, bh = cv2.boundingRect(contour)
+        rect_area = float(max(1, bw * bh))
+        fill_ratio = area / rect_area
+        cx = (x + bw / 2.0) / float(max(1, w))
+        cy = (y + bh / 2.0) / float(max(1, h))
+        aspect_ratio = bw / float(max(1, bh))
+        score = area_ratio * max(0.2, fill_ratio)
+        if score <= best_score:
+            continue
+        best_score = score
+        best = {
+            "area_ratio": area_ratio,
+            "fill_ratio": fill_ratio,
+            "aspect_ratio": aspect_ratio,
+            "center_x": cx,
+            "center_y": cy,
+        }
+    return best
 
+
+def _score_front_blob_candidate(
+    metric: dict | None,
+    expected_x: tuple[float, float],
+    expected_y: tuple[float, float],
+    area_scale: float,
+    aspect_range: tuple[float, float] | None = None,
+) -> float:
+    if not metric:
+        return 0.0
+    cx = float(metric.get("center_x", 0.0))
+    cy = float(metric.get("center_y", 0.0))
+    area_ratio = float(metric.get("area_ratio", 0.0))
+    fill_ratio = float(metric.get("fill_ratio", 0.0))
+    aspect_ratio = float(metric.get("aspect_ratio", 1.0))
+    score = min(1.0, area_ratio * area_scale)
+    if expected_x[0] <= cx <= expected_x[1] and expected_y[0] <= cy <= expected_y[1]:
+        score *= 1.0
+    else:
+        score *= 0.24
+    score *= max(0.35, min(1.0, fill_ratio / 0.55))
+    if aspect_range:
+        if aspect_range[0] <= aspect_ratio <= aspect_range[1]:
+            score *= 1.0
+        else:
+            score *= 0.4
+    return float(max(0.0, min(1.0, score)))
+
+
+def _scan_front_blob_orientation(proxy_img: np.ndarray) -> dict:
+    if proxy_img.ndim != 3:
+        return {"side": "unknown", "confidence": 0.0, "angle": 0, "angle_candidates": []}
+
+    angle_candidates: List[dict] = []
     for angle in (0, 90, 180, 270):
-        rotated_proxy = _rotate_by_angle(proxy, angle)
-        face_detected = _detect_face_proxy(rotated_proxy)
-        t_qr = perf_counter()
-        qr_detected = _detect_qr_proxy(rotated_proxy)
-        total_qr_detect_ms += _ms(perf_counter() - t_qr)
-        mrz_score = _mrz_likelihood_score(rotated_proxy)
-        state = _triage_state_from_signals(face_detected, qr_detected, mrz_score)
-        confidence = _triage_confidence(face_detected, qr_detected, mrz_score, state)
-        angle_rows.append(
+        rotated_proxy = _rotate_by_angle(proxy_img, angle)
+        hsv = cv2.cvtColor(rotated_proxy, cv2.COLOR_BGR2HSV)
+        red_mask = None
+        for low, high in _BLOB_RED_HSV_RANGES:
+            part = cv2.inRange(hsv, np.array(low, dtype=np.uint8), np.array(high, dtype=np.uint8))
+            red_mask = part if red_mask is None else cv2.bitwise_or(red_mask, part)
+        gold_low, gold_high = _BLOB_GOLD_HSV_RANGE
+        gold_mask = cv2.inRange(hsv, np.array(gold_low, dtype=np.uint8), np.array(gold_high, dtype=np.uint8))
+
+        emblem_metric = _largest_blob_metrics(red_mask)
+        chip_metric = _largest_blob_metrics(gold_mask)
+        emblem_score = _score_front_blob_candidate(emblem_metric, (0.05, 0.42), (0.04, 0.34), 180.0)
+        chip_score = _score_front_blob_candidate(chip_metric, (0.52, 0.92), (0.12, 0.58), 170.0, (0.75, 1.8))
+        combined_score = max(emblem_score, chip_score, min(1.0, emblem_score * 0.7 + chip_score))
+        angle_candidates.append(
             {
                 "angle": angle,
-                "face_detected": bool(face_detected),
-                "qr_detected": bool(qr_detected),
-                "mrz_score": round(float(mrz_score), 4),
-                "triage_state": state,
-                "confidence": round(float(confidence), 4),
+                "side": "front" if combined_score >= _BLOB_FRONT_SCORE_MIN else "unknown",
+                "confidence": round(float(combined_score), 4),
+                "emblem_score": round(float(emblem_score), 4),
+                "chip_score": round(float(chip_score), 4),
+                "markers": [name for name, score in (("emblem", emblem_score), ("chip", chip_score)) if score >= 0.22],
             }
         )
 
+    if not angle_candidates:
+        return {"side": "unknown", "confidence": 0.0, "angle": 0, "angle_candidates": []}
+
+    best = max(
+        angle_candidates,
+        key=lambda row: (float(row.get("confidence", 0.0)), len(row.get("markers", []))),
+    )
+    return {
+        "side": str(best.get("side", "unknown")),
+        "confidence": float(best.get("confidence", 0.0)),
+        "angle": int(best.get("angle", 0)),
+        "markers": list(best.get("markers", [])),
+        "angle_candidates": angle_candidates,
+    }
+
+
+def _validate_qr_success(crop_img: np.ndarray, angle: int) -> bool:
+    try:
+        rotated_img = _rotate_by_angle(crop_img, angle)
+        success, encoded_img = cv2.imencode(".jpg", rotated_img)
+        if not success:
+            return False
+        detected = try_decode_qr(encoded_img.tobytes()) or ""
+        parsed = parse_cccd_qr(detected) if detected else None
+        return _is_valid_qr_data(parsed)
+    except Exception:
+        return False
+
+
+def _analyze_orientation_row(crop_img: np.ndarray, proxy_img: np.ndarray, angle: int) -> tuple[dict, float]:
+    rotated_proxy = _rotate_by_angle(proxy_img, angle)
+    face_detected = _detect_face_proxy(rotated_proxy)
+    t_qr = perf_counter()
+    qr_detected = _detect_qr_proxy(rotated_proxy)
+    qr_detect_ms = _ms(perf_counter() - t_qr)
+    qr_validated = False
+    if qr_detected and LOCAL_OCR_TRIAGE_EARLY_EXIT:
+        qr_validated = _validate_qr_success(crop_img, angle)
+    mrz_score = _mrz_likelihood_score(rotated_proxy)
+    state = _triage_state_from_signals(face_detected, qr_detected or qr_validated, mrz_score)
+    confidence = _triage_confidence(face_detected, qr_detected or qr_validated, mrz_score, state)
+    return (
+        {
+            "angle": angle,
+            "face_detected": bool(face_detected),
+            "qr_detected": bool(qr_detected or qr_validated),
+            "qr_validated": bool(qr_validated),
+            "mrz_score": round(float(mrz_score), 4),
+            "triage_state": state,
+            "confidence": round(float(confidence), 4),
+        },
+        qr_detect_ms,
+    )
+
+
+def _select_best_triage_row(angle_rows: List[dict]) -> dict:
     if not angle_rows:
-        oriented_img = crop_img
-        best = {
+        return {
             "angle": 0,
             "face_detected": False,
             "qr_detected": False,
+            "qr_validated": False,
             "mrz_score": 0.0,
             "triage_state": TRIAGE_STATE_UNKNOWN,
             "confidence": 0.0,
         }
-    else:
-        best = max(
-            angle_rows,
-            key=lambda row: (
-                float(row.get("confidence", 0.0)),
-                1 if row.get("qr_detected") else 0,
-                1 if row.get("face_detected") else 0,
-                float(row.get("mrz_score", 0.0)),
-            ),
-        )
-        oriented_img = _rotate_by_angle(crop_img, int(best.get("angle", 0)))
+    return max(
+        angle_rows,
+        key=lambda row: (
+            float(row.get("confidence", 0.0)),
+            1 if row.get("qr_detected") else 0,
+            1 if row.get("face_detected") else 0,
+            float(row.get("mrz_score", 0.0)),
+        ),
+    )
 
-    triage_ms = _ms(perf_counter() - t_triage)
+
+def _legacy_triage_crop_orientation(crop_img: np.ndarray, proxy_img: np.ndarray) -> dict:
+    angle_rows: List[dict] = []
+    total_qr_detect_ms = 0.0
+    early_exit_applied = False
+    for angle in (0, 90, 180, 270):
+        row, qr_detect_ms = _analyze_orientation_row(crop_img, proxy_img, angle)
+        total_qr_detect_ms += qr_detect_ms
+        angle_rows.append(row)
+        if LOCAL_OCR_TRIAGE_EARLY_EXIT and row.get("qr_validated"):
+            early_exit_applied = True
+            break
+    best = _select_best_triage_row(angle_rows)
     return {
-        "oriented_img": oriented_img,
+        "oriented_img": _rotate_by_angle(crop_img, int(best.get("angle", 0))),
         "orientation_angle": int(best.get("angle", 0)),
         "triage_state": str(best.get("triage_state", TRIAGE_STATE_UNKNOWN)),
         "face_detected": bool(best.get("face_detected", False)),
         "qr_detected": bool(best.get("qr_detected", False)),
         "mrz_score": float(best.get("mrz_score", 0.0)),
         "triage_confidence": float(best.get("confidence", 0.0)),
-        "triage_ms": triage_ms,
         "qr_detect_ms": round(float(total_qr_detect_ms), 2),
         "angle_candidates": angle_rows,
+        "triage_path": "legacy",
+        "blob_side": "unknown",
+        "blob_confidence": 0.0,
+        "blob_markers": [],
+        "early_exit_applied": bool(early_exit_applied),
     }
+
+
+def _triage_crop_orientation(crop_img: np.ndarray) -> dict:
+    t_triage = perf_counter()
+    proxy = _make_proxy_image(crop_img, LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE)
+    blob = _scan_front_blob_orientation(proxy)
+    total_qr_detect_ms = 0.0
+
+    if blob.get("side") == "front" and float(blob.get("confidence", 0.0)) >= _BLOB_FRONT_SCORE_MIN:
+        angle = int(blob.get("angle", 0))
+        row, qr_detect_ms = _analyze_orientation_row(crop_img, proxy, angle)
+        total_qr_detect_ms += qr_detect_ms
+        mrz_score = float(row.get("mrz_score", 0.0))
+        if row.get("qr_detected") and not row.get("face_detected"):
+            result = _legacy_triage_crop_orientation(crop_img, proxy)
+            result["triage_ms"] = _ms(perf_counter() - t_triage)
+            result["blob_side"] = "front"
+            result["blob_confidence"] = float(blob.get("confidence", 0.0))
+            result["blob_markers"] = list(blob.get("markers", []))
+            result["blob_angle_candidates"] = blob.get("angle_candidates", [])
+            return result
+
+        if not row.get("qr_detected") and not row.get("face_detected") and mrz_score >= _BLOB_STRONG_MRZ_REJECT_SCORE:
+            result = _legacy_triage_crop_orientation(crop_img, proxy)
+            result["triage_ms"] = _ms(perf_counter() - t_triage)
+            result["blob_side"] = "front"
+            result["blob_confidence"] = float(blob.get("confidence", 0.0))
+            result["blob_markers"] = list(blob.get("markers", []))
+            result["blob_angle_candidates"] = blob.get("angle_candidates", [])
+            return result
+
+        triage_state = TRIAGE_STATE_FRONT_OLD if row.get("qr_detected") else TRIAGE_STATE_FRONT_NEW
+        triage_confidence = max(
+            float(blob.get("confidence", 0.0)),
+            _triage_confidence(bool(row.get("face_detected")), bool(row.get("qr_detected")), mrz_score, triage_state),
+        )
+        return {
+            "oriented_img": _rotate_by_angle(crop_img, angle),
+            "orientation_angle": angle,
+            "triage_state": triage_state,
+            "face_detected": bool(row.get("face_detected", False)),
+            "qr_detected": bool(row.get("qr_detected", False)),
+            "mrz_score": mrz_score,
+            "triage_confidence": round(float(triage_confidence), 4),
+            "triage_ms": _ms(perf_counter() - t_triage),
+            "qr_detect_ms": round(float(total_qr_detect_ms), 2),
+            "angle_candidates": [
+                {
+                    "angle": angle,
+                    "face_detected": bool(row.get("face_detected", False)),
+                    "qr_detected": bool(row.get("qr_detected", False)),
+                    "mrz_score": round(float(row.get("mrz_score", 0.0)), 4),
+                    "triage_state": triage_state,
+                    "confidence": round(float(triage_confidence), 4),
+                }
+            ],
+            "triage_path": "blob_front",
+            "blob_side": "front",
+            "blob_confidence": float(blob.get("confidence", 0.0)),
+            "blob_markers": list(blob.get("markers", [])),
+            "blob_angle_candidates": blob.get("angle_candidates", []),
+            "early_exit_applied": False,
+        }
+
+    result = _legacy_triage_crop_orientation(crop_img, proxy)
+    result["triage_ms"] = _ms(perf_counter() - t_triage)
+    result["blob_angle_candidates"] = blob.get("angle_candidates", [])
+    return result
 
 
 def _try_qr_data_from_crop(
@@ -1533,42 +1913,67 @@ def _try_qr_data_from_crop(
     encode_ms = 0.0
     decode_ms = 0.0
     detected_parse_ms = 0.0
+
+    def _qr_decode_variants(img_native: np.ndarray) -> List[tuple[str, np.ndarray]]:
+        variants: List[tuple[str, np.ndarray]] = [("native", img_native)]
+        try:
+            gray = cv2.cvtColor(img_native, cv2.COLOR_BGR2GRAY) if img_native.ndim == 3 else img_native
+            blur = cv2.GaussianBlur(gray, (0, 0), 1.2)
+            sharp = cv2.addWeighted(gray, 1.8, blur, -0.8, 0)
+            variants.append(("sharp_gray", sharp))
+            if max(gray.shape[:2]) <= 1800:
+                scaled_gray = cv2.resize(gray, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+                scaled_sharp = cv2.resize(sharp, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+                variants.append(("scale3_gray", scaled_gray))
+                variants.append(("scale3_sharp", scaled_sharp))
+        except Exception:
+            pass
+        return variants
+
+    variant_attempts: List[dict] = []
     try:
-        t_enc = perf_counter()
-        success, encoded_img = cv2.imencode(".jpg", crop.img_native)
-        encode_ms = _ms(perf_counter() - t_enc)
-        if not success:
-            if isinstance(timing, dict):
-                timing.update(
-                    {
-                        "seed_parse_ms": seed_parse_ms,
-                        "encode_ms": encode_ms,
-                        "decode_ms": decode_ms,
-                        "detected_parse_ms": detected_parse_ms,
-                        "result": "encode_failed",
-                        "total_ms": _ms(perf_counter() - t_total),
-                    }
-                )
-            return None, ""
-        t_dec = perf_counter()
-        detected = try_decode_qr(encoded_img.tobytes()) or ""
-        decode_ms = _ms(perf_counter() - t_dec)
-        t_parse = perf_counter()
-        parsed = parse_cccd_qr(detected) if detected else None
-        detected_parse_ms = _ms(perf_counter() - t_parse)
-        if _is_valid_qr_data(parsed):
-            if isinstance(timing, dict):
-                timing.update(
-                    {
-                        "seed_parse_ms": seed_parse_ms,
-                        "encode_ms": encode_ms,
-                        "decode_ms": decode_ms,
-                        "detected_parse_ms": detected_parse_ms,
-                        "result": "backend_qr",
-                        "total_ms": _ms(perf_counter() - t_total),
-                    }
-                )
-            return parsed, detected
+        for variant_name, variant_img in _qr_decode_variants(crop.img_native):
+            t_enc = perf_counter()
+            success, encoded_img = cv2.imencode(".png", variant_img)
+            variant_encode_ms = _ms(perf_counter() - t_enc)
+            encode_ms += variant_encode_ms
+            if not success:
+                variant_attempts.append({"variant": variant_name, "result": "encode_failed", "encode_ms": variant_encode_ms})
+                continue
+            t_dec = perf_counter()
+            detected = try_decode_qr(encoded_img.tobytes()) or ""
+            variant_decode_ms = _ms(perf_counter() - t_dec)
+            decode_ms += variant_decode_ms
+            t_parse = perf_counter()
+            parsed = parse_cccd_qr(detected) if detected else None
+            variant_parse_ms = _ms(perf_counter() - t_parse)
+            detected_parse_ms += variant_parse_ms
+            is_valid = _is_valid_qr_data(parsed)
+            variant_attempts.append(
+                {
+                    "variant": variant_name,
+                    "result": "valid" if is_valid else ("decoded" if detected else "empty"),
+                    "encode_ms": variant_encode_ms,
+                    "decode_ms": variant_decode_ms,
+                    "parse_ms": variant_parse_ms,
+                    "decoded_len": len(detected or ""),
+                }
+            )
+            if is_valid:
+                if isinstance(timing, dict):
+                    timing.update(
+                        {
+                            "seed_parse_ms": seed_parse_ms,
+                            "encode_ms": round(encode_ms, 2),
+                            "decode_ms": round(decode_ms, 2),
+                            "detected_parse_ms": round(detected_parse_ms, 2),
+                            "result": "backend_qr",
+                            "variant": variant_name,
+                            "variant_attempts": variant_attempts,
+                            "total_ms": _ms(perf_counter() - t_total),
+                        }
+                    )
+                return parsed, detected
     except Exception:
         pass
 
@@ -1576,14 +1981,80 @@ def _try_qr_data_from_crop(
         timing.update(
             {
                 "seed_parse_ms": seed_parse_ms,
-                "encode_ms": encode_ms,
-                "decode_ms": decode_ms,
-                "detected_parse_ms": detected_parse_ms,
+                "encode_ms": round(encode_ms, 2),
+                "decode_ms": round(decode_ms, 2),
+                "detected_parse_ms": round(detected_parse_ms, 2),
                 "result": "no_qr",
+                "variant": "",
+                "variant_attempts": variant_attempts,
                 "total_ms": _ms(perf_counter() - t_total),
             }
         )
     return None, ""
+
+
+def _rotate_crop(crop: DocCrop, angle: int) -> DocCrop:
+    return DocCrop(
+        img_native=_rotate_by_angle(crop.img_native, angle),
+        img_ocr=_rotate_by_angle(crop.img_ocr, angle),
+        bbox=crop.bbox,
+        doc_type=crop.doc_type,
+        confidence=crop.confidence,
+    )
+
+
+def _try_qr_data_from_rotations(
+    crop: DocCrop,
+    preferred_angle: int = 0,
+    timing: Optional[dict] = None,
+) -> tuple[dict | None, str, int]:
+    ordered_angles: List[int] = []
+    for angle in (preferred_angle, 0, 90, 180, 270):
+        normalized = int(angle) % 360
+        if normalized not in ordered_angles:
+            ordered_angles.append(normalized)
+
+    total_ms = 0.0
+    angle_attempts: List[dict] = []
+    for angle in ordered_angles:
+        rotated_crop = crop if angle == 0 else _rotate_crop(crop, angle)
+        angle_timing: Dict[str, Any] = {}
+        qr_data, qr_text = _try_qr_data_from_crop(rotated_crop, timing=angle_timing)
+        attempt_ms = float(angle_timing.get("total_ms", 0.0) or 0.0)
+        total_ms += attempt_ms
+        angle_attempts.append(
+            {
+                "angle": angle,
+                "result": str(angle_timing.get("result", "no_qr")),
+                "variant": str(angle_timing.get("variant", "")),
+                "total_ms": round(attempt_ms, 2),
+            }
+        )
+        if _is_valid_qr_data(qr_data):
+            if isinstance(timing, dict):
+                timing.update(
+                    {
+                        "result": "backend_qr_rescue" if angle != ordered_angles[0] else "backend_qr",
+                        "qr_angle": angle,
+                        "variant": str(angle_timing.get("variant", "")),
+                        "angle_attempts": angle_attempts,
+                        "variant_attempts": angle_timing.get("variant_attempts", []),
+                        "total_ms": round(total_ms, 2),
+                    }
+                )
+            return qr_data, qr_text, angle
+
+    if isinstance(timing, dict):
+        timing.update(
+            {
+                "result": "no_qr",
+                "qr_angle": int(preferred_angle) % 360,
+                "variant": "",
+                "angle_attempts": angle_attempts,
+                "total_ms": round(total_ms, 2),
+            }
+        )
+    return None, "", int(preferred_angle) % 360
 
 
 def _extract_primary_id(
@@ -1675,6 +2146,14 @@ def _ensure_person_record(persons_map: Dict[str, dict], person_order: List[str],
     return record
 
 
+def _should_collect_person_record(prepared: dict) -> bool:
+    if str(prepared.get("triage_state", TRIAGE_STATE_UNKNOWN)) != TRIAGE_STATE_UNKNOWN:
+        return True
+    if str(prepared.get("source_type", "OCR")).upper() == "QR":
+        return True
+    return re.fullmatch(r"\d{12}", str(prepared.get("id_12", "") or "")) is not None
+
+
 def _rekey_person_record(persons_map: Dict[str, dict], person_order: List[str], old_key: str, new_key: str) -> str:
     if old_key == new_key or old_key not in persons_map:
         return new_key
@@ -1715,11 +2194,16 @@ def _analyze_image_prepare(
 
     triage = _triage_crop_orientation(crop.img_native)
     triage_state = str(triage.get("triage_state", TRIAGE_STATE_UNKNOWN))
+    orientation_angle = int(triage.get("orientation_angle", 0))
+    face_detected = bool(triage.get("face_detected", False))
+    qr_detected = bool(triage.get("qr_detected", False))
+    mrz_score = float(triage.get("mrz_score", 0.0))
+    triage_confidence = float(triage.get("triage_confidence", 0.0) or 0.0)
     profile = _triage_profile_from_state(triage_state)
     side = _triage_side_from_state(triage_state)
 
-    oriented_native = _rotate_by_angle(crop.img_native, triage.get("orientation_angle", 0))
-    oriented_ocr = _rotate_by_angle(crop.img_ocr, triage.get("orientation_angle", 0))
+    oriented_native = _rotate_by_angle(crop.img_native, orientation_angle)
+    oriented_ocr = _rotate_by_angle(crop.img_ocr, orientation_angle)
     oriented_crop = DocCrop(
         img_native=oriented_native,
         img_ocr=oriented_ocr,
@@ -1731,8 +2215,34 @@ def _analyze_image_prepare(
     qr_timing: Dict[str, Any] = {}
     qr_data = None
     qr_text = ""
+    qr_rescue_attempted = False
     if _triage_state_has_qr(triage_state) or seeded_qr_text.strip():
         qr_data, qr_text = _try_qr_data_from_crop(oriented_crop, seeded_qr_text, timing=qr_timing)
+    elif not seeded_qr_text.strip() and _should_attempt_qr_rescue(triage_state, qr_detected):
+        qr_rescue_attempted = True
+        qr_data, qr_text, qr_rescue_angle = _try_qr_data_from_rotations(
+            crop,
+            preferred_angle=orientation_angle,
+            timing=qr_timing,
+        )
+        if _is_valid_qr_data(qr_data):
+            qr_detected = True
+            orientation_angle = int(qr_rescue_angle) % 360
+            oriented_native = _rotate_by_angle(crop.img_native, orientation_angle)
+            oriented_ocr = _rotate_by_angle(crop.img_ocr, orientation_angle)
+            oriented_crop = DocCrop(
+                img_native=oriented_native,
+                img_ocr=oriented_ocr,
+                bbox=crop.bbox,
+                doc_type=crop.doc_type,
+                confidence=crop.confidence,
+            )
+            rescued_state = _triage_state_from_signals(face_detected, True, mrz_score)
+            if rescued_state != TRIAGE_STATE_UNKNOWN:
+                triage_state = rescued_state
+                triage_confidence = max(triage_confidence, _triage_confidence(face_detected, True, mrz_score, triage_state))
+                profile = _triage_profile_from_state(triage_state)
+                side = _triage_side_from_state(triage_state)
 
     source_type = "QR" if _is_valid_qr_data(qr_data) else "OCR"
     data = _build_qr_person_data(qr_data or {}) if source_type == "QR" else _empty_person_data()
@@ -1745,7 +2255,7 @@ def _analyze_image_prepare(
     ocr_box_count = 0
     line_count = 0
 
-    if source_type != "QR":
+    if source_type != "QR" and triage_state != TRIAGE_STATE_UNKNOWN:
         det_boxes, rapidocr_det_ms = _rapidocr_detect_boxes(oriented_ocr)
         ocr_box_count = len(det_boxes)
         id_12, id_source, raw_text, id_extract_ms, _, line_count = _extract_primary_id(
@@ -1756,6 +2266,50 @@ def _analyze_image_prepare(
         )
         if id_12:
             data["so_giay_to"] = id_12
+        elif not seeded_qr_text.strip() and not qr_rescue_attempted:
+            qr_rescue_timing: Dict[str, Any] = {}
+            qr_rescue_attempted = True
+            qr_rescue_data, qr_rescue_text, qr_rescue_angle = _try_qr_data_from_rotations(
+                crop,
+                preferred_angle=orientation_angle,
+                timing=qr_rescue_timing,
+            )
+            rescue_total_ms = float(qr_rescue_timing.get("total_ms", 0.0) or 0.0)
+            qr_timing["total_ms"] = round(float(qr_timing.get("total_ms", 0.0) or 0.0) + rescue_total_ms, 2)
+            if qr_rescue_timing.get("angle_attempts"):
+                qr_timing["angle_attempts"] = qr_rescue_timing.get("angle_attempts", [])
+            if qr_rescue_timing.get("variant_attempts"):
+                qr_timing["variant_attempts"] = qr_rescue_timing.get("variant_attempts", [])
+            if qr_rescue_timing.get("variant"):
+                qr_timing["variant"] = qr_rescue_timing.get("variant", "")
+            if qr_rescue_timing.get("result"):
+                qr_timing["result"] = qr_rescue_timing.get("result", "")
+            if qr_rescue_timing.get("qr_angle") is not None:
+                qr_timing["qr_angle"] = qr_rescue_timing.get("qr_angle")
+            if _is_valid_qr_data(qr_rescue_data):
+                qr_data = qr_rescue_data
+                qr_text = qr_rescue_text
+                source_type = "QR"
+                data = _build_qr_person_data(qr_data or {})
+                id_12 = _clean_doc_number(data.get("so_giay_to", ""))
+                id_source = "qr" if id_12 else "none"
+                qr_detected = True
+                orientation_angle = int(qr_rescue_angle) % 360
+                oriented_native = _rotate_by_angle(crop.img_native, orientation_angle)
+                oriented_ocr = _rotate_by_angle(crop.img_ocr, orientation_angle)
+                oriented_crop = DocCrop(
+                    img_native=oriented_native,
+                    img_ocr=oriented_ocr,
+                    bbox=crop.bbox,
+                    doc_type=crop.doc_type,
+                    confidence=crop.confidence,
+                )
+                rescued_state = _triage_state_from_signals(face_detected, True, mrz_score)
+                if rescued_state != TRIAGE_STATE_UNKNOWN:
+                    triage_state = rescued_state
+                    triage_confidence = max(triage_confidence, _triage_confidence(face_detected, True, mrz_score, triage_state))
+                    profile = _triage_profile_from_state(triage_state)
+                    side = _triage_side_from_state(triage_state)
 
     total_ms = _ms(perf_counter() - t_total)
     _log_debug(
@@ -1767,13 +2321,22 @@ def _analyze_image_prepare(
         crop_bbox=list(crop.bbox),
         crop_confidence=round(float(crop.confidence or 0.0), 4),
         triage_state=triage_state,
-        orientation_angle=int(triage.get("orientation_angle", 0)),
-        triage_confidence=round(float(triage.get("triage_confidence", 0.0) or 0.0), 4),
-        face_detected=bool(triage.get("face_detected", False)),
-        qr_detected=bool(triage.get("qr_detected", False)),
-        mrz_score=round(float(triage.get("mrz_score", 0.0) or 0.0), 4),
+        orientation_angle=orientation_angle,
+        triage_confidence=round(triage_confidence, 4),
+        face_detected=face_detected,
+        qr_detected=qr_detected,
+        mrz_score=round(mrz_score, 4),
         angle_candidates=triage.get("angle_candidates", []),
+        triage_path=triage.get("triage_path", "legacy"),
+        blob_side=triage.get("blob_side", "unknown"),
+        blob_confidence=round(float(triage.get("blob_confidence", 0.0) or 0.0), 4),
+        blob_markers=triage.get("blob_markers", []),
         qr_seeded=bool(seeded_qr_text.strip()),
+        qr_result=qr_timing.get("result", ""),
+        qr_variant=qr_timing.get("variant", ""),
+        qr_angle=qr_timing.get("qr_angle", orientation_angle),
+        qr_angle_attempts=qr_timing.get("angle_attempts", []),
+        qr_variant_attempts=qr_timing.get("variant_attempts", []),
         qr_text_preview=_preview_text(qr_text, limit=120),
         source_type=source_type,
         det_box_count=len(det_boxes),
@@ -1805,10 +2368,15 @@ def _analyze_image_prepare(
         "profile": profile,
         "doc_type": _coarse_doc_type_from_profile(profile, crop.doc_type),
         "triage_state": triage_state,
-        "orientation_angle": int(triage.get("orientation_angle", 0)),
-        "face_detected": bool(triage.get("face_detected", False)),
-        "qr_detected": bool(triage.get("qr_detected", False)),
-        "mrz_score": float(triage.get("mrz_score", 0.0)),
+        "orientation_angle": orientation_angle,
+        "face_detected": face_detected,
+        "qr_detected": qr_detected,
+        "mrz_score": mrz_score,
+        "triage_path": str(triage.get("triage_path", "legacy")),
+        "triage_confidence": triage_confidence,
+        "blob_side": str(triage.get("blob_side", "unknown")),
+        "blob_confidence": float(triage.get("blob_confidence", 0.0)),
+        "blob_markers": list(triage.get("blob_markers", [])),
         "qr_text": qr_text,
         "qr_data": qr_data or {},
         "data": data,
@@ -1843,34 +2411,103 @@ def _ensure_detection(prepared: dict) -> None:
     prepared["timing_ms"]["rapidocr_det_ms"] = round(float(prepared["timing_ms"].get("rapidocr_det_ms", 0.0)) + det_ms, 2)
 
 
-def _run_detail_phase(prepared: dict, record: dict) -> tuple[dict, str, float]:
-    _ensure_detection(prepared)
-    selected = filter_target_boxes(prepared.get("det_boxes", []), prepared["img_ocr"].shape[:2], prepared["triage_state"], "detail")
+def _resolve_detail_profile(prepared: dict, inferred_profile: str, raw_text: str) -> str:
+    current_profile = prepared.get("profile", DOC_PROFILE_UNKNOWN)
+    if inferred_profile == DOC_PROFILE_UNKNOWN:
+        return current_profile
+    if current_profile == DOC_PROFILE_UNKNOWN:
+        return inferred_profile
+    current_side = _infer_side(current_profile, prepared.get("doc_type", "unknown"))
+    inferred_side = _infer_side(inferred_profile, prepared.get("doc_type", "unknown"))
+    if current_side == inferred_side:
+        return inferred_profile
+    if inferred_side == "back" and _has_strong_back_signals(raw_text):
+        return inferred_profile
+    return current_profile
+
+
+def _is_valid_doc_number(value: str) -> bool:
+    return re.fullmatch(r"\d{12}", str(value or "")) is not None
+
+
+def _detail_candidate_score(parsed: dict, raw_text: str, final_profile: str, recognized_count: int) -> float:
+    raw_text = raw_text or ""
+    folded = _ascii_fold(raw_text).lower()
+    score = 0.0
+    if _is_valid_doc_number(parsed.get("so_giay_to", "")):
+        score += 6.0
+    if "idvnm" in folded:
+        score += 4.0
+    if _has_strong_back_signals(raw_text):
+        score += 3.0
+    if final_profile in {DOC_PROFILE_BACK_NEW, DOC_PROFILE_BACK_OLD}:
+        score += 2.0
+    if parsed.get("ngay_cap"):
+        score += 0.75
+    if parsed.get("ngay_het_han"):
+        score += 0.75
+    score += min(max(recognized_count, 0), 12) * 0.12
+    score += min(len(raw_text.strip()), 240) / 240.0
+    return round(float(score), 4)
+
+
+def _should_retry_detail_rotation(prepared: dict, parsed: dict, raw_text: str, final_profile: str) -> bool:
+    if str(prepared.get("source_type", "OCR")).upper() == "QR":
+        return False
+    side = prepared.get("side", "unknown")
+    if side != "back" and final_profile not in {DOC_PROFILE_BACK_NEW, DOC_PROFILE_BACK_OLD}:
+        return False
+    if _is_valid_doc_number(parsed.get("so_giay_to", "")) and _has_strong_back_signals(raw_text):
+        return False
+    return True
+
+
+def _run_detail_phase_once(
+    prepared: dict,
+    img_native: np.ndarray,
+    img_ocr: np.ndarray,
+    det_boxes: List[dict],
+    angle: int,
+) -> tuple[dict, str, float, str, dict]:
+    selected = filter_target_boxes(det_boxes, img_ocr.shape[:2], prepared["triage_state"], "detail")
     if not selected:
-        _log_debug("detail_phase", context=prepared.get("filename", ""), selected_box_count=0, result="no_boxes")
-        return _empty_person_data(), "", 0.0
+        return _empty_person_data(), "", 0.0, prepared.get("profile", DOC_PROFILE_UNKNOWN), {
+            "angle": int(angle) % 360,
+            "selected_box_count": 0,
+            "recognized_count": 0,
+            "score": 0.0,
+            "raw_text_preview": "",
+            "final_profile": prepared.get("profile", DOC_PROFILE_UNKNOWN),
+            "id_12": "",
+        }
 
     recognized, detail_ms = _recognize_target_boxes_rapidocr(
-        prepared["img_native"],
+        img_native,
         selected,
-        context=f"{prepared.get('filename', '')}:detail_fast",
+        context=f"{prepared.get('filename', '')}:detail_fast:{int(angle) % 360}",
     )
-    
+
     vietocr_boxes = []
     for item in recognized:
         text = item["text"]
         folded = _ascii_fold(text).lower()
-        if re.fullmatch(r"[\d\W]+", text): continue
-        if len(folded) < 3: continue
+        if re.fullmatch(r"[\d\W]+", text):
+            continue
+        if len(folded) < 3:
+            continue
         skip_labels = r"^(ho va ten|ho ten|full name|gioi tinh|sex|ngay sinh|date of birth|quoc tich|nationality|que quan|place of origin|noi thuong tru|noi cu tru|place of residence|ngay cap|date of issue|co gia tri|date of expiry|idvnm|can cuoc|cong dan|socialist|republic|independence|freedom|happiness|bo cong an|director|public security)"
         if re.search(skip_labels, folded):
             continue
         vietocr_boxes.append(item)
-        
+
     if vietocr_boxes:
-        refined, refined_ms = _recognize_target_boxes(prepared["img_native"], vietocr_boxes, context=f"{prepared.get('filename', '')}:detail_refine")
+        refined, refined_ms = _recognize_target_boxes(
+            img_native,
+            vietocr_boxes,
+            context=f"{prepared.get('filename', '')}:detail_refine:{int(angle) % 360}",
+        )
         detail_ms += refined_ms
-        ref_map = { str(_box_bounds(r["box"])): r["text"] for r in refined }
+        ref_map = {str(_box_bounds(r["box"])): r["text"] for r in refined}
         for item in recognized:
             bnd_str = str(_box_bounds(item["box"]))
             if bnd_str in ref_map:
@@ -1878,23 +2515,90 @@ def _run_detail_phase(prepared: dict, record: dict) -> tuple[dict, str, float]:
 
     lines = _group_lines(recognized)
     raw_text = _build_raw_text(lines)
-    _print_rapidocr_raw_text(raw_text, context=f"detail_{prepared['triage_state']}")
-    parsed = _parse_cccd_fulltext(raw_text, prepared["profile"])
+    _print_rapidocr_raw_text(raw_text, context=f"detail_{prepared['triage_state']}_{int(angle) % 360}")
     inferred_profile = _infer_doc_profile(_normalize_ocr_lines(lines), prepared.get("doc_type", "unknown"))
+    final_profile = _resolve_detail_profile(prepared, inferred_profile, raw_text)
+    parsed = _parse_cccd_fulltext(raw_text, final_profile)
     if not parsed.get("so_giay_to") and prepared.get("id_12"):
         parsed["so_giay_to"] = prepared["id_12"]
+    recognized_count = len(recognized)
+    return parsed, raw_text, detail_ms, final_profile, {
+        "angle": int(angle) % 360,
+        "selected_box_count": len(selected),
+        "recognized_count": recognized_count,
+        "score": _detail_candidate_score(parsed, raw_text, final_profile, recognized_count),
+        "raw_text_preview": _preview_text(raw_text),
+        "final_profile": final_profile,
+        "inferred_profile": inferred_profile,
+        "id_12": _clean_doc_number(parsed.get("so_giay_to", "")),
+    }
+
+
+def _run_detail_phase(prepared: dict, record: dict) -> tuple[dict, str, float, str]:
+    _ensure_detection(prepared)
+    current_angle = int(prepared.get("orientation_angle", 0) or 0) % 360
+    parsed, raw_text, detail_ms, final_profile, meta = _run_detail_phase_once(
+        prepared,
+        prepared["img_native"],
+        prepared["img_ocr"],
+        prepared.get("det_boxes", []),
+        current_angle,
+    )
+    total_detail_ms = detail_ms
+    selected_meta = dict(meta)
+    rescue_attempts: List[dict] = []
+
+    if _should_retry_detail_rotation(prepared, parsed, raw_text, final_profile):
+        for angle in (0, 90, 180, 270):
+            if angle == current_angle:
+                continue
+            rotate_delta = (int(angle) - current_angle) % 360
+            alt_native = _rotate_by_angle(prepared["img_native"], rotate_delta)
+            alt_ocr = _rotate_by_angle(prepared["img_ocr"], rotate_delta)
+            alt_det_boxes, alt_det_ms = _rapidocr_detect_boxes(alt_ocr)
+            alt_parsed, alt_raw_text, alt_detail_ms, alt_profile, alt_meta = _run_detail_phase_once(
+                prepared,
+                alt_native,
+                alt_ocr,
+                alt_det_boxes,
+                angle,
+            )
+            total_detail_ms += alt_det_ms + alt_detail_ms
+            alt_meta["det_ms"] = alt_det_ms
+            rescue_attempts.append(dict(alt_meta))
+            if float(alt_meta.get("score", 0.0)) > float(selected_meta.get("score", 0.0)) + 0.05:
+                parsed, raw_text, final_profile = alt_parsed, alt_raw_text, alt_profile
+                selected_meta = dict(alt_meta)
+                prepared["img_native"] = alt_native
+                prepared["img_ocr"] = alt_ocr
+                prepared["det_boxes"] = alt_det_boxes
+                prepared["orientation_angle"] = int(angle) % 360
+                prepared["ocr_box_count"] = len(alt_det_boxes)
+
+        _log_debug(
+            "detail_rotation_rescue",
+            context=prepared.get("filename", ""),
+            base_angle=current_angle,
+            selected_angle=selected_meta.get("angle", current_angle),
+            base_score=meta.get("score", 0.0),
+            selected_score=selected_meta.get("score", meta.get("score", 0.0)),
+            attempts=rescue_attempts,
+        )
+
     _log_debug(
         "detail_phase",
         context=prepared.get("filename", ""),
-        selected_box_count=len(selected),
-        recognized_count=len(recognized),
-        elapsed_ms=detail_ms,
+        orientation_angle=selected_meta.get("angle", current_angle),
+        selected_box_count=selected_meta.get("selected_box_count", 0),
+        recognized_count=selected_meta.get("recognized_count", 0),
+        elapsed_ms=total_detail_ms,
         current_profile=prepared.get("profile"),
-        inferred_profile=inferred_profile,
+        inferred_profile=selected_meta.get("inferred_profile", DOC_PROFILE_UNKNOWN),
+        final_profile=final_profile,
         parsed_fields=[key for key, value in parsed.items() if (value or "").strip()],
         raw_text_preview=_preview_text(raw_text),
     )
-    return parsed, raw_text, detail_ms
+    return parsed, raw_text, total_detail_ms, final_profile
 
 
 def _local_engine_name() -> str:
@@ -1912,7 +2616,6 @@ def _finalize_image_rows(image_results: List[dict], persons_map: Dict[str, dict]
             row["pair_key"] = pair_key if paired else None
             row["paired"] = paired
             row["warnings"] = warnings
-            row["profile"] = record.get("profile", DOC_PROFILE_UNKNOWN)
 
 
 def _build_summary(
@@ -2051,6 +2754,11 @@ def _local_ocr_batch_from_inputs_triage_v2(
                     "face_detected": prepared["face_detected"],
                     "qr_detected": prepared["qr_detected"],
                     "mrz_score": prepared["mrz_score"],
+                    "triage_path": prepared.get("triage_path", "legacy"),
+                    "triage_confidence": prepared.get("triage_confidence", 0.0),
+                    "blob_side": prepared.get("blob_side", "unknown"),
+                    "blob_confidence": prepared.get("blob_confidence", 0.0),
+                    "blob_markers": prepared.get("blob_markers", []),
                     "id_12": prepared["id_12"],
                     "id_source": prepared["id_source"],
                     "paired": False,
@@ -2075,6 +2783,11 @@ def _local_ocr_batch_from_inputs_triage_v2(
                     "face_detected": False,
                     "qr_detected": False,
                     "mrz_score": 0.0,
+                    "triage_path": "legacy",
+                    "triage_confidence": 0.0,
+                    "blob_side": "unknown",
+                    "blob_confidence": 0.0,
+                    "blob_markers": [],
                     "id_12": "",
                     "id_source": "none",
                     "paired": False,
@@ -2096,6 +2809,8 @@ def _local_ocr_batch_from_inputs_triage_v2(
     row_key_map: Dict[int, str] = {}
 
     for prepared in prepared_rows:
+        if not _should_collect_person_record(prepared):
+            continue
         index = prepared["index"]
         filename = prepared["filename"]
         key = prepared["id_12"] if re.fullmatch(r"\d{12}", prepared["id_12"] or "") else f"img:{index}"
@@ -2125,12 +2840,28 @@ def _local_ocr_batch_from_inputs_triage_v2(
             continue
 
         t_merge = perf_counter()
-        if _should_run_detail_phase(record["data"], prepared["profile"]):
-            parsed, raw_text, detail_ms = _run_detail_phase(prepared, record)
+        if prepared["triage_state"] != TRIAGE_STATE_UNKNOWN and _should_run_detail_phase(record["data"], prepared["profile"]):
+            parsed, raw_text, detail_ms, final_profile = _run_detail_phase(prepared, record)
             prepared["timing_ms"]["targeted_extract_ms"] = detail_ms
+            image_results[index]["orientation_angle"] = prepared.get("orientation_angle", image_results[index].get("orientation_angle", 0))
+            if final_profile and final_profile != prepared.get("profile"):
+                prepared["profile"] = final_profile
+                prepared["triage_state"] = _triage_state_from_profile(final_profile)
+                prepared["side"] = _infer_side(final_profile, prepared.get("doc_type", "unknown"))
+                prepared["doc_type"] = _coarse_doc_type_from_profile(final_profile, prepared.get("doc_type", "unknown"))
+                image_results[index]["profile"] = prepared["profile"]
+                image_results[index]["triage_state"] = prepared["triage_state"]
+                image_results[index]["side"] = prepared["side"]
+                image_results[index]["doc_type"] = prepared["doc_type"]
+                image_results[index]["warnings"] = _collect_warnings(prepared["data"], prepared["profile"])
+                if len(record.get("indexes", [])) <= 1:
+                    record["profile"] = final_profile
+                    record["side"] = prepared["side"]
             if raw_text:
                 _append_person_raw_text(record, raw_text, prepared["filename"])
                 _merge_person_data(record["data"], parsed, record["field_sources"], "OCR", fill_missing_only=False)
+                record["profile"] = _merge_profile(record.get("profile", DOC_PROFILE_UNKNOWN), prepared["profile"])
+                record["side"] = _merge_side(record.get("side", "unknown"), prepared["side"])
                 record["analyses"].append(
                     {
                         "source_type": "OCR",
@@ -2169,6 +2900,18 @@ def _local_ocr_batch_from_inputs_triage_v2(
         warnings = _collect_warnings(record["data"], profile)
         person_source = "QR" if any(str(item.get("source_type", "OCR")).upper() == "QR" for item in record.get("analyses", [])) else "OCR"
         combined_raw_text = "\n\n".join(record.get("raw_texts", []))
+        image_refs = []
+        for index in sorted(record.get("indexes", [])):
+            if not (0 <= index < len(image_results)):
+                continue
+            row = image_results[index]
+            image_refs.append(
+                {
+                    "index": index,
+                    "side": row.get("side", "unknown"),
+                    "triage_state": row.get("triage_state", TRIAGE_STATE_UNKNOWN),
+                }
+            )
         persons.append(
             {
                 "type": "person",
@@ -2180,6 +2923,7 @@ def _local_ocr_batch_from_inputs_triage_v2(
                 "field_sources": record.get("field_sources", {}),
                 "warnings": warnings,
                 "_files": record.get("files", []),
+                "image_refs": image_refs,
                 "raw_text": combined_raw_text,
             }
         )
@@ -2232,8 +2976,18 @@ def local_ocr_from_bytes(
     persons = result.get("persons") or []
     image_results = result.get("image_results") or []
     if not persons:
-        err = (result.get("errors") or [{}])[0].get("error", "Khong nhan dien duoc noi dung")
-        raise ValueError(err)
+        image_result = image_results[0] if image_results else {}
+        return {
+            "persons": [],
+            "properties": [],
+            "marriages": [],
+            "raw_text": image_result.get("raw_text", ""),
+            "doc_type": image_result.get("doc_type", "unknown"),
+            "triage_state": image_result.get("triage_state", TRIAGE_STATE_UNKNOWN),
+            "image_results": image_results,
+            "errors": result.get("errors", []),
+            "timing_ms": (result.get("summary", {}) or {}).get("timing_ms", {}),
+        }
 
     best = persons[0]
     image_result = image_results[0] if image_results else {}
@@ -2253,6 +3007,7 @@ def local_ocr_from_bytes(
                 "profile": profile,
                 "field_sources": best.get("field_sources", {}),
                 "warnings": best.get("warnings", []),
+                "image_refs": best.get("image_refs", []),
                 "triage_state": image_result.get("triage_state", TRIAGE_STATE_UNKNOWN),
                 "orientation_angle": image_result.get("orientation_angle", 0),
                 "face_detected": image_result.get("face_detected", False),
@@ -2266,8 +3021,29 @@ def local_ocr_from_bytes(
         "marriages": [],
         "raw_text": raw_text,
         "doc_type": image_result.get("doc_type", "unknown"),
+        "image_results": image_results,
         "timing_ms": (result.get("summary", {}) or {}).get("timing_ms", {}),
     }
+
+
+async def _create_local_ocr_session(job_id: str, uploads: List[UploadFile]) -> str:
+    session_dir = _local_ocr_session_dir(job_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    manifest_items = []
+    try:
+        for index, upload in enumerate(uploads):
+            safe_name = _safe_filename(upload.filename or "", index)
+            ext = os.path.splitext(safe_name)[1].lower() or ".jpg"
+            stored_name = f"{index:04d}{ext}"
+            raw = await upload.read()
+            with open(session_dir / stored_name, "wb") as fw:
+                fw.write(raw)
+            manifest_items.append({"index": index, "filename": upload.filename or safe_name, "stored_name": stored_name})
+        _write_local_ocr_session_manifest(session_dir, job_id, manifest_items)
+    except Exception:
+        _purge_local_ocr_session_path(str(session_dir))
+        raise
+    return str(session_dir)
 
 
 @router.post("/analyze-local")
@@ -2290,19 +3066,12 @@ async def submit_local_job(
     if not file:
         raise HTTPException(status_code=400, detail="Chua co file")
     _ensure_local_ocr_dependencies()
-
-    temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "ocr")
-    os.makedirs(temp_dir, exist_ok=True)
     job_id = str(uuid.uuid4())
-    ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
-    temp_path = os.path.join(temp_dir, f"{job_id}{ext}")
-
-    raw = await file.read()
-    with open(temp_path, "wb") as fw:
-        fw.write(raw)
+    temp_path = await _create_local_ocr_session(job_id, [file])
 
     db = SessionLocal()
     try:
+        _cleanup_stale_local_ocr_sessions(db)
         job = OCRJob(
             id=job_id,
             status="queued",
@@ -2332,47 +3101,25 @@ async def submit_local_batch_job(
     if not files:
         raise HTTPException(status_code=400, detail="Chua co file")
     _ensure_local_ocr_dependencies()
-
-    temp_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tmp", "ocr")
-    os.makedirs(temp_root, exist_ok=True)
     job_id = str(uuid.uuid4())
-    batch_dir = os.path.join(temp_root, f"batch_{job_id}")
-    os.makedirs(batch_dir, exist_ok=True)
+    session_dir = await _create_local_ocr_session(job_id, files)
 
-    manifest_items = []
+    db = SessionLocal()
     try:
-        for index, upload in enumerate(files):
-            safe_name = _safe_filename(upload.filename or "", index)
-            ext = os.path.splitext(safe_name)[1].lower() or ".jpg"
-            stored_name = f"{index:04d}{ext}"
-            file_path = os.path.join(batch_dir, stored_name)
-            raw = await upload.read()
-            with open(file_path, "wb") as fw:
-                fw.write(raw)
-            manifest_items.append({"index": index, "filename": upload.filename or safe_name, "stored_name": stored_name})
-
-        manifest_path = os.path.join(batch_dir, "manifest.json")
-        with open(manifest_path, "w", encoding="utf-8") as fw:
-            json.dump({"items": manifest_items}, fw, ensure_ascii=False)
-
-        db = SessionLocal()
-        try:
-            job = OCRJob(
-                id=job_id,
-                status="queued",
-                temp_file_path=batch_dir,
-                result_json=None,
-                error_message=None,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
-            )
-            db.add(job)
-            db.commit()
-        finally:
-            db.close()
-    except Exception:
-        shutil.rmtree(batch_dir, ignore_errors=True)
-        raise
+        _cleanup_stale_local_ocr_sessions(db)
+        job = OCRJob(
+            id=job_id,
+            status="queued",
+            temp_file_path=session_dir,
+            result_json=None,
+            error_message=None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
 
     from tasks import process_ocr_batch_job
 
@@ -2393,6 +3140,38 @@ async def get_local_job_status(job_id: str):
             "result_json": job.result_json,
             "error_message": job.error_message,
         }
+    finally:
+        db.close()
+
+
+@router.get("/local/image/{job_id}/{index}")
+async def get_local_job_image(job_id: str, index: int):
+    db = SessionLocal()
+    try:
+        job = db.query(OCRJob).filter(OCRJob.id == job_id).first()
+        if not job or not job.temp_file_path:
+            raise HTTPException(status_code=404, detail="Khong tim thay OCR session")
+        try:
+            _, file_path = _resolve_local_ocr_session_item(job.temp_file_path, index)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return FileResponse(path=str(file_path), filename=file_path.name)
+    finally:
+        db.close()
+
+
+@router.delete("/local/session/{job_id}")
+async def delete_local_job_session(job_id: str):
+    db = SessionLocal()
+    try:
+        job = db.query(OCRJob).filter(OCRJob.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail="Khong tim thay job")
+        _purge_local_ocr_session_path(job.temp_file_path)
+        job.temp_file_path = None
+        db.commit()
+        _cleanup_stale_local_ocr_sessions(db)
+        return {"ok": True, "job_id": job_id}
     finally:
         db.close()
 
