@@ -1161,7 +1161,7 @@ endif %}
               <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-primary flex-grow-1" id="ocr-btn-extract" onclick="ocrExtractAll()"
                   disabled title="Khuyến nghị: Nhạy bén, cần token">
-                  <span id="ocr-btn-text"><i class="bi bi-robot me-1"></i>AI OCR (GPT)</span>
+                  <span id="ocr-btn-text"><i class="bi bi-robot me-1"></i>AI OCR</span>
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" onclick="ocrClearAll()" title="Xoá tất cả ảnh">
                   <i class="bi bi-trash"></i>
@@ -1438,8 +1438,102 @@ endif %}
 
         const btn = document.getElementById('tpl-btn-upload');
         btn.disabled = true;
+        /*
+        document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
+        try {
+          const formData = new FormData();
+          for (const item of pending) {
+            item.status = 'processing';
+            renderQueue();
+            const blob = item.file || await (await fetch(item.dataUrl)).blob();
+            formData.append('files', blob, item.name);
+          }
+
+          const resp = await fetch('/api/ocr/analyze', { method: 'POST', body: formData });
+          if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
+          const data = await resp.json();
+
+          const persons = Array.isArray(data.persons) ? data.persons : [];
+          const properties = Array.isArray(data.properties) ? data.properties : [];
+          const marriages = Array.isArray(data.marriages) ? data.marriages : [];
+          const byFile = {};
+
+          for (const p of persons) {
+            const sourceType = String(p.source_type || 'AI').toUpperCase();
+            const files = Array.isArray(p._files) && p._files.length ? p._files : [];
+            for (const f of files.filter(Boolean)) {
+              (byFile[f] = byFile[f] || []).push({
+                type: 'person',
+                data: p,
+                source: sourceType,
+                source_type: sourceType,
+                filename: f,
+              });
+            }
+          }
+          for (const pr of properties) {
+            const filename = pr._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'property',
+              data: pr,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+          for (const m of marriages) {
+            const filename = m._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'marriage',
+              data: m,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+
+          for (const item of pending) {
+            const results = byFile[item.name] || [];
+            if (results.length) {
+              const r = results[0];
+              const sourceType = String(r.source_type || r.source || 'AI').toUpperCase();
+              item.status = sourceType === 'QR' ? 'qr' : 'ai';
+              item._result = { ...r, filename: item.name };
+            } else {
+              item.status = 'error';
+              item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+            }
+            renderQueue();
+          }
+
+          ocrResults.push(...persons.map(p => ({
+            type: 'person',
+            data: p,
+            source: String(p.source_type || 'AI').toUpperCase(),
+            source_type: String(p.source_type || 'AI').toUpperCase(),
+            side: p.side || 'unknown',
+          })));
+          ocrResults.push(...properties.map(p => ({ type: 'property', data: p, source: 'AI', source_type: 'AI' })));
+          ocrResults.push(...marriages.map(m => ({ type: 'marriage', data: m, source: 'AI', source_type: 'AI' })));
+        } catch (e) {
+          for (const item of pending) {
+            item.status = 'error';
+            item._errorMsg = e.message;
+            renderQueue();
+          }
+          showToast('Lỗi OCR: ' + e.message, 'danger');
+        }
+
+        mergeOcrResultsInPlace();
+        renderResults();
+        autoStageOcrResults();
+
+        btn.disabled = false;
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
+        return;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải...';
 
+        */
         const fd = new FormData();
         fd.append('ten_mau', ten);
         fd.append('file_mau', file);
@@ -3703,6 +3797,98 @@ endif %}
         const btn = document.getElementById('ocr-btn-extract');
         btn.disabled = true;
         document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
+        try {
+          const formData = new FormData();
+          for (const item of pending) {
+            item.status = 'processing';
+            renderQueue();
+            const blob = item.file || await (await fetch(item.dataUrl)).blob();
+            formData.append('files', blob, item.name);
+          }
+
+          const resp = await fetch('/api/ocr/analyze', { method: 'POST', body: formData });
+          if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
+          const data = await resp.json();
+
+          const persons = Array.isArray(data.persons) ? data.persons : [];
+          const properties = Array.isArray(data.properties) ? data.properties : [];
+          const marriages = Array.isArray(data.marriages) ? data.marriages : [];
+          const byFile = {};
+
+          for (const p of persons) {
+            const sourceType = String(p.source_type || 'AI').toUpperCase();
+            const files = Array.isArray(p._files) && p._files.length ? p._files : [];
+            for (const f of files.filter(Boolean)) {
+              (byFile[f] = byFile[f] || []).push({
+                type: 'person',
+                data: p,
+                source: sourceType,
+                source_type: sourceType,
+                filename: f,
+              });
+            }
+          }
+          for (const pr of properties) {
+            const filename = pr._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'property',
+              data: pr,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+          for (const m of marriages) {
+            const filename = m._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'marriage',
+              data: m,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+
+          for (const item of pending) {
+            const results = byFile[item.name] || [];
+            if (results.length) {
+              const r = results[0];
+              const sourceType = String(r.source_type || r.source || 'AI').toUpperCase();
+              item.status = sourceType === 'QR' ? 'qr' : 'ai';
+              item._result = { ...r, filename: item.name };
+            } else {
+              item.status = 'error';
+              item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+            }
+            renderQueue();
+          }
+
+          ocrResults.push(...persons.map(p => ({
+            type: 'person',
+            data: p,
+            source: String(p.source_type || 'AI').toUpperCase(),
+            source_type: String(p.source_type || 'AI').toUpperCase(),
+            side: p.side || 'unknown',
+          })));
+          ocrResults.push(...properties.map(p => ({ type: 'property', data: p, source: 'AI', source_type: 'AI' })));
+          ocrResults.push(...marriages.map(m => ({ type: 'marriage', data: m, source: 'AI', source_type: 'AI' })));
+        } catch (e) {
+          for (const item of pending) {
+            item.status = 'error';
+            item._errorMsg = e.message;
+            renderQueue();
+          }
+          showToast('Lỗi OCR: ' + e.message, 'danger');
+        }
+
+        mergeOcrResultsInPlace();
+        renderResults();
+        autoStageOcrResults();
+
+        btn.disabled = false;
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
+        return;
+        document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
 
         // ── Bước 1: QR scan tất cả (client-side, miễn phí) ──────────────────
         const needsAI = [];
@@ -3762,8 +3948,7 @@ endif %}
               if (results.length) {
                 const r = results[0];
                 // Mặt sau CCCD đã ghép → show "ai (mặt sau)" không cần thêm vào ocrResults
-                const isBackOnly = r.type === 'person' && r.data?._source?.includes('+back')
-                  && r.data?._files?.[1] === item.name;
+                const isBackOnly = false;
                 item.status = isBackOnly ? 'ai_back' : 'ai';
                 item._result = { ...r, source: 'AI', filename: item.name };
               } else {
@@ -3794,7 +3979,7 @@ endif %}
         autoStageOcrResults();  // Tự động đưa vào staging + pool
 
         btn.disabled = false;
-        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR (GPT)';
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
       };
 
       // ── Trích xuất Local RapidOCR ────────────────────────────────────

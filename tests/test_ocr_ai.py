@@ -4,7 +4,7 @@ from unittest import mock
 
 from fastapi import HTTPException, UploadFile
 
-from routers import ocr
+from routers import ocr_ai
 
 
 def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
@@ -25,11 +25,11 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            mock.patch.object(ocr, "try_decode_qr", return_value="qr-text"),
-            mock.patch.object(ocr, "parse_cccd_qr", return_value=qr_data),
-            mock.patch.object(ocr, "call_vision_images", side_effect=AssertionError("AI should not run")),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value="qr-text"),
+            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
+            mock.patch.object(ocr_ai, "call_vision_images", side_effect=AssertionError("AI should not run")),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
         self.assertEqual(result["summary"]["qr_hits"], 1)
         self.assertEqual(result["summary"]["ai_runs"], 0)
@@ -58,11 +58,11 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with (
-            mock.patch.object(ocr, "try_decode_qr", return_value=None),
-            mock.patch.object(ocr, "resize_to_base64", return_value="b64"),
-            mock.patch.object(ocr, "call_vision_images", return_value=ai_output),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
+            mock.patch.object(ocr_ai, "call_vision_images", return_value=ai_output),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
         self.assertEqual(result["summary"]["qr_hits"], 0)
         self.assertEqual(result["summary"]["ai_runs"], 1)
@@ -80,15 +80,15 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         upload = make_upload("broken.jpg")
 
         with (
-            mock.patch.object(ocr, "try_decode_qr", return_value=None),
-            mock.patch.object(ocr, "resize_to_base64", return_value="b64"),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
             mock.patch.object(
-                ocr,
+                ocr_ai,
                 "call_vision_images",
                 return_value=[HTTPException(status_code=502, detail="upstream error")],
             ),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
         self.assertEqual(result["persons"], [])
         self.assertEqual(len(result["errors"]), 1)

@@ -1,7 +1,7 @@
 # CLAUDE.md - notary_v2
 
 Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
-Cap nhat: 01/04/2026.
+Cap nhat: 13/04/2026.
 
 ## Nguyen tac van hanh mac dinh
 - Mac dinh phat trien va test tren local.
@@ -13,11 +13,114 @@ Cap nhat: 01/04/2026.
   - `bash deploy/vps/manage_services.sh restart`
   - `bash deploy/vps/manage_services.sh logs`
 - Neu commit local va VPS bi lech nhau, phai xac minh ro ben nao la ban moi nhat truoc khi tiep tuc, khong duoc mac dinh local la nguon dung.
+- OCR toc do cao mac dinh `no fallback`:
+  - Khong them fallback theo thoi quen.
+  - Chi them fallback khi co benchmark moi chung minh recall tang dang ke va latency van chap nhan duoc.
+  - Cloud AI hien tai: `server QR raw_only -> false => AI ngay`.
+  - Local OCR la pipeline nghien cuu rieng; neu can fallback/triage/rotate thi ly do phai nam trong local, khong keo sang AI.
 ## Tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
 - Frontend: Jinja2 + Bootstrap + Vanilla JS.
 - Local OCR: RapidOCR detection + VietOCR recognition (CPU-only).
+
+## Cach doc repo nay
+- Khong doc lai toan bo codebase tu dau moi khi debug.
+- Bat dau tu `CLAUDE.md` de xac dinh dung entrypoint, sau do mo file plan trong `docs/plans/`, roi moi doc file code lien quan.
+- Neu sua 1 flow lon ma thay `CLAUDE.md` khong con dung nua, phai cap nhat lai ngay. `CLAUDE.md` la ban do repo, khong chi la ghi chu chung chung.
+
+## Ban do repo / ownership
+- `main.py`
+  - Tao FastAPI app.
+  - Load `.env`.
+  - Chay DB migrations nhe truoc `create_all`.
+  - Mount static/templates.
+  - Include routers.
+  - Warmup Local OCR luc startup.
+- `database.py`
+  - Engine, `SessionLocal`, `Base`, va cac ham migrate schema.
+- `models.py`
+  - Core tables: `Customer`, `Property`, `InheritanceCase`, `OCRJob`, `ExtractedDocument`.
+- `routers/`
+  - `customers.py`: CRUD/import khach hang.
+  - `properties.py`: CRUD tai san.
+  - `cases.py`: man hinh trung tam cua nghiep vu ho so, gom form/detail/preview/template.
+  - `participants.py`: API nguoi tham gia.
+  - `ocr_ai.py`: Cloud OCR / AI OCR sync, tach rieng khoi local.
+  - `ocr_local.py`: Local OCR core + async submit/status/save.
+- `tasks.py`
+  - Celery worker cho Local OCR async.
+  - Khong tu viet OCR, chi doc file tam, goi `routers.ocr_local`, luu ket qua vao `OCRJob`.
+- `frontend/templates/`
+  - `cases/form.html` la UI lon nhat va la noi OCR duoc goi tu frontend.
+  - `customers/*.html`, `properties/*.html`, `cases/*.html` di kem tung router cung ten.
+- `frontend/static/`
+  - `ocr_qr_worker.js`: QR worker phia client.
+  - `ReactFlowApp.jsx`: UI ReactFlow nhung van duoc embed tu `cases/form.html`.
+- `docs/plans/`
+  - Noi giu decision record theo feature. Sua feature nao thi doc plan do truoc.
+
+## Quan he goi nhau quan trong
+- App startup
+  - `main.py` -> load env -> migrate DB -> include routers -> warmup `routers.ocr_local.warmup_local_ocr()`.
+- Cloud OCR sync
+  - Frontend `frontend/templates/cases/form.html` -> `POST /api/ocr/analyze` -> `routers/ocr_ai.py:analyze_images()`.
+  - Flow trong `routers/ocr_ai.py`: server QR `raw_only` 1 lan -> neu QR hop le thi tra QR result rieng -> neu khong co QR thi preprocess nhe -> goi Qwen/AI model -> normalize JSON -> khong auto-ghep front/back o backend.
+- Local OCR async
+  - Frontend `frontend/templates/cases/form.html` -> `POST /api/ocr/local/submit-batch`.
+  - `routers/ocr_local.py` tao `OCRJob`, luu file tam, enqueue `tasks.process_ocr_batch_job`.
+  - `tasks.py` doc `manifest.json` + bytes -> goi `local_ocr_batch_from_inputs()` -> luu `result_json` vao `OCRJob`.
+  - Frontend poll `GET /api/ocr/local/status/{job_id}`.
+  - Frontend co the goi `POST /api/ocr/local/confirm-save` de luu `ExtractedDocument`.
+- OCR UI relation
+  - `frontend/templates/cases/form.html` la diem noi giua OCR AI, OCR Local, QR worker, va mapping ket qua vao form.
+  - `frontend/static/ocr_qr_worker.js` la telemetry/QR support phia client, khong phai source of truth cua OCR server.
+  - `frontend/static/ReactFlowApp.jsx` la UI ReactFlow duoc nhung vao `cases/form.html`, khong phai mot app frontend tach rieng.
+  - AI button va Local button phai duoc debug nhu 2 flow doc lap; khong duoc mac dinh chung helper neu khong co ly do rat ro.
+
+## Khi debug, mo file nao truoc
+- Bug Cloud OCR / AI OCR
+  - Doc `docs/plans/ocr_ai.md` -> `routers/ocr_ai.py` -> `.env` -> `frontend/templates/cases/form.html`.
+- Bug Local OCR / pairing / front-back / merge
+  - Doc `docs/plans/ocr_local.md` -> `routers/ocr_local.py` -> `tasks.py` -> `models.py` (`OCRJob`).
+- Bug OCR UI tren form ho so
+  - `frontend/templates/cases/form.html` -> `frontend/static/ocr_qr_worker.js` -> `routers/ocr_ai.py` hoac `routers/ocr_local.py` tuy endpoint.
+- Bug queue / pending job / worker
+  - `tasks.py` -> `models.py` (`OCRJob`) -> `logs/worker.log`.
+- Bug startup / route khong mount / env khong load
+  - `main.py` -> `.env` -> `database.py`.
+- Bug man hinh ho so, preview, template
+  - `routers/cases.py` -> `frontend/templates/cases/*.html` -> `frontend/static/ReactFlowApp.jsx` neu lien quan flow graph.
+- Bug khach hang
+  - `routers/customers.py` -> `frontend/templates/customers/*.html`.
+- Bug tai san
+  - `routers/properties.py` -> `frontend/templates/properties/*.html`.
+
+## Bai toan OCR tong the
+- Day khong phai bai toan OCR thuan `1 anh -> 1 doan text`.
+- Input thuong la nhieu anh cung luc, thu tu lon xon, co the chen mat truoc, mat sau, nhieu CCCD khac nhau, va ca anh khong phai CCCD.
+- He thong phai giai dong thoi cac bai toan nho sau:
+  - Nhan dien anh nao la CCCD, anh nao khong phai CCCD.
+  - Nhan dien mat truoc / mat sau.
+  - Ghep cap dung cac anh thuoc cung 1 CCCD.
+  - Trich xuat du lieu va tra JSON dung contract.
+- Nguyen tac thiet ke bat buoc:
+  - Luon danh gia bai toan theo `batch end-to-end`, khong toi uu tung buoc rieng le neu tong thoi gian lai tang.
+  - Uu tien pipeline giai nhieu bai toan trong cung mot luong xu ly neu do chinh xac van dat yeu cau.
+  - Moi thay doi OCR phai kiem tra lai xem co dang giai quyet ket hop ca `phan loai + nhan dien side + ghep cap + trich xuat JSON` nhanh hon hay khong.
+  - Khong coi accuracy OCR text don le la metric duy nhat; metric dung la do dung cua ket qua JSON cuoi cung tren ca batch anh lon xon.
+
+## Boundary AI vs Local
+- `routers/ocr_ai.py` va `routers/ocr_local.py` la 2 pipeline tach rieng.
+- OCR AI:
+  - Uu tien latency.
+  - QR chi scan 1 lan tren server, `raw_only`.
+  - QR hit thi tra ket qua rieng; khong xoay, khong triage, khong auto-pair front/back o backend.
+  - Frontend AI path khong duoc scan QR client-side truoc khi goi server.
+- OCR Local:
+  - Uu tien nghien cuu/chinh xac/pairing.
+  - Duoc giu triage, rotate, crop, QR rescue, deterministic merge.
+- Khong import helper QR/parser giua AI va Local. Neu can giong nhau thi duplicate co chu dich de giu kha nang debug doc lap.
 
 ## Chay du an
 ```bash
@@ -159,7 +262,7 @@ Moi chuc nang lon co file plan rieng trong `docs/plans/`. Agent phai mo va doc p
 
 | Lam viec voi... | Doc plan nay truoc |
 |---|---|
-| `routers/ocr.py` (Cloud OCR, AI OCR) | `docs/plans/ocr_ai.md` |
+| `routers/ocr_ai.py` (Cloud OCR, AI OCR) | `docs/plans/ocr_ai.md` |
 | `routers/ocr_local.py`, `tasks.py` (Local OCR) | `docs/plans/ocr_local.md` |
 
 Index day du: `docs/plans/_INDEX.md`

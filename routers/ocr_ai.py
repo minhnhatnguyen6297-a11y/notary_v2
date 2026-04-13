@@ -2,12 +2,12 @@
 Cloud OCR router.
 
 Fast path:
-1. Try QR locally.
+1. Try QR once on the server using raw image bytes.
 2. Preprocess image lightly.
 3. If QR fails, send the image straight to AI OCR.
 
 Cloud OCR intentionally avoids front/back, old/new, MRZ pairing, and other
-document-side heuristics. Those rules now belong to the Local OCR pipeline.
+document-side heuristics. Those rules belong to the Local OCR pipeline.
 """
 
 from __future__ import annotations
@@ -16,10 +16,12 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import os
 import re
 import unicodedata
 from datetime import datetime
+from time import perf_counter
 from typing import Any, List
 
 import httpx
@@ -28,22 +30,33 @@ from dotenv import dotenv_values
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, ImageFilter, ImageOps
 
-try:
-    import cv2
-    import numpy as np
-except Exception:
-    cv2 = None
-    np = None
-
 
 router = APIRouter(tags=["OCR"])
+_logger = logging.getLogger("ocr_ai")
 
 _ENV_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 MAX_IMAGE_PX = 1000
+MAX_IMAGE_PX_QWEN = int(os.getenv("QWEN_MAX_IMAGE_PX", "1600"))
 JPEG_QUALITY = 82
 AI_TIMEOUT_SECONDS = 120.0
 AI_CONCURRENCY = 4
+
+
+def _ms(seconds: float) -> float:
+    return round(max(0.0, float(seconds)) * 1000.0, 2)
+
+
+def _log_ocr_ai(event: str, level: str = "info", **fields: Any) -> None:
+    payload = {"event": event, **fields}
+    try:
+        message = json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        message = str(payload)
+    if level == "warning":
+        _logger.warning("[OCR_AI] %s", message)
+    else:
+        _logger.info("[OCR_AI] %s", message)
 
 
 def _read_env() -> dict[str, str]:
@@ -51,7 +64,13 @@ def _read_env() -> dict[str, str]:
 
 
 def _get_api_key(model: str) -> str:
-    key_name = "GEMINI_API_KEY" if "gemini" in model.lower() else "OPENAI_API_KEY"
+    m = model.lower()
+    if "qwen" in m:
+        key_name = "QWEN_API_KEY"
+        fallback = "DASHSCOPE_API_KEY"
+        env = _read_env()
+        return os.getenv(key_name, "") or env.get(key_name, "") or os.getenv(fallback, "") or env.get(fallback, "")
+    key_name = "GEMINI_API_KEY" if "gemini" in m else "OPENAI_API_KEY"
     return os.getenv(key_name, "") or _read_env().get(key_name, "")
 
 
@@ -78,18 +97,6 @@ def _zxing_decode_qr(image_obj) -> str | None:
     return None
 
 
-def _cv_to_pil_gray(gray_img):
-    if cv2 is None or np is None:
-        return None
-    try:
-        if gray_img.ndim == 2:
-            return Image.fromarray(gray_img)
-        rgb = cv2.cvtColor(gray_img, cv2.COLOR_BGR2RGB)
-        return Image.fromarray(rgb)
-    except Exception:
-        return None
-
-
 def _qr_variants(file_bytes: bytes) -> list[Image.Image]:
     variants: list[Image.Image] = []
     try:
@@ -101,48 +108,6 @@ def _qr_variants(file_bytes: bytes) -> list[Image.Image]:
     except Exception:
         pass
 
-    if cv2 is None or np is None:
-        return variants
-
-    try:
-        arr = np.frombuffer(file_bytes, dtype=np.uint8)
-        img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img_bgr is None:
-            return variants
-
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape[:2]
-        scale = 2.0
-        nw, nh = int(w * scale), int(h * scale)
-        if nw <= 2600 and nh <= 2600:
-            upscaled = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_CUBIC)
-            pil_var = _cv_to_pil_gray(upscaled)
-            if pil_var is not None:
-                variants.append(pil_var)
-            base_for_thresh = upscaled
-        else:
-            base_for_thresh = gray
-
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(base_for_thresh)
-        sharpen = cv2.filter2D(
-            clahe,
-            -1,
-            np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32),
-        )
-        adaptive = cv2.adaptiveThreshold(
-            sharpen,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            31,
-            7,
-        )
-        pil_var = _cv_to_pil_gray(adaptive)
-        if pil_var is not None:
-            variants.append(pil_var)
-    except Exception:
-        pass
-
     return variants
 
 
@@ -151,21 +116,6 @@ def try_decode_qr(file_bytes: bytes) -> str | None:
         decoded = _zxing_decode_qr(candidate)
         if decoded:
             return decoded
-
-    if cv2 is None or np is None:
-        return None
-
-    try:
-        arr = np.frombuffer(file_bytes, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            return None
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        decoded, _, _ = cv2.QRCodeDetector().detectAndDecode(gray)
-        if decoded:
-            return decoded.strip()
-    except Exception:
-        pass
     return None
 
 
@@ -391,6 +341,34 @@ Rules:
 - If the image is not one of the supported document types, return [{"doc_type":"unknown","data":{}}].
 """
 
+SYSTEM_PROMPT_QWEN = """Phan tich anh tai lieu phap ly Viet Nam va tra ve JSON array.
+
+Moi item la object gom:
+- "doc_type": "person" | "marriage_cert" | "land_cert" | "unknown"
+- "side": "front" | "back" | "unknown"  (chi dung cho doc_type=person)
+- "data": object chua cac truong
+
+Voi "person" (CCCD/CMND):
+{"ho_ten":"","so_giay_to":"","ngay_sinh":"","gioi_tinh":"","dia_chi":"","ngay_cap":"","ngay_het_han":""}
+
+Voi "marriage_cert":
+{"chong_ho_ten":"","chong_ngay_sinh":"","chong_so_giay_to":"","vo_ho_ten":"","vo_ngay_sinh":"","vo_so_giay_to":"","ngay_dang_ky":"","noi_dang_ky":""}
+
+Voi "land_cert":
+{"so_serial":"","so_thua_dat":"","so_to_ban_do":"","dia_chi_dat":"","loai_dat":"","ngay_cap":"","co_quan_cap":""}
+
+Quy tac:
+- Mat truoc CCCD (side=front): co ho ten, ngay sinh, anh chan dung.
+- Mat sau CCCD moi (side=back): co "Noi cu tru" hoac van tay + MRZ.
+- Mat sau CCCD cu (side=back): co "Dac diem nhan dang" + dau van tay.
+- Ngay theo dinh dang DD/MM/YYYY.
+- So giay to chi gom chu so.
+- Giu dau tieng Viet neu doc duoc.
+- Anh khong phai tai lieu phap ly → [{"doc_type":"unknown","data":{}}].
+- Truong khong doc duoc → chuoi rong, khong doan mo.
+- Tra ve ONLY JSON array, khong them text khac.
+"""
+
 
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
@@ -488,7 +466,9 @@ def _normalize_ai_item(item: Any, filename: str) -> dict[str, Any]:
     else:
         normalized_data = {}
 
-    return {"doc_type": doc_type, "data": normalized_data, "filename": filename}
+    side_raw = _clean_text(item.get("side", "")).lower()
+    side = side_raw if side_raw in ("front", "back") else "unknown"
+    return {"doc_type": doc_type, "data": normalized_data, "filename": filename, "side": side}
 
 
 def _prepare_image_bytes(file_bytes: bytes, max_px: int = MAX_IMAGE_PX) -> bytes:
@@ -537,7 +517,9 @@ async def _call_vision_single(
     api_key: str,
     image_b64: str,
 ) -> list[dict]:
-    is_gemini = "gemini" in model.lower()
+    m = model.lower()
+    is_gemini = "gemini" in m
+    is_qwen = "qwen" in m
 
     try:
         if is_gemini:
@@ -554,6 +536,32 @@ async def _call_vision_single(
                         }
                     ],
                     "generationConfig": {"temperature": 0.0},
+                },
+            )
+        elif is_qwen:
+            dashscope_base = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1")
+            resp = await client.post(
+                f"{dashscope_base}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 900,
+                    "temperature": 0,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": SYSTEM_PROMPT_QWEN},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                                },
+                            ],
+                        }
+                    ],
                 },
             )
         else:
@@ -610,19 +618,49 @@ async def _call_vision_single(
     return [{"doc_type": "unknown", "data": {}}]
 
 
-async def call_vision_images(images_b64: list[str]) -> list[list[dict] | Exception]:
+async def call_vision_images(items: list[dict[str, str]]) -> list[list[dict] | Exception]:
     model = _get_model()
     api_key = _get_api_key(model)
     if not api_key:
         raise HTTPException(status_code=500, detail=f"Server chua cau hinh khoa API cho model {model}")
 
+    event_name = "qwen_call" if "qwen" in model.lower() else "vision_call"
     semaphore = asyncio.Semaphore(AI_CONCURRENCY)
     async with httpx.AsyncClient(timeout=AI_TIMEOUT_SECONDS) as client:
-        async def worker(image_b64: str):
+        async def worker(item: dict[str, str]):
             async with semaphore:
-                return await _call_vision_single(client, model=model, api_key=api_key, image_b64=image_b64)
+                filename = item.get("filename") or "unknown"
+                t_start = perf_counter()
+                try:
+                    result = await _call_vision_single(
+                        client,
+                        model=model,
+                        api_key=api_key,
+                        image_b64=item["image_b64"],
+                    )
+                except Exception as exc:
+                    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                    _log_ocr_ai(
+                        event_name,
+                        level="warning",
+                        filename=filename,
+                        model=model,
+                        latency_ms=_ms(perf_counter() - t_start),
+                        status="error",
+                        error=str(detail)[:300],
+                    )
+                    raise
+                _log_ocr_ai(
+                    event_name,
+                    filename=filename,
+                    model=model,
+                    latency_ms=_ms(perf_counter() - t_start),
+                    status="ok",
+                    doc_count=len(result),
+                )
+                return result
 
-        return await asyncio.gather(*(worker(image_b64) for image_b64 in images_b64), return_exceptions=True)
+        return await asyncio.gather(*(worker(item) for item in items), return_exceptions=True)
 
 
 def _append_qr_person(
@@ -670,12 +708,13 @@ def _append_ai_doc(
     filename = doc.get("filename") or "unknown"
 
     if doc_type == "person":
+        side = doc.get("side", "unknown")
         persons.append(
             {
                 **data,
                 "_source": "AI",
                 "source_type": "AI",
-                "side": "unknown",
+                "side": side,
                 "_files": [filename],
                 "_qr": False,
                 "field_sources": _field_sources(data, "ai"),
@@ -723,11 +762,71 @@ def _append_ai_doc(
         )
 
 
+def _merge_cccd_pair_legacy_unused(group: list[dict]) -> dict:
+    """Merge mang front+back cua cung 1 CCCD. Thu tu uu tien: QR > front > back."""
+    front = next((p for p in group if p.get("side") == "front"), None)
+    back = next((p for p in group if p.get("side") == "back"), None)
+    qr_hit = next((p for p in group if p.get("source_type") == "QR"), None)
+
+    base = dict(qr_hit or front or group[0])
+    base["paired"] = True
+    base["_files"] = [f for p in group for f in (p.get("_files") or [])]
+
+    # Mat sau CCCD moi co "Noi cu tru" → ghi de dia_chi tren base neu base chua co
+    if back:
+        back_addr = (back.get("dia_chi") or "").strip()
+        if back_addr and not (base.get("dia_chi") or "").strip():
+            base["dia_chi"] = back_addr
+
+    return base
+
+
+def _pair_persons_legacy_unused(persons: list[dict]) -> list[dict]:
+    """Ghep cap front+back theo so_giay_to 12 so. So khong hop le → giu nguyen, paired=False."""
+    from collections import defaultdict
+
+    groups: dict[str, list[dict]] = defaultdict(list)
+    ungrouped: list[dict] = []
+
+    for p in persons:
+        id_no = re.sub(r"\D", "", p.get("so_giay_to") or "")
+        if len(id_no) == 12:
+            groups[id_no].append(p)
+        else:
+            ungrouped.append(p)
+
+    result: list[dict] = []
+    for group in groups.values():
+        if len(group) == 1:
+            group[0]["paired"] = False
+            result.append(group[0])
+        else:
+            result.append(_merge_cccd_pair_legacy_unused(group))
+
+    for p in ungrouped:
+        p["paired"] = False
+        result.append(p)
+
+    return result
+
+
+def _mark_unpaired_persons(persons: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    for person in persons:
+        current = dict(person)
+        current["paired"] = False
+        if not isinstance(current.get("_files"), list) or not current.get("_files"):
+            current["_files"] = []
+        result.append(current)
+    return result
+
+
 @router.post("/analyze")
 async def analyze_images(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="Chua co anh nao duoc gui len")
 
+    t_total = perf_counter()
     persons: list[dict] = []
     properties: list[dict] = []
     marriages: list[dict] = []
@@ -735,12 +834,20 @@ async def analyze_images(files: List[UploadFile] = File(...)):
     errors: list[dict] = []
     ai_inputs: list[dict[str, str]] = []
     qr_hits = 0
+    qr_ms = 0.0
+    prepare_ms = 0.0
+    qwen_ms = 0.0
+
+    model = _get_model()
+    img_max_px = MAX_IMAGE_PX_QWEN if "qwen" in model.lower() else MAX_IMAGE_PX
 
     for upload in files:
         filename = upload.filename or "unknown"
         try:
             file_bytes = await upload.read()
+            t_qr = perf_counter()
             qr_text = try_decode_qr(file_bytes) or ""
+            qr_ms += perf_counter() - t_qr
             qr_data = parse_cccd_qr(qr_text) if qr_text else None
             if qr_data and qr_data.get("so_giay_to"):
                 _append_qr_person(
@@ -753,12 +860,16 @@ async def analyze_images(files: List[UploadFile] = File(...)):
                 qr_hits += 1
                 continue
 
-            ai_inputs.append({"filename": filename, "image_b64": resize_to_base64(file_bytes)})
+            t_prepare = perf_counter()
+            ai_inputs.append({"filename": filename, "image_b64": resize_to_base64(file_bytes, max_px=img_max_px)})
+            prepare_ms += perf_counter() - t_prepare
         except Exception as exc:
             errors.append({"filename": filename, "error": str(exc)})
 
     if ai_inputs:
-        ai_outputs = await call_vision_images([item["image_b64"] for item in ai_inputs])
+        t_qwen = perf_counter()
+        ai_outputs = await call_vision_images(ai_inputs)
+        qwen_ms = perf_counter() - t_qwen
         for item, output in zip(ai_inputs, ai_outputs):
             filename = item["filename"]
             if isinstance(output, Exception):
@@ -779,7 +890,23 @@ async def analyze_images(files: List[UploadFile] = File(...)):
                     raw_results=raw_results,
                 )
 
+    t_pair = perf_counter()
+    persons = _mark_unpaired_persons(persons)
+    pair_ms = perf_counter() - t_pair
+    paired_count = 0
     unknowns = sum(1 for item in raw_results if item.get("doc_type") == "unknown")
+    _log_ocr_ai(
+        "ocr_ai_done",
+        model=model,
+        total_images=len(files),
+        qr_hits=qr_hits,
+        ai_runs=len(ai_inputs),
+        total_ms=_ms(perf_counter() - t_total),
+        qr_ms=_ms(qr_ms),
+        prepare_ms=_ms(prepare_ms),
+        qwen_ms=_ms(qwen_ms),
+        pair_ms=_ms(pair_ms),
+    )
     return {
         "persons": persons,
         "properties": properties,
@@ -790,8 +917,9 @@ async def analyze_images(files: List[UploadFile] = File(...)):
             "total_images": len(files),
             "qr_hits": qr_hits,
             "ai_runs": len(ai_inputs),
-            "model": _get_model(),
+            "model": model,
             "persons": len(persons),
+            "paired_persons": paired_count,
             "properties": len(properties),
             "marriages": len(marriages),
             "unknowns": unknowns,
@@ -802,8 +930,9 @@ async def analyze_images(files: List[UploadFile] = File(...)):
 @router.get("/config")
 async def ocr_config():
     model = _get_model()
+    img_max_px = MAX_IMAGE_PX_QWEN if "qwen" in model.lower() else MAX_IMAGE_PX
     return {
         "configured": bool(_get_api_key(model)),
         "model": model,
-        "max_image_px": MAX_IMAGE_PX,
+        "max_image_px": img_max_px,
     }
