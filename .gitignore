@@ -18,6 +18,7 @@ tools/upload_lab/upload_runs/
 tools/upload_lab/*.json
 tools/upload_lab/.ui_setup_state.json
 tools/upload_lab/nd_storage_state.json
+upload_lab_runtime/
 
 # Claude local config
 .claude/settings.local.json

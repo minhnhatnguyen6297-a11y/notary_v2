@@ -5,9 +5,10 @@ Fast path:
 1. Try QR once on the server using raw image bytes.
 2. Preprocess image lightly.
 3. If QR fails, send the image straight to AI OCR.
+4. Canonicalize extracted identity data and pair images after extraction.
 
-Cloud OCR intentionally avoids front/back, old/new, MRZ pairing, and other
-document-side heuristics. Those rules belong to the Local OCR pipeline.
+Cloud OCR stays QR-first and avoids heavy local MRZ OCR, but it still performs
+post-extract grouping so front/back images do not leak out as separate persons.
 """
 
 from __future__ import annotations
@@ -41,6 +42,30 @@ MAX_IMAGE_PX_QWEN = int(os.getenv("QWEN_MAX_IMAGE_PX", "1600"))
 JPEG_QUALITY = 82
 AI_TIMEOUT_SECONDS = 120.0
 AI_CONCURRENCY = 4
+
+DOC_PROFILE_FRONT_OLD = "cccd_front_old"
+DOC_PROFILE_BACK_OLD = "cccd_back_old"
+DOC_PROFILE_FRONT_NEW = "cccd_front_new"
+DOC_PROFILE_BACK_NEW = "cccd_back_new"
+DOC_PROFILE_UNKNOWN = "unknown"
+
+_PROFILE_TO_SIDE_LABEL = {
+    DOC_PROFILE_FRONT_OLD: "front_old_cccd",
+    DOC_PROFILE_FRONT_NEW: "front_new_cc",
+    DOC_PROFILE_BACK_NEW: "back_new_cc",
+    DOC_PROFILE_BACK_OLD: "back_old_cccd",
+    DOC_PROFILE_UNKNOWN: "unknown",
+}
+
+_FIELD_SOURCE_PRIORITY = {
+    "so_giay_to": {"qr": 3, "mrz": 2, "ai": 1},
+    "ngay_sinh": {"qr": 3, "mrz": 2, "ai": 1},
+    "gioi_tinh": {"qr": 3, "mrz": 2, "ai": 1},
+    "ho_ten": {"qr": 3, "ai": 2, "mrz": 1},
+    "dia_chi": {"qr": 3, "ai": 2},
+    "ngay_cap": {"qr": 3, "ai": 2},
+    "ngay_het_han": {"qr": 3, "mrz": 2, "ai": 1},
+}
 
 
 def _ms(seconds: float) -> float:
@@ -374,6 +399,213 @@ def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+SYSTEM_PROMPT = """Vietnamese legal document OCR. One image = one document side. Return ONLY a JSON array.
+
+For CCCD/person images, return exactly one object:
+{
+  "doc_type":"cccd_front|cccd_back|person|unknown",
+  "data":{
+    "doc_side":"front|back|unknown",
+    "doc_version":"old|new|unknown",
+    "ho_ten":"",
+    "so_giay_to":"",
+    "ngay_sinh":"",
+    "gioi_tinh":"",
+    "dia_chi":"",
+    "ngay_cap":"",
+    "ngay_het_han":"",
+    "mrz_line1":"",
+    "mrz_line2":"",
+    "mrz_line3":"",
+    "so_giay_to_mrz":"",
+    "dia_chi_back":""
+  }
+}
+
+For "marriage_cert", use:
+{"doc_type":"marriage_cert","data":{"chong_ho_ten":"","chong_ngay_sinh":"","chong_so_giay_to":"","vo_ho_ten":"","vo_ngay_sinh":"","vo_so_giay_to":"","ngay_dang_ky":"","noi_dang_ky":""}}
+
+For "land_cert", use:
+{"doc_type":"land_cert","data":{"so_serial":"","so_thua_dat":"","so_to_ban_do":"","dia_chi_dat":"","loai_dat":"","ngay_cap":"","co_quan_cap":""}}
+
+Rules:
+- Identify CCCD front/back when visible. Set doc_side and doc_version.
+- Old CCCD "CĂN CƯỚC CÔNG DÂN" front may show address. Front fields can include Họ tên, Ngày sinh, Giới tính, Quê quán, Nơi thường trú, Có giá trị đến.
+- On old CCCD front, dia_chi MUST be "Nơi thường trú". Never use "Quê quán" or "Quốc tịch" as dia_chi.
+- New CĂN CƯỚC front has no address. dia_chi must be empty on new front.
+- New CĂN CƯỚC back may show QR, chip, "Nơi cư trú", ngày cấp, ngày hết hạn, and MRZ. Put residence text into dia_chi_back.
+- Old CCCD back usually has fingerprints, ngày cấp, and MRZ. Prefer ngay_cap from the back side.
+- If MRZ is visible, copy mrz_line1/2/3 and extract so_giay_to_mrz if readable.
+- Do not pair documents together and do not infer hidden fields from another image.
+- Use empty string for unreadable or missing fields.
+- Dates must be DD/MM/YYYY when visible.
+- ID values must contain digits only.
+- Keep Vietnamese diacritics if readable.
+- If unsupported, return [{"doc_type":"unknown","data":{}}].
+"""
+
+
+SYSTEM_PROMPT_QWEN = """Phan tich mot anh tai lieu phap ly Viet Nam va tra ve ONLY JSON array.
+
+Voi CCCD/giay to nhan than, tra ve:
+{
+  "doc_type":"cccd_front|cccd_back|person|unknown",
+  "data":{
+    "doc_side":"front|back|unknown",
+    "doc_version":"old|new|unknown",
+    "ho_ten":"",
+    "so_giay_to":"",
+    "ngay_sinh":"",
+    "gioi_tinh":"",
+    "dia_chi":"",
+    "ngay_cap":"",
+    "ngay_het_han":"",
+    "mrz_line1":"",
+    "mrz_line2":"",
+    "mrz_line3":"",
+    "so_giay_to_mrz":"",
+    "dia_chi_back":""
+  }
+}
+
+Quy tac:
+- Neu thay mat truoc thi dat doc_side=front.
+- Neu thay mat sau thi dat doc_side=back.
+- Neu thay MRZ thi copy day du mrz_line1/2/3 va so_giay_to_mrz neu doc duoc.
+- Khong doan mo truong khong thay.
+- So giay to chi gom chu so.
+- Ngay theo dinh dang DD/MM/YYYY.
+- Neu khong phai tai lieu ho tro thi tra ve [{"doc_type":"unknown","data":{}}].
+"""
+
+
+def _ascii_fold(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    without_marks = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return without_marks.replace("đ", "d").replace("Đ", "D")
+
+
+def _normalize_text_space(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def _clean_doc_number(value: Any) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) >= 12:
+        return digits[:12]
+    return digits
+
+
+def _normalize_mrz_line(value: Any) -> str:
+    cleaned = _ascii_fold(str(value or "")).upper().replace("`", "<")
+    return re.sub(r"[^A-Z0-9<]", "", cleaned)
+
+
+def _extract_canonical_cccd_from_mrz_line1(normalized_line1: str) -> str:
+    if not normalized_line1.startswith("IDVNM"):
+        return ""
+    digits_after_prefix = "".join(ch for ch in normalized_line1[5:] if ch.isdigit())
+    if len(digits_after_prefix) < 22:
+        return ""
+    return digits_after_prefix[:22][10:22]
+
+
+def _extract_cccd_from_mrz_lines(*values: Any) -> str:
+    normalized_lines = [_normalize_mrz_line(value) for value in values if _normalize_mrz_line(value)]
+    for line in normalized_lines:
+        canonical = _extract_canonical_cccd_from_mrz_line1(line)
+        if canonical:
+            return canonical
+    for line in normalized_lines:
+        match = re.search(r"(?<!\d)(\d{12})(?:<<\d)?(?!\d)", line)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _validated_mrz_cccd(data: dict[str, Any]) -> str:
+    line1 = _normalize_mrz_line(data.get("mrz_line1"))
+    line2 = _normalize_mrz_line(data.get("mrz_line2"))
+    line3 = _normalize_mrz_line(data.get("mrz_line3"))
+    derived = _extract_cccd_from_mrz_lines(line1, line2, line3)
+    if derived:
+        return derived
+    explicit = _valid_cccd_candidate(data.get("so_giay_to_mrz"))
+    if explicit and not any((line1, line2, line3)):
+        return explicit
+    return ""
+
+
+def extract_cccd_from_mrz(mrz_line1: Any) -> str:
+    normalized = _normalize_mrz_line(mrz_line1)
+    canonical = _extract_canonical_cccd_from_mrz_line1(normalized)
+    if canonical:
+        return canonical
+    match = re.search(r"(\d{12})<<\d", normalized)
+    if match:
+        return match.group(1)
+    match = re.search(r"(\d{12})<<", normalized)
+    return match.group(1) if match else ""
+
+
+def _mrz_date_to_display(value: Any, *, birth: bool) -> str:
+    raw = re.sub(r"[^0-9<]", "", str(value or ""))
+    if len(raw) < 6 or raw.startswith("<<<<<<"):
+        return ""
+    candidate = raw[:6]
+    if not re.fullmatch(r"\d{6}", candidate):
+        return ""
+    yy = int(candidate[0:2])
+    mm = int(candidate[2:4])
+    dd = int(candidate[4:6])
+    if not (1 <= mm <= 12 and 1 <= dd <= 31):
+        return ""
+    current_year = datetime.now().year
+    century = 1900 if birth and yy > current_year % 100 else 2000
+    return f"{dd:02d}/{mm:02d}/{century + yy:04d}"
+
+
+def _extract_name_from_mrz_line(value: Any) -> str:
+    line = _normalize_mrz_line(value)
+    if not line or "<" not in line:
+        return ""
+    alpha_count = sum(1 for ch in line if "A" <= ch <= "Z")
+    digit_count = sum(1 for ch in line if ch.isdigit())
+    if alpha_count < 4 or alpha_count <= digit_count:
+        return ""
+    name = line.rstrip("<").replace("<<", " ").replace("<", " ").strip()
+    name = re.sub(r"\s+", " ", name)
+    if len(name.split()) < 2:
+        return ""
+    return name
+
+
+def _extract_digit_candidates(*values: Any) -> list[str]:
+    seen: list[str] = []
+    for value in values:
+        text = _normalize_mrz_line(value) if value is not None else ""
+        for match in re.findall(r"\d{8,12}", text):
+            if match not in seen:
+                seen.append(match)
+    return seen
+
+
+def _parse_mrz_fields(data: dict[str, Any]) -> dict[str, str]:
+    line1 = _normalize_mrz_line(data.get("mrz_line1"))
+    line2 = _normalize_mrz_line(data.get("mrz_line2"))
+    line3 = _normalize_mrz_line(data.get("mrz_line3"))
+    if not any((line1, line2, line3)):
+        return {}
+    name = _extract_name_from_mrz_line(line3)
+    return {
+        "so_giay_to": _validated_mrz_cccd(data),
+        "ho_ten": name,
+        "ngay_sinh": _mrz_date_to_display(line2[0:6] if len(line2) >= 6 else "", birth=True),
+        "gioi_tinh": _normalize_gender("Nam" if len(line2) >= 8 and line2[7:8] == "M" else ("Nữ" if len(line2) >= 8 and line2[7:8] == "F" else "")),
+        "ngay_het_han": _mrz_date_to_display(line2[8:14] if len(line2) >= 14 else "", birth=False),
+    }
+
+
 def _normalize_date(value: Any) -> str:
     raw = _clean_text(value).replace("-", "/").replace(".", "/")
     match = re.search(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)", raw)
@@ -437,9 +669,57 @@ def _normalize_land_data(data: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _normalize_expiry_value(value: Any) -> str:
+    raw = _normalize_text_space(value)
+    if not raw:
+        return ""
+    if re.search(r"khong\s+thoi\s+han|không\s+thời\s+hạn|indefinite|no\s+expiry", _ascii_fold(raw).lower()):
+        return ""
+    return _normalize_date(raw)
+
+
+def _normalize_gender(value: Any) -> str:
+    folded = _ascii_fold(_clean_text(value)).lower()
+    if folded in {"nam", "male"}:
+        return "Nam"
+    if folded in {"nu", "female"}:
+        return "Nữ"
+    return ""
+
+
+def _normalize_person_data(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "ho_ten": _clean_text(data.get("ho_ten")),
+        "so_giay_to": _digits_only(data.get("so_giay_to")),
+        "ngay_sinh": _normalize_date(data.get("ngay_sinh")),
+        "gioi_tinh": _normalize_gender(data.get("gioi_tinh")),
+        "dia_chi": _clean_text(data.get("dia_chi")),
+        "ngay_cap": _normalize_date(data.get("ngay_cap")),
+        "ngay_het_han": _normalize_expiry_value(data.get("ngay_het_han")),
+    }
+
+
+def _normalize_person_metadata(data: dict[str, Any]) -> dict[str, str]:
+    side = _normalize_text_space(data.get("doc_side", "")).lower()
+    version = _normalize_text_space(data.get("doc_version", "")).lower()
+    return {
+        "doc_side": side if side in {"front", "back"} else "unknown",
+        "doc_version": version if version in {"old", "new"} else "unknown",
+        "mrz_line1": _normalize_mrz_line(data.get("mrz_line1")),
+        "mrz_line2": _normalize_mrz_line(data.get("mrz_line2")),
+        "mrz_line3": _normalize_mrz_line(data.get("mrz_line3")),
+        "so_giay_to_mrz": _validated_mrz_cccd(data),
+        "dia_chi_back": _clean_text(data.get("dia_chi_back")),
+    }
+
+
 def _coerce_doc_type(value: Any) -> str:
     raw = _clean_text(value).lower()
-    if raw in {"person", "cccd", "cccd_front", "cccd_back", "citizen_card", "id_card", "identity_card"}:
+    if raw in {"cccd_front", "citizen_card_front", "id_card_front", "identity_card_front"}:
+        return "cccd_front"
+    if raw in {"cccd_back", "citizen_card_back", "id_card_back", "identity_card_back"}:
+        return "cccd_back"
+    if raw in {"person", "cccd", "citizen_card", "id_card", "identity_card"}:
         return "person"
     if raw in {"marriage", "marriage_cert", "marriage_certificate", "ket_hon"}:
         return "marriage_cert"
@@ -450,15 +730,15 @@ def _coerce_doc_type(value: Any) -> str:
 
 def _normalize_ai_item(item: Any, filename: str) -> dict[str, Any]:
     if not isinstance(item, dict):
-        return {"doc_type": "unknown", "data": {}, "filename": filename}
+        return {"doc_type": "unknown", "data": {}, "filename": filename, "side": "unknown", "field_sources": {}}
 
     data = item.get("data")
     if not isinstance(data, dict):
         data = {}
 
     doc_type = _coerce_doc_type(item.get("doc_type"))
-    if doc_type == "person":
-        normalized_data = _normalize_person_data(data)
+    if doc_type in {"person", "cccd_front", "cccd_back"}:
+        normalized_data = {**_normalize_person_data(data), **_normalize_person_metadata(data)}
     elif doc_type == "marriage_cert":
         normalized_data = _normalize_marriage_data(data)
     elif doc_type == "land_cert":
@@ -466,9 +746,17 @@ def _normalize_ai_item(item: Any, filename: str) -> dict[str, Any]:
     else:
         normalized_data = {}
 
-    side_raw = _clean_text(item.get("side", "")).lower()
+    side_raw = _normalize_text_space(item.get("side") or data.get("doc_side", "")).lower()
     side = side_raw if side_raw in ("front", "back") else "unknown"
-    return {"doc_type": doc_type, "data": normalized_data, "filename": filename, "side": side}
+    source = "ai"
+    field_sources = _field_sources(_normalize_person_data(data), source) if doc_type in {"person", "cccd_front", "cccd_back"} else {}
+    return {
+        "doc_type": doc_type,
+        "data": normalized_data,
+        "filename": filename,
+        "side": side,
+        "field_sources": field_sources,
+    }
 
 
 def _prepare_image_bytes(file_bytes: bytes, max_px: int = MAX_IMAGE_PX) -> bytes:
@@ -690,6 +978,9 @@ def _append_qr_person(
             "data": normalized,
             "filename": filename,
             "source_type": "QR",
+            "side": "unknown",
+            "field_sources": _field_sources(normalized, "qr"),
+            "_qr": True,
         }
     )
 
@@ -707,7 +998,7 @@ def _append_ai_doc(
     data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
     filename = doc.get("filename") or "unknown"
 
-    if doc_type == "person":
+    if doc_type in {"person", "cccd_front", "cccd_back"}:
         side = doc.get("side", "unknown")
         persons.append(
             {
@@ -717,7 +1008,7 @@ def _append_ai_doc(
                 "side": side,
                 "_files": [filename],
                 "_qr": False,
-                "field_sources": _field_sources(data, "ai"),
+                "field_sources": dict(doc.get("field_sources") or _field_sources(_normalize_person_data(data), "ai")),
                 "warnings": [],
             }
         )
@@ -821,6 +1112,477 @@ def _mark_unpaired_persons(persons: list[dict]) -> list[dict]:
     return result
 
 
+def _empty_person_data() -> dict[str, str]:
+    return {
+        "ho_ten": "",
+        "so_giay_to": "",
+        "ngay_sinh": "",
+        "gioi_tinh": "",
+        "dia_chi": "",
+        "ngay_cap": "",
+        "ngay_het_han": "",
+    }
+
+
+def _digits_only(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _valid_cccd_candidate(value: Any) -> str:
+    digits = _digits_only(value)
+    return digits if len(digits) == 12 else ""
+
+
+def _count_vietnamese_diacritics(text: str) -> int:
+    total = 0
+    for ch in text or "":
+        if ch in {"đ", "Đ"}:
+            total += 1
+            continue
+        if any(unicodedata.combining(c) for c in unicodedata.normalize("NFD", ch)):
+            total += 1
+    return total
+
+
+def _field_rank(field_name: str, source: str) -> int:
+    return _FIELD_SOURCE_PRIORITY.get(field_name, {}).get(str(source or "").lower(), 0)
+
+
+def _candidate_beats_current(
+    field_name: str,
+    incoming_val: str,
+    incoming_source: str,
+    current_val: str,
+    current_source: str,
+) -> bool:
+    if not incoming_val:
+        return False
+    if not current_val:
+        return True
+    incoming_rank = _field_rank(field_name, incoming_source)
+    current_rank = _field_rank(field_name, current_source)
+    if incoming_rank > current_rank:
+        return True
+    if incoming_rank < current_rank:
+        return False
+    if field_name == "ho_ten":
+        incoming_marks = _count_vietnamese_diacritics(incoming_val)
+        current_marks = _count_vietnamese_diacritics(current_val)
+        if incoming_marks != current_marks:
+            return incoming_marks > current_marks
+    return len(incoming_val) > len(current_val)
+
+
+def _normalize_person_field(field_name: str, value: Any) -> str:
+    if field_name == "so_giay_to":
+        return _digits_only(value)
+    if field_name in {"ngay_sinh", "ngay_cap"}:
+        return _normalize_date(value)
+    if field_name == "ngay_het_han":
+        return _normalize_expiry_value(value)
+    if field_name == "gioi_tinh":
+        return _normalize_gender(value)
+    return _clean_text(value)
+
+
+def _merge_field_value(
+    target_data: dict[str, str],
+    field_sources: dict[str, str],
+    *,
+    field_name: str,
+    value: Any,
+    source: str,
+) -> None:
+    normalized = _normalize_person_field(field_name, value)
+    if not normalized:
+        return
+    current_val = target_data.get(field_name, "")
+    current_source = field_sources.get(field_name, "")
+    if _candidate_beats_current(field_name, normalized, source, current_val, current_source):
+        target_data[field_name] = normalized
+        field_sources[field_name] = source
+
+
+def _allowed_ai_fields_for_profile(profile: str) -> set[str]:
+    if profile == DOC_PROFILE_FRONT_OLD:
+        return {"ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_het_han"}
+    if profile == DOC_PROFILE_FRONT_NEW:
+        return {"ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh"}
+    if profile == DOC_PROFILE_BACK_NEW:
+        return {"dia_chi", "ngay_cap", "ngay_het_han"}
+    if profile == DOC_PROFILE_BACK_OLD:
+        return {"ngay_cap"}
+    return set(_empty_person_data().keys())
+
+
+def _infer_profile_from_doc(doc: dict[str, Any]) -> str:
+    if str(doc.get("source_type", "")).upper() == "QR":
+        return DOC_PROFILE_UNKNOWN
+
+    data = dict(doc.get("data") or {})
+    doc_type = str(doc.get("doc_type") or "").lower()
+    side = _normalize_text_space(data.get("doc_side") or doc.get("side", "")).lower()
+    version = _normalize_text_space(data.get("doc_version", "")).lower()
+    has_address = bool(_clean_text(data.get("dia_chi_back") or data.get("dia_chi")))
+    has_mrz = bool(
+        _validated_mrz_cccd(data)
+        or _normalize_mrz_line(data.get("mrz_line1"))
+        or _normalize_mrz_line(data.get("mrz_line2"))
+        or _normalize_mrz_line(data.get("mrz_line3"))
+    )
+    has_identity = any(_clean_text(data.get(name)) for name in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh"))
+
+    if doc_type == "cccd_back" or side == "back":
+        return DOC_PROFILE_BACK_NEW if version == "new" or has_address else DOC_PROFILE_BACK_OLD
+    if doc_type == "cccd_front" or side == "front":
+        return DOC_PROFILE_FRONT_OLD if version == "old" or bool(_clean_text(data.get("dia_chi"))) else DOC_PROFILE_FRONT_NEW
+    if has_mrz:
+        return DOC_PROFILE_BACK_NEW if has_address else DOC_PROFILE_BACK_OLD
+    if has_identity:
+        return DOC_PROFILE_FRONT_OLD if bool(_clean_text(data.get("dia_chi"))) else DOC_PROFILE_FRONT_NEW
+    return DOC_PROFILE_UNKNOWN
+
+
+def _derive_pair_key_from_doc(doc: dict[str, Any]) -> tuple[str, str]:
+    data = dict(doc.get("data") or {})
+    if str(doc.get("source_type", "")).upper() == "QR":
+        qr_key = _valid_cccd_candidate(data.get("so_giay_to"))
+        if qr_key:
+            return qr_key, "qr"
+
+    mrz_key = _validated_mrz_cccd(data)
+    if mrz_key:
+        return mrz_key, "mrz"
+
+    ai_key = _valid_cccd_candidate(data.get("so_giay_to"))
+    if ai_key:
+        return ai_key, "ai"
+    return "", ""
+
+
+def _doc_signature(data: dict[str, Any]) -> tuple[str, str]:
+    return (_ascii_fold(_clean_text(data.get("ho_ten", ""))).lower(), _normalize_date(data.get("ngay_sinh", "")))
+
+
+def _derive_pair_hint_from_doc(doc: dict[str, Any]) -> str:
+    data = dict(doc.get("data") or {})
+    valid_candidate = (
+        _valid_cccd_candidate(data.get("so_giay_to"))
+        or _valid_cccd_candidate(data.get("so_giay_to_mrz"))
+        or _extract_cccd_from_mrz_lines(data.get("mrz_line1"), data.get("mrz_line2"), data.get("mrz_line3"))
+    )
+    if valid_candidate:
+        return valid_candidate
+
+    mrz_digits = _digits_only(data.get("so_giay_to_mrz"))
+    if mrz_digits:
+        return mrz_digits
+
+    ai_digits = _digits_only(data.get("so_giay_to"))
+    if ai_digits:
+        return ai_digits
+
+    line1_digits = _digits_only(data.get("mrz_line1"))
+    if line1_digits:
+        return line1_digits
+
+    line_candidates = _extract_digit_candidates(data.get("mrz_line2"), data.get("mrz_line3"))
+    return max(line_candidates, key=len, default="")
+
+
+def _digit_overlap_score(left: str, right: str) -> int:
+    left_digits = _digits_only(left)
+    right_digits = _digits_only(right)
+    if not left_digits or not right_digits:
+        return 0
+    shorter, longer = (left_digits, right_digits)
+    if len(shorter) > len(longer):
+        shorter, longer = longer, shorter
+    for size in range(len(shorter), 0, -1):
+        for start in range(0, len(shorter) - size + 1):
+            chunk = shorter[start : start + size]
+            if chunk and chunk in longer:
+                return size
+    return 0
+
+
+def _merge_group_into(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for field_name in _empty_person_data():
+        source_value = source["data"].get(field_name, "")
+        source_kind = source["field_sources"].get(field_name, "")
+        if source_value and source_kind:
+            _merge_field_value(target["data"], target["field_sources"], field_name=field_name, value=source_value, source=source_kind)
+    target["profiles"].update(source["profiles"])
+    target["has_qr"] = target["has_qr"] or source["has_qr"]
+    target["pair_key"] = target["pair_key"] or source["pair_key"]
+    target["pair_key_source"] = target["pair_key_source"] or source["pair_key_source"]
+    if len(_digits_only(source.get("pair_hint", ""))) > len(_digits_only(target.get("pair_hint", ""))):
+        target["pair_hint"] = source["pair_hint"]
+    for filename in source["files"]:
+        if filename not in target["files"]:
+            target["files"].append(filename)
+
+
+def _build_person_groups(raw_results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    groups: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    for index, doc in enumerate(raw_results):
+        if str(doc.get("doc_type") or "").lower() not in {"person", "cccd_front", "cccd_back"}:
+            continue
+
+        data = dict(doc.get("data") or {})
+        if data.get("dia_chi_back") and not data.get("dia_chi"):
+            data["dia_chi"] = data.get("dia_chi_back", "")
+
+        profile = _infer_profile_from_doc({**doc, "data": data})
+        pair_key, pair_key_source = _derive_pair_key_from_doc({**doc, "data": data})
+        pair_hint = _derive_pair_hint_from_doc({**doc, "data": data})
+        group_key = pair_key or f"img:{doc.get('filename', 'unknown')}:{index}"
+
+        if group_key not in groups:
+            groups[group_key] = {
+                "data": _empty_person_data(),
+                "field_sources": {},
+                "profiles": set(),
+                "files": [],
+                "has_qr": False,
+                "pair_key": pair_key,
+                "pair_key_source": pair_key_source,
+                "pair_hint": pair_hint,
+            }
+            order.append(group_key)
+
+        group = groups[group_key]
+        group["profiles"].add(profile)
+        group["has_qr"] = group["has_qr"] or str(doc.get("source_type", "")).upper() == "QR"
+        if pair_key and not group["pair_key"]:
+            group["pair_key"] = pair_key
+            group["pair_key_source"] = pair_key_source
+        if len(_digits_only(pair_hint)) > len(_digits_only(group.get("pair_hint", ""))):
+            group["pair_hint"] = pair_hint
+        filename = str(doc.get("filename") or "unknown")
+        if filename not in group["files"]:
+            group["files"].append(filename)
+
+        field_sources = dict(doc.get("field_sources") or {})
+        source_type = "qr" if str(doc.get("source_type", "")).upper() == "QR" else "ai"
+        allowed_ai_fields = _allowed_ai_fields_for_profile(profile)
+        mrz_fields = _parse_mrz_fields(data)
+        for field_name in _empty_person_data():
+            if field_name == "so_giay_to":
+                mrz_key = _validated_mrz_cccd(data)
+                if mrz_key:
+                    _merge_field_value(group["data"], group["field_sources"], field_name=field_name, value=mrz_key, source="mrz")
+            if mrz_fields.get(field_name):
+                _merge_field_value(group["data"], group["field_sources"], field_name=field_name, value=mrz_fields[field_name], source="mrz")
+            if source_type != "qr" and field_name not in allowed_ai_fields:
+                continue
+            source = field_sources.get(field_name, source_type)
+            if field_name == "dia_chi" and data.get("dia_chi_back"):
+                source = "ai"
+            _merge_field_value(group["data"], group["field_sources"], field_name=field_name, value=data.get(field_name, ""), source=source)
+
+    keyed_keys = [key for key in order if len(_valid_cccd_candidate(key)) == 12]
+    qr_keys = [key for key in order if groups[key]["has_qr"]]
+
+    for key in list(order):
+        source_group = groups.get(key)
+        if not source_group or source_group["has_qr"]:
+            continue
+        name_sig, birth_sig = _doc_signature(source_group["data"])
+        if not (name_sig and birth_sig):
+            continue
+        candidates = [
+            candidate
+            for candidate in qr_keys
+            if candidate != key and _doc_signature(groups[candidate]["data"]) == (name_sig, birth_sig)
+        ]
+        if len(candidates) != 1:
+            continue
+        target_key = candidates[0]
+        _merge_group_into(groups[target_key], source_group)
+        if key in order:
+            order.remove(key)
+        if key in groups:
+            del groups[key]
+
+    keyed_keys = [key for key in order if len(_valid_cccd_candidate(key)) == 12]
+    for key in list(order):
+        if len(_valid_cccd_candidate(key)) != 12:
+            continue
+        source_group = groups.get(key)
+        if not source_group:
+            continue
+        source_is_backish = bool(source_group["profiles"] & {DOC_PROFILE_BACK_NEW, DOC_PROFILE_BACK_OLD})
+        if not source_is_backish:
+            continue
+        name_sig, birth_sig = _doc_signature(source_group["data"])
+        if not (name_sig and birth_sig):
+            continue
+        candidates = [
+            candidate
+            for candidate in keyed_keys
+            if candidate != key and _doc_signature(groups[candidate]["data"]) == (name_sig, birth_sig)
+        ]
+        if len(candidates) != 1:
+            continue
+        target_key = candidates[0]
+        _merge_group_into(groups[target_key], source_group)
+        if key in order:
+            order.remove(key)
+        if key in groups:
+            del groups[key]
+
+    keyed_keys = [key for key in order if len(_valid_cccd_candidate(key)) == 12]
+    for key in list(order):
+        if len(_valid_cccd_candidate(key)) == 12:
+            continue
+        source_group = groups.get(key)
+        if not source_group:
+            continue
+        name_sig, birth_sig = _doc_signature(source_group["data"])
+        candidates: list[str] = []
+        if name_sig and birth_sig:
+            candidates = [candidate for candidate in keyed_keys if _doc_signature(groups[candidate]["data"]) == (name_sig, birth_sig)]
+        if not candidates and name_sig:
+            source_is_backish = bool(source_group["profiles"] & {DOC_PROFILE_BACK_NEW, DOC_PROFILE_BACK_OLD})
+            if source_is_backish:
+                candidates = [
+                    candidate
+                    for candidate in keyed_keys
+                    if _doc_signature(groups[candidate]["data"])[0] == name_sig
+                ]
+        if len(candidates) != 1:
+            continue
+        target_key = candidates[0]
+        _merge_group_into(groups[target_key], source_group)
+        order.remove(key)
+        del groups[key]
+
+    signature_pairs: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for key in order:
+        if len(_valid_cccd_candidate(key)) == 12:
+            continue
+        group = groups.get(key)
+        if not group:
+            continue
+        signature = _doc_signature(group["data"])
+        if not all(signature):
+            continue
+        frontish = bool(group["profiles"] & {DOC_PROFILE_FRONT_OLD, DOC_PROFILE_FRONT_NEW})
+        backish = bool(group["profiles"] & {DOC_PROFILE_BACK_OLD, DOC_PROFILE_BACK_NEW})
+        if not (frontish or backish):
+            continue
+        bucket = signature_pairs.setdefault(signature, {"front": [], "back": []})
+        if frontish:
+            bucket["front"].append(key)
+        if backish:
+            bucket["back"].append(key)
+
+    for bucket in signature_pairs.values():
+        if len(bucket["front"]) != 1 or len(bucket["back"]) != 1:
+            continue
+        target_key = bucket["front"][0]
+        source_key = bucket["back"][0]
+        if target_key == source_key or target_key not in groups or source_key not in groups:
+            continue
+        _merge_group_into(groups[target_key], groups[source_key])
+        if source_key in order:
+            order.remove(source_key)
+        del groups[source_key]
+
+    keyed_keys = [key for key in order if len(_valid_cccd_candidate(key)) == 12]
+    for key in list(order):
+        if len(_valid_cccd_candidate(key)) == 12:
+            continue
+        source_group = groups.get(key)
+        if not source_group:
+            continue
+        source_is_backish = bool(source_group["profiles"] & {DOC_PROFILE_BACK_NEW, DOC_PROFILE_BACK_OLD})
+        if not source_is_backish:
+            continue
+        birth_sig = _doc_signature(source_group["data"])[1]
+        pair_hint = _digits_only(source_group.get("pair_hint", ""))
+        if not birth_sig or len(pair_hint) < 8:
+            continue
+        scored_candidates: list[tuple[int, str]] = []
+        for candidate in keyed_keys:
+            candidate_group = groups[candidate]
+            if _doc_signature(candidate_group["data"])[1] != birth_sig:
+                continue
+            candidate_key = candidate_group.get("pair_key") or candidate_group["data"].get("so_giay_to", "")
+            score = _digit_overlap_score(pair_hint, candidate_key)
+            if score >= 8:
+                scored_candidates.append((score, candidate))
+        if not scored_candidates:
+            continue
+        best_score = max(score for score, _ in scored_candidates)
+        best_candidates = [candidate for score, candidate in scored_candidates if score == best_score]
+        if len(best_candidates) != 1:
+            continue
+        target_key = best_candidates[0]
+        _merge_group_into(groups[target_key], source_group)
+        order.remove(key)
+        del groups[key]
+
+    persons: list[dict[str, Any]] = []
+    paired_count = 0
+    for key in order:
+        group = groups[key]
+        front_present = bool(group["profiles"] & {DOC_PROFILE_FRONT_OLD, DOC_PROFILE_FRONT_NEW})
+        back_present = bool(group["profiles"] & {DOC_PROFILE_BACK_OLD, DOC_PROFILE_BACK_NEW})
+        paired = (front_present and back_present) or (group["has_qr"] and len(group["files"]) > 1)
+        if paired:
+            paired_count += 1
+
+        side_label = "unknown"
+        if DOC_PROFILE_BACK_NEW in group["profiles"]:
+            side_label = _PROFILE_TO_SIDE_LABEL[DOC_PROFILE_BACK_NEW]
+        elif DOC_PROFILE_BACK_OLD in group["profiles"]:
+            side_label = _PROFILE_TO_SIDE_LABEL[DOC_PROFILE_BACK_OLD]
+        elif DOC_PROFILE_FRONT_OLD in group["profiles"]:
+            side_label = _PROFILE_TO_SIDE_LABEL[DOC_PROFILE_FRONT_OLD]
+        elif DOC_PROFILE_FRONT_NEW in group["profiles"]:
+            side_label = _PROFILE_TO_SIDE_LABEL[DOC_PROFILE_FRONT_NEW]
+
+        final_key = _valid_cccd_candidate(group["pair_key"]) or _valid_cccd_candidate(group["data"].get("so_giay_to"))
+        if final_key:
+            group["data"]["so_giay_to"] = final_key
+            if not group["field_sources"].get("so_giay_to"):
+                group["field_sources"]["so_giay_to"] = group["pair_key_source"] or "ai"
+
+        if paired:
+            source_label = "cccd+back"
+        elif back_present:
+            source_label = "cccd_back only"
+        else:
+            source_label = "cccd (thiếu mặt sau)"
+
+        persons.append(
+            {
+                "ho_ten": group["data"].get("ho_ten", ""),
+                "so_giay_to": group["data"].get("so_giay_to", ""),
+                "ngay_sinh": group["data"].get("ngay_sinh", ""),
+                "gioi_tinh": group["data"].get("gioi_tinh", ""),
+                "dia_chi": group["data"].get("dia_chi", ""),
+                "ngay_cap": group["data"].get("ngay_cap", ""),
+                "ngay_het_han": group["data"].get("ngay_het_han", ""),
+                "_source": source_label,
+                "source_type": "QR" if group["has_qr"] else "AI",
+                "side": "unknown",
+                "_side": side_label,
+                "_qr": group["has_qr"],
+                "_files": group["files"],
+                "field_sources": group["field_sources"],
+                "warnings": [],
+                "paired": paired,
+            }
+        )
+
+    return persons, paired_count
+
+
 @router.post("/analyze")
 async def analyze_images(files: List[UploadFile] = File(...)):
     if not files:
@@ -891,9 +1653,8 @@ async def analyze_images(files: List[UploadFile] = File(...)):
                 )
 
     t_pair = perf_counter()
-    persons = _mark_unpaired_persons(persons)
+    persons, paired_count = _build_person_groups(raw_results)
     pair_ms = perf_counter() - t_pair
-    paired_count = 0
     unknowns = sum(1 for item in raw_results if item.get("doc_type") == "unknown")
     _log_ocr_ai(
         "ocr_ai_done",

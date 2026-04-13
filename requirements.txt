@@ -11,3 +11,4 @@ Pillow
 httpx
 python-dotenv
 celery[sqlalchemy]==5.3.6
+PyQt6>=6.6,<7

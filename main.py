@@ -48,17 +48,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         app_logger.exception("[startup] Local OCR warmup skipped: %s", e)
     try:
-        ai_ocr_settings = ocr._get_ai_ocr_settings()
-        ocr.init_ai_preprocess_pool(int(ai_ocr_settings.get("preprocess_workers", 0) or 0))
-        if ai_ocr_settings.get("preprocess_warmup", True):
-            ocr.warmup_ai_preprocess_pool()
+        app_logger.info("[startup] AI OCR fast path active")
     except Exception as e:
-        app_logger.exception("[startup] AI OCR preprocess pool warmup skipped: %s", e)
+        app_logger.exception("[startup] AI OCR startup hook skipped: %s", e)
     yield
-    try:
-        ocr.shutdown_ai_preprocess_pool()
-    except Exception as e:
-        app_logger.exception("[shutdown] AI OCR preprocess pool shutdown failed: %s", e)
 
 
 app = FastAPI(

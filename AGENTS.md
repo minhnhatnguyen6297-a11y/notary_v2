@@ -105,3 +105,24 @@ theo thu tu nay truoc khi hoi them:
 - Chi tiet co che suy ra context nam trong `docs/SESSION_CONTEXT.md`.
 - Neu repo co them lenh bootstrap khac, cap nhat `scripts/session_context_check.ps1`
   thay vi tao script rieng cho tung module.
+
+## Rule test bat buoc cho OCR
+
+Khi session dang tap trung vao OCR va user yeu cau test, verify, replay, hoac fix
+theo bo anh cu the, Codex phai lam theo vong lap nay:
+
+1. Tu chay thu bo anh duoc nhac toi ngay trong session de lay ket qua goc.
+2. Chay repo voi chinh bo anh do.
+3. Doc log, timing, va doi chieu ket qua cua repo voi ket qua goc vua lay trong
+   session.
+4. Neu lech:
+   - ghi ro diem lech nao
+   - tim nguyen nhan
+   - sua
+   - chay lai cung bo anh
+5. Lap lai cho den khi ket qua dung theo muc tieu task.
+
+Quy tac nay uu tien:
+- test tren bo anh that cua bug report truoc
+- doi chieu bang log/timing thay vi chi nhin screenshot
+- khong dung lai o muc "co ve da fix" neu chua replay lai bo anh do
