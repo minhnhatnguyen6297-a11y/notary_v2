@@ -16,7 +16,7 @@ from database import (
     migrate_properties_schema,
 )
 from observability import configure_process_logging
-from routers import cases, customers, ocr, ocr_local, participants, properties
+from routers import cases, customers, ocr_ai, ocr_local, participants, properties
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
@@ -111,7 +111,7 @@ app.include_router(customers.router, prefix="/customers", tags=["Khach hang"])
 app.include_router(properties.router, prefix="/properties", tags=["Tai san"])
 app.include_router(cases.router, prefix="/cases", tags=["Ho so thua ke"])
 app.include_router(participants.router, prefix="/participants", tags=["Nguoi tham gia"])
-app.include_router(ocr.router, prefix="/api/ocr", tags=["OCR"])
+app.include_router(ocr_ai.router, prefix="/api/ocr", tags=["OCR"])
 app.include_router(ocr_local.router, prefix="/api/ocr", tags=["OCR_Local"])
 
 

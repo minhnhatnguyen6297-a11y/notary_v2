@@ -8,6 +8,7 @@ Local OCR V4:
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -29,11 +30,12 @@ _LOCAL_OCR_IMPORT_ERROR = None
 try:
     import cv2
     import numpy as np
-    from PIL import Image
+    from PIL import Image, ImageOps
 except ImportError as exc:
     cv2 = None
     np = None
     Image = None
+    ImageOps = None
     _LOCAL_OCR_IMPORT_ERROR = str(exc)
 
 try:
@@ -45,7 +47,11 @@ except ImportError as exc:
     else:
         _LOCAL_OCR_IMPORT_ERROR = f"{_LOCAL_OCR_IMPORT_ERROR}; {exc}"
 
-from .ocr import parse_cccd_qr, try_decode_qr
+try:
+    import zxingcpp
+except ImportError:
+    zxingcpp = None
+
 from database import SessionLocal
 from models import ExtractedDocument, OCRJob
 
@@ -151,6 +157,313 @@ def _log_timing(event: str, level: str = "info", **fields) -> None:
         _logger.warning("[OCR_LOCAL_TIMING] %s", message)
     else:
         _logger.info("[OCR_LOCAL_TIMING] %s", message)
+
+
+def _zxing_decode_qr_local(image_obj) -> str | None:
+    if zxingcpp is None:
+        return None
+    try:
+        results = zxingcpp.read_barcodes(image_obj)
+        for result in results:
+            if result.format in (zxingcpp.BarcodeFormat.QRCode, zxingcpp.BarcodeFormat.MicroQRCode):
+                text = (result.text or "").strip()
+                if text:
+                    return text
+    except Exception:
+        return None
+    return None
+
+
+def _cv_to_pil_gray_local(gray_img):
+    if Image is None or cv2 is None:
+        return None
+    try:
+        if gray_img.ndim == 2:
+            return Image.fromarray(gray_img)
+        rgb = cv2.cvtColor(gray_img, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(rgb)
+    except Exception:
+        return None
+
+
+def _qr_variants_local(file_bytes: bytes) -> list[Image.Image]:
+    variants: list[Image.Image] = []
+    if Image is None:
+        return variants
+    try:
+        pil_img = Image.open(io.BytesIO(file_bytes))
+        pil_img = ImageOps.exif_transpose(pil_img)
+        if pil_img.mode not in ("RGB", "L"):
+            pil_img = pil_img.convert("RGB")
+        variants.append(pil_img)
+    except Exception:
+        pass
+
+    if cv2 is None or np is None:
+        return variants
+
+    try:
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            return variants
+
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape[:2]
+        scale = 2.0
+        nw, nh = int(w * scale), int(h * scale)
+        if nw <= 2600 and nh <= 2600:
+            upscaled = cv2.resize(gray, (nw, nh), interpolation=cv2.INTER_CUBIC)
+            pil_var = _cv_to_pil_gray_local(upscaled)
+            if pil_var is not None:
+                variants.append(pil_var)
+            base_for_thresh = upscaled
+        else:
+            base_for_thresh = gray
+
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(base_for_thresh)
+        sharpen = cv2.filter2D(
+            clahe,
+            -1,
+            np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32),
+        )
+        adaptive = cv2.adaptiveThreshold(
+            sharpen,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            7,
+        )
+        pil_var = _cv_to_pil_gray_local(adaptive)
+        if pil_var is not None:
+            variants.append(pil_var)
+    except Exception:
+        pass
+
+    return variants
+
+
+def try_decode_qr(file_bytes: bytes) -> str | None:
+    for candidate in _qr_variants_local(file_bytes):
+        decoded = _zxing_decode_qr_local(candidate)
+        if decoded:
+            return decoded
+
+    if cv2 is None or np is None:
+        return None
+
+    detector = _get_qr_detector()
+    if detector is None:
+        return None
+
+    try:
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        decoded, _, _ = detector.detectAndDecode(gray)
+        if decoded:
+            return decoded.strip()
+    except Exception:
+        pass
+    return None
+
+
+def parse_cccd_qr(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+
+    parts = [part.strip() for part in re.split(r"[|\r\n;]+", raw) if part and part.strip()]
+    if not parts:
+        return None
+
+    now_year = datetime.now().year
+
+    def fold(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value or "")
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        return normalized.replace("đ", "d").replace("Đ", "D").lower()
+
+    def is_name_candidate(value: str) -> bool:
+        if not value or re.search(r"\d", value):
+            return False
+        words = value.split()
+        if not (2 <= len(words) <= 6):
+            return False
+        folded = fold(value)
+        return not re.search(
+            r"bo cong an|ministry|public security|cong hoa|socialist|identity|citizen|can cuoc|"
+            r"noi thuong tru|noi cu tru|place of|date of|quoc tich|nationality|que quan",
+            folded,
+        )
+
+    def is_address_candidate(value: str) -> bool:
+        folded = fold(value)
+        return len(value) >= 10 and (
+            "," in value or re.search(r"\b(thon|to dan pho|xa|phuong|huyen|quan|tinh|thanh pho|tp)\b", folded)
+        )
+
+    def parse_date(raw_date: str) -> str:
+        compact = re.sub(r"\s+", "", raw_date or "")
+        if not compact:
+            return ""
+        match = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", compact)
+        if match:
+            dd = int(match.group(1))
+            mm = int(match.group(2))
+            yyyy = int(match.group(3))
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+            return ""
+        if re.fullmatch(r"\d{8}", compact):
+            dd = int(compact[0:2])
+            mm = int(compact[2:4])
+            yyyy = int(compact[4:8])
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+            yyyy = int(compact[0:4])
+            mm = int(compact[4:6])
+            dd = int(compact[6:8])
+            if 1 <= dd <= 31 and 1 <= mm <= 12 and 1900 <= yyyy <= 2100:
+                return f"{dd:02d}/{mm:02d}/{yyyy:04d}"
+        return ""
+
+    def collect_dates(part: str) -> list[str]:
+        out: list[str] = []
+        compact = re.sub(r"\s+", "", part or "")
+        for match in re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{4}", compact):
+            parsed = parse_date(match)
+            if parsed:
+                out.append(parsed)
+        for match in re.findall(r"\d{8}", compact):
+            parsed = parse_date(match)
+            if parsed:
+                out.append(parsed)
+        if re.fullmatch(r"\d{16}", compact):
+            first = parse_date(compact[:8])
+            second = parse_date(compact[8:])
+            if first:
+                out.append(first)
+            if second:
+                out.append(second)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for value in out:
+            if value not in seen:
+                seen.add(value)
+                deduped.append(value)
+        return deduped
+
+    cccd = ""
+    cccd_idx = -1
+    for idx, part in enumerate(parts):
+        match = re.search(r"(?<!\d)(\d{12})(?!\d)", part)
+        if match:
+            cccd = match.group(1)
+            cccd_idx = idx
+            break
+    if not cccd:
+        return None
+
+    name = ""
+    birth = ""
+    issue = ""
+    expiry = ""
+    gender = ""
+    address = ""
+
+    for idx, part in enumerate(parts):
+        folded = fold(part)
+        label_value = part.split(":", 1)[1].strip() if ":" in part else part
+        if not name and re.search(r"ho va ten|ho ten|full name", folded):
+            if is_name_candidate(label_value):
+                name = label_value
+            elif idx + 1 < len(parts) and is_name_candidate(parts[idx + 1]):
+                name = parts[idx + 1]
+        if not gender and re.search(r"\b(nam|nu|nữ|male|female)\b", folded):
+            if re.search(r"\b(nam|male)\b", folded):
+                gender = "Nam"
+            elif re.search(r"\b(nu|nữ|female)\b", folded):
+                gender = "Nữ"
+        if not address and re.search(r"noi thuong tru|noi cu tru|place of residence", folded):
+            if label_value:
+                address = label_value
+            elif idx + 1 < len(parts):
+                address = parts[idx + 1].strip()
+        date_values = collect_dates(part)
+        if date_values:
+            if re.search(r"ngay sinh|date of birth", folded) and not birth:
+                birth = date_values[0]
+            if re.search(r"ngay cap|date of issue", folded) and not issue:
+                issue = date_values[0]
+            if re.search(r"ngay het han|date of expiry|co gia tri den|có giá trị đến", folded) and not expiry:
+                expiry = date_values[-1]
+
+    if not name:
+        preferred: list[str] = []
+        if 0 <= cccd_idx + 1 < len(parts):
+            preferred.append(parts[cccd_idx + 1])
+        if 0 <= cccd_idx + 2 < len(parts):
+            preferred.append(parts[cccd_idx + 2])
+        for part in preferred + parts:
+            if is_name_candidate(part):
+                name = part
+                break
+
+    if not gender:
+        for part in parts:
+            folded = fold(part)
+            if re.search(r"\b(nam|male)\b", folded):
+                gender = "Nam"
+                break
+            if re.search(r"\b(nu|nữ|female)\b", folded):
+                gender = "Nữ"
+                break
+
+    if not address:
+        address_candidates = [part for part in parts if is_address_candidate(part)]
+        if address_candidates:
+            address_candidates.sort(key=len, reverse=True)
+            address = address_candidates[0]
+
+    all_dates: list[str] = []
+    for part in parts:
+        all_dates.extend(collect_dates(part))
+
+    def year_of(value: str) -> int:
+        return int(value.split("/")[-1]) if value else 0
+
+    if all_dates:
+        if not birth:
+            birth_candidates = [value for value in all_dates if 1900 <= year_of(value) <= now_year]
+            if birth_candidates:
+                birth = sorted(birth_candidates, key=year_of)[0]
+        if not issue:
+            issue_candidates = [value for value in all_dates if 2000 <= year_of(value) <= now_year + 1 and value != birth]
+            if issue_candidates:
+                issue = sorted(issue_candidates, key=year_of)[0]
+        if not expiry:
+            expiry_candidates = [value for value in all_dates if year_of(value) >= now_year]
+            if expiry_candidates:
+                expiry = sorted(expiry_candidates, key=year_of)[-1]
+
+    if address:
+        folded_address = fold(address)
+        if re.search(r"bo cong an|ministry|public security|quoc tich|nationality", folded_address):
+            address = ""
+
+    return {
+        "so_giay_to": cccd,
+        "ho_ten": (name or "").strip(),
+        "ngay_sinh": (birth or "").strip(),
+        "gioi_tinh": gender,
+        "dia_chi": (address or "").strip(),
+        "ngay_cap": (issue or "").strip(),
+        "ngay_het_han": (expiry or "").strip(),
+    }
 
 
 def _log_debug(event: str, level: str = "info", **fields) -> None:
@@ -761,6 +1074,7 @@ def warmup_local_ocr() -> tuple[bool, str]:
     try:
         _ensure_local_ocr_dependencies()
         _get_rapidocr_engine()
+        _get_vietocr_engine()
         return True, ""
     except Exception as exc:
         _logger.exception("Local OCR warmup failed: %s", exc)

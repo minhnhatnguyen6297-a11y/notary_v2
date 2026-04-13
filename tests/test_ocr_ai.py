@@ -1,26 +1,18 @@
 import io
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest import mock
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
-from routers import ocr
+from routers import ocr_ai
 
 
 def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
     return UploadFile(filename=filename, file=io.BytesIO(content))
 
 
-def make_settings() -> dict:
-    return {
-        "timing_log": False,
-        "preprocess_workers": 0,
-        "preprocess_warmup": False,
-    }
-
-
 class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
-    async def test_analyze_images_groups_preprocessed_qr_row(self):
+    async def test_analyze_images_short_circuits_to_qr(self):
         upload = make_upload("qr-card.jpg")
         qr_data = {
             "so_giay_to": "012345678901",
@@ -31,40 +23,25 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             "ngay_cap": "03/04/2021",
             "ngay_het_han": "03/04/2031",
         }
-        row = ocr._build_empty_row(0, "qr-card.jpg")
-        row["doc_type"] = "cccd_front"
-        row["profile"] = ocr.DOC_PROFILE_FRONT_OLD
-        row["state"] = ocr.TRIAGE_STATE_FRONT_OLD
-        row["qr_text"] = "qr-text"
-        row["qr_data"] = qr_data
-        row["has_qr"] = True
-        ocr._apply_source_merge(row["data"], row["field_sources"], qr_data, source="qr", profile=row["profile"])
-        ocr._sync_row_identity(row)
 
         with (
-            patch.object(ocr, "_get_ai_ocr_settings", return_value=make_settings()),
-            patch.object(ocr, "_preprocess_ai_file_items", new=AsyncMock(return_value=([row], []))),
-            patch.object(ocr, "_build_ai_plan", return_value=[]),
-            patch.object(ocr, "_build_escalation_plans", return_value=[]),
-            patch.object(ocr, "_execute_ai_plans", new=AsyncMock(side_effect=AssertionError("AI should not run"))),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value="qr-text"),
+            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
+            mock.patch.object(ocr_ai, "call_vision_images", side_effect=AssertionError("AI should not run")),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
-        self.assertEqual(result["summary"]["total_images"], 1)
-        self.assertEqual(result["summary"]["cccd_fronts"], 1)
+        self.assertEqual(result["summary"]["qr_hits"], 1)
+        self.assertEqual(result["summary"]["ai_runs"], 0)
         self.assertEqual(len(result["persons"]), 1)
+        self.assertEqual(result["persons"][0]["source_type"], "QR")
         self.assertEqual(result["persons"][0]["so_giay_to"], "012345678901")
-        self.assertTrue(result["persons"][0]["_qr"])
         self.assertEqual(result["persons"][0]["_files"], ["qr-card.jpg"])
 
-    async def test_analyze_images_applies_ai_results_for_non_qr_images(self):
+    async def test_analyze_images_runs_ai_for_non_qr_images(self):
         upload = make_upload("front.jpg")
-        row = ocr._build_empty_row(0, "front.jpg")
-        row["state"] = ocr.TRIAGE_STATE_FRONT_UNKNOWN
-        row["profile"] = ocr.DOC_PROFILE_UNKNOWN
-        plans = [{"record_index": 0, "mode": "full"}]
-        ai_results = {
-            0: [
+        ai_output = [
+            [
                 {
                     "doc_type": "cccd_front",
                     "data": {
@@ -78,39 +55,40 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
                     },
                 }
             ]
-        }
+        ]
 
         with (
-            patch.object(ocr, "_get_ai_ocr_settings", return_value=make_settings()),
-            patch.object(ocr, "_preprocess_ai_file_items", new=AsyncMock(return_value=([row], []))),
-            patch.object(ocr, "_build_ai_plan", return_value=plans),
-            patch.object(ocr, "_build_escalation_plans", return_value=[]),
-            patch.object(ocr, "_execute_ai_plans", new=AsyncMock(return_value=ai_results)),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
+            mock.patch.object(ocr_ai, "call_vision_images", return_value=ai_output),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
-        self.assertEqual(result["summary"]["total_images"], 1)
-        self.assertEqual(result["summary"]["cccd_fronts"], 1)
+        self.assertEqual(result["summary"]["qr_hits"], 0)
+        self.assertEqual(result["summary"]["ai_runs"], 1)
         self.assertEqual(len(result["persons"]), 1)
         person = result["persons"][0]
+        self.assertEqual(person["source_type"], "AI")
+        self.assertEqual(person["side"], "unknown")
         self.assertEqual(person["ho_ten"], "NGUYEN VAN AN")
         self.assertEqual(person["so_giay_to"], "012345678901")
         self.assertEqual(person["ngay_sinh"], "01/02/1990")
-        self.assertEqual(person["ngay_cap"], "")
+        self.assertEqual(person["ngay_cap"], "03/04/2021")
         self.assertEqual(person["_files"], ["front.jpg"])
 
-    async def test_analyze_images_collects_preprocess_errors(self):
+    async def test_analyze_images_collects_ai_errors_per_file(self):
         upload = make_upload("broken.jpg")
 
         with (
-            patch.object(ocr, "_get_ai_ocr_settings", return_value=make_settings()),
-            patch.object(
-                ocr,
-                "_preprocess_ai_file_items",
-                new=AsyncMock(return_value=([], [{"filename": "broken.jpg", "error": "upstream error"}])),
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
+            mock.patch.object(
+                ocr_ai,
+                "call_vision_images",
+                return_value=[HTTPException(status_code=502, detail="upstream error")],
             ),
         ):
-            result = await ocr.analyze_images([upload])
+            result = await ocr_ai.analyze_images([upload])
 
         self.assertEqual(result["persons"], [])
         self.assertEqual(len(result["errors"]), 1)

@@ -1161,7 +1161,7 @@ endif %}
               <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-primary flex-grow-1" id="ocr-btn-extract" onclick="ocrExtractAll()"
                   disabled title="Khuyến nghị: Nhạy bén, cần token">
-                  <span id="ocr-btn-text"><i class="bi bi-robot me-1"></i>AI OCR (GPT)</span>
+                  <span id="ocr-btn-text"><i class="bi bi-robot me-1"></i>AI OCR</span>
                 </button>
                 <button class="btn btn-sm btn-outline-secondary" onclick="ocrClearAll()" title="Xoá tất cả ảnh">
                   <i class="bi bi-trash"></i>
@@ -1438,8 +1438,102 @@ endif %}
 
         const btn = document.getElementById('tpl-btn-upload');
         btn.disabled = true;
+        /*
+        document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
+        try {
+          const formData = new FormData();
+          for (const item of pending) {
+            item.status = 'processing';
+            renderQueue();
+            const blob = item.file || await (await fetch(item.dataUrl)).blob();
+            formData.append('files', blob, item.name);
+          }
+
+          const resp = await fetch('/api/ocr/analyze', { method: 'POST', body: formData });
+          if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
+          const data = await resp.json();
+
+          const persons = Array.isArray(data.persons) ? data.persons : [];
+          const properties = Array.isArray(data.properties) ? data.properties : [];
+          const marriages = Array.isArray(data.marriages) ? data.marriages : [];
+          const byFile = {};
+
+          for (const p of persons) {
+            const sourceType = String(p.source_type || 'AI').toUpperCase();
+            const files = Array.isArray(p._files) && p._files.length ? p._files : [];
+            for (const f of files.filter(Boolean)) {
+              (byFile[f] = byFile[f] || []).push({
+                type: 'person',
+                data: p,
+                source: sourceType,
+                source_type: sourceType,
+                filename: f,
+              });
+            }
+          }
+          for (const pr of properties) {
+            const filename = pr._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'property',
+              data: pr,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+          for (const m of marriages) {
+            const filename = m._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'marriage',
+              data: m,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+
+          for (const item of pending) {
+            const results = byFile[item.name] || [];
+            if (results.length) {
+              const r = results[0];
+              const sourceType = String(r.source_type || r.source || 'AI').toUpperCase();
+              item.status = sourceType === 'QR' ? 'qr' : 'ai';
+              item._result = { ...r, filename: item.name };
+            } else {
+              item.status = 'error';
+              item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+            }
+            renderQueue();
+          }
+
+          ocrResults.push(...persons.map(p => ({
+            type: 'person',
+            data: p,
+            source: String(p.source_type || 'AI').toUpperCase(),
+            source_type: String(p.source_type || 'AI').toUpperCase(),
+            side: p.side || 'unknown',
+          })));
+          ocrResults.push(...properties.map(p => ({ type: 'property', data: p, source: 'AI', source_type: 'AI' })));
+          ocrResults.push(...marriages.map(m => ({ type: 'marriage', data: m, source: 'AI', source_type: 'AI' })));
+        } catch (e) {
+          for (const item of pending) {
+            item.status = 'error';
+            item._errorMsg = e.message;
+            renderQueue();
+          }
+          showToast('Lỗi OCR: ' + e.message, 'danger');
+        }
+
+        mergeOcrResultsInPlace();
+        renderResults();
+        autoStageOcrResults();
+
+        btn.disabled = false;
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
+        return;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang tải...';
 
+        */
         const fd = new FormData();
         fd.append('ten_mau', ten);
         fd.append('file_mau', file);
@@ -1646,12 +1740,12 @@ endif %}
       {% for p in participants %}
     {
       id: "{{ p.customer_id }}",
-        name: {{ p.customer.ho_ten | tojson }},
-          doc: {{ (p.customer.so_giay_to or '') | tojson }},
-            gender: {{ (p.customer.gioi_tinh or '') | tojson }},
-              birth: {{ (p.customer.ngay_sinh.year | string if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '')) | tojson }},
-              death: {{ (p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '') | tojson }},
-                role: {{ p.vai_tro | tojson }},
+        name: "{{ p.customer.ho_ten|e }}",
+          doc: "{{ p.customer.so_giay_to|e }}",
+            gender: "{{ p.customer.gioi_tinh|default('', true)|e }}",
+              birth: "{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}",
+              death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
+                role: "{{ p.vai_tro|e }}",
                   share: "{{ p.ty_le }}",
                     receive: "{{ '1' if p.co_nhan_tai_san else '0' }}",
                       parent_id: "{{ p.parent_customer_id if p.parent_customer_id else '' }}"
@@ -1664,11 +1758,11 @@ endif %}
       {% for c in all_customers %}
     {
       id: "{{ c.id }}",
-        name: {{ c.ho_ten | tojson }},
-          doc: {{ (c.so_giay_to or '') | tojson }},
-            gender: {{ (c.gioi_tinh or '') | tojson }},
-              death: {{ (c.ngay_chet.year | string if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '')) | tojson }},
-                birth: {{ (c.ngay_sinh.year | string if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '')) | tojson }}
+        name: "{{ c.ho_ten|e }}",
+          doc: "{{ c.so_giay_to|e }}",
+            gender: "{{ c.gioi_tinh|default('', true)|e }}",
+              death: "{{ c.ngay_chet.year if c.ngay_chet and c.ngay_chet.day == 1 and c.ngay_chet.month == 1 else (c.ngay_chet.strftime('%d/%m/%Y') if c.ngay_chet else '') }}",
+                birth: "{{ c.ngay_sinh.year if c.ngay_sinh and c.ngay_sinh.day == 1 and c.ngay_sinh.month == 1 else (c.ngay_sinh.strftime('%d/%m/%Y') if c.ngay_sinh else '') }}"
     } {% if not loop.last %}, {% endif %}
     {% endfor %}
   ];
@@ -3105,51 +3199,6 @@ endif %}
       let imageQueue = [];   // [{id, file, dataUrl, name, status, sizeKB}]
       let ocrResults = [];   // [{person|property|marriage, source, filename}]
       let totalCostUSD = 0;
-      let ocrLocalSessionJobId = '';
-      let ocrLocalImageResults = [];
-
-      function getLocalImageResult(index) {
-        return (ocrLocalImageResults || []).find(row => Number(row?.index) === Number(index)) || null;
-      }
-
-      function getLocalImageUrl(index) {
-        if (!ocrLocalSessionJobId && ocrLocalSessionJobId !== 0) return '';
-        return `/api/ocr/local/image/${encodeURIComponent(ocrLocalSessionJobId)}/${Number(index)}`;
-      }
-
-      async function ocrDeleteLocalSession(reason = '', useKeepalive = false) {
-        const jobId = String(ocrLocalSessionJobId || '').trim();
-        if (!jobId) {
-          ocrLocalImageResults = [];
-          return;
-        }
-        ocrLocalSessionJobId = '';
-        ocrLocalImageResults = [];
-        try {
-          await fetch(`/api/ocr/local/session/${encodeURIComponent(jobId)}`, {
-            method: 'DELETE',
-            keepalive: !!useKeepalive,
-            headers: reason ? { 'X-OCR-Session-Reason': reason } : {},
-          });
-        } catch (_) { }
-      }
-
-      function normalizeImageRefs(value) {
-        if (!Array.isArray(value)) return [];
-        const seen = new Set();
-        const refs = [];
-        value.forEach(ref => {
-          const index = Number(ref?.index);
-          if (!Number.isFinite(index) || seen.has(index)) return;
-          seen.add(index);
-          refs.push({
-            index,
-            side: String(ref?.side || '').toLowerCase() || 'unknown',
-            triage_state: String(ref?.triage_state || '').toLowerCase() || 'unknown',
-          });
-        });
-        return refs.sort((a, b) => a.index - b.index);
-      }
 
       // ── Drag/drop helpers ──────────────────────────────────────────────────
       window.ocrDragOver = e => { e.preventDefault(); document.getElementById('ocr-drop-zone').style.borderColor = '#2563eb'; };
@@ -3372,7 +3421,7 @@ endif %}
           imageQueue.push(entry);
           renderQueue();
           const [preview, qrDataUrl] = await Promise.all([
-            resizeImage(f, 700),
+            resizeImage(f, 1000),
             fileToDataUrl(f),
           ]);
           entry.dataUrl = preview?.dataUrl || null;
@@ -3447,7 +3496,6 @@ endif %}
         if (s === 'processing') return '<span style="color:#d97706;">⚙️ Đang trích xuất...</span>';
         if (s === 'ocr') return '<span style="color:#2563eb;">🧾 OCR</span>';
         if (s === 'ocr_back') return '<span style="color:#7c3aed;">🧾 OCR • mặt sau đã ghép</span>';
-        if (s === 'qr_back') return '<span style="color:#059669;">✅ QR • mặt sau đã ghép</span>';
         if (s === 'ai') return '<span style="color:#2563eb;">🤖 AI OCR</span>';
         if (s === 'ai_back') return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
         if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
@@ -3455,57 +3503,10 @@ endif %}
       }
 
       // ── Preview ảnh to khi click thumbnail ────────────────────────────────
-      function statusHtml(item) {
-        const s = typeof item === 'string' ? item : item.status;
-        const errMsg = typeof item === 'object' ? (item._errorMsg || '') : '';
-        if (s === 'pending') return '<span style="color:#64748b;">Cho xu ly</span>';
-        if (s === 'queued') return '<span style="color:#0f172a;">Dang xep hang</span>';
-        if (s === 'qr') return '<span style="color:#059669;">QR (mien phi)</span>';
-        if (s === 'processing') return '<span style="color:#d97706;">Dang trich xuat...</span>';
-        if (s === 'ocr') return '<span style="color:#2563eb;">OCR</span>';
-        if (s === 'ocr_back') return '<span style="color:#7c3aed;">OCR - mat sau da ghep</span>';
-        if (s === 'qr_back') return '<span style="color:#059669;">QR - mat sau da ghep</span>';
-        if (s === 'ai') return '<span style="color:#2563eb;">AI OCR</span>';
-        if (s === 'ai_back') return '<span style="color:#7c3aed;">Mat sau (da ghep)</span>';
-        if (s === 'ai_manual') return '<span style="color:#b45309;">AI OCR - can gan/chinh tay</span>';
-        if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">${errMsg || 'Loi'}</span>`;
-        return s;
-      }
-
-      function ensureOcrPreviewOverlay() {
-        let overlay = document.getElementById('ocr-preview-overlay');
-        if (!overlay) {
-          overlay = document.createElement('div');
-          overlay.id = 'ocr-preview-overlay';
-          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:zoom-out;';
-          overlay.onclick = () => overlay.style.display = 'none';
-          const img = document.createElement('img');
-          img.id = 'ocr-preview-img';
-          img.style.cssText = 'max-width:88vw;max-height:82vh;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.6);';
-          const label = document.createElement('div');
-          label.id = 'ocr-preview-label';
-          label.style.cssText = 'color:#fff;font-size:13px;margin-top:10px;opacity:.8;';
-          overlay.appendChild(img);
-          overlay.appendChild(label);
-          document.body.appendChild(overlay);
-        }
-        return overlay;
-      }
-
-      function showOcrPreview(src, label) {
-        if (!src) return;
-        const overlay = ensureOcrPreviewOverlay();
-        document.getElementById('ocr-preview-img').src = src;
-        document.getElementById('ocr-preview-label').textContent = label || '';
-        overlay.style.display = 'flex';
-      }
-
       window.ocrPreviewImg = function (id) {
         const item = imageQueue.find(i => i.id === id);
         if (!item?.dataUrl) return;
-        showOcrPreview(item.dataUrl, item.name + (item.status === 'error' ? ' - ' + (item._errorMsg || 'Loi') : ''));
-        return;
-        let overlay = ensureOcrPreviewOverlay();
+        let overlay = document.getElementById('ocr-preview-overlay');
         if (!overlay) {
           overlay = document.createElement('div');
           overlay.id = 'ocr-preview-overlay';
@@ -3527,20 +3528,6 @@ endif %}
       };
 
       // ── Bổ sung mặt còn thiếu vào card đã có ─────────────────────────────
-      window.ocrPrimeSessionImage = function (index) {
-        const src = getLocalImageUrl(index);
-        if (!src) return;
-        const img = new Image();
-        img.src = src;
-      };
-
-      window.ocrPreviewSessionImage = function (index, label = '') {
-        const src = getLocalImageUrl(index);
-        const imageMeta = getLocalImageResult(index);
-        if (!src) return;
-        showOcrPreview(src, label || imageMeta?.filename || `Anh #${Number(index) + 1}`);
-      };
-
       window.ocrSupplementCard = async function (idx, neededSide) {
         const persons = ocrResults.filter(r => r.type === 'person');
         const existing = persons[idx];
@@ -3556,7 +3543,7 @@ endif %}
           if (suppBtn) { suppBtn.disabled = true; suppBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>'; }
 
           try {
-            const { dataUrl } = await resizeImage(file, 700);
+            const { dataUrl } = await resizeImage(file, 1000);
             const qId = Date.now() + '_s';
             imageQueue.push({ id: qId, file, name: file.name, dataUrl, status: 'processing', sizeKB: 0 });
             renderQueue();
@@ -3628,10 +3615,8 @@ endif %}
       };
 
       window.ocrClearAll = function () {
-        ocrDeleteLocalSession('clear').catch(() => {});
         imageQueue = [];
         ocrResults = [];
-        ocrLocalImageResults = [];
         document.getElementById('ocr-queue').innerHTML = '';
         document.getElementById('ocr-queue').appendChild(document.getElementById('ocr-queue-empty'));
         document.getElementById('ocr-queue-empty').style.display = '';
@@ -3647,9 +3632,7 @@ endif %}
       };
 
       function resetOcrWorkingResults() {
-        ocrDeleteLocalSession('reset').catch(() => {});
         ocrResults = [];
-        ocrLocalImageResults = [];
         document.getElementById('ocr-results-empty').style.display = 'flex';
         document.getElementById('ocr-results-list').style.display = 'none';
         document.getElementById('ocr-results-list').innerHTML = '';
@@ -3735,10 +3718,6 @@ endif %}
         return value.map(v => String(v || '').trim()).filter(Boolean);
       }
 
-      function mergeImageRefs(first, second) {
-        return normalizeImageRefs([...(first || []), ...(second || [])]);
-      }
-
       function mergeOcrResultsInPlace() {
         const merged = [];
         const personByDoc = new Map();
@@ -3764,7 +3743,7 @@ endif %}
               ...normalizeWarnings(r.warnings),
               ...normalizeWarnings(r.data?.warnings),
             ]));
-            const first = { ...r, data: { ...(r.data || {}) }, warnings, image_refs: normalizeImageRefs(r.image_refs) };
+            const first = { ...r, data: { ...(r.data || {}) }, warnings };
             personByDoc.set(doc, first);
             merged.push(first);
             continue;
@@ -3799,7 +3778,6 @@ endif %}
           if (!target.filename && r.filename) target.filename = r.filename;
           if (!target.document_type && r.document_type) target.document_type = r.document_type;
           target.field_sources = { ...(target.field_sources || {}), ...(r.field_sources || {}) };
-          target.image_refs = mergeImageRefs(target.image_refs, r.image_refs);
           target.warnings = Array.from(new Set([
             ...normalizeWarnings(target.warnings),
             ...normalizeWarnings(target.data?.warnings),
@@ -3819,33 +3797,116 @@ endif %}
         const btn = document.getElementById('ocr-btn-extract');
         btn.disabled = true;
         document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
-
-        // ── Bước 1: QR scan tất cả (client-side, miễn phí) ──────────────────
-        const qrConcurrency = 3;
-        let qrCursor = 0;
-        const qrWorkers = Array.from({ length: Math.min(qrConcurrency, pending.length) }, async () => {
-          while (qrCursor < pending.length) {
-            const currentIndex = qrCursor++;
-            const item = pending[currentIndex];
-            if (!item) break;
-
+        try {
+          const formData = new FormData();
+          for (const item of pending) {
             item.status = 'processing';
             renderQueue();
+            const blob = item.file || await (await fetch(item.dataUrl)).blob();
+            formData.append('files', blob, item.name);
+          }
 
-            const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
-            if (qrText) {
-              const person = parseQRToPerson(qrText);
-              if (person) {
-                item.status = 'qr';
-                item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
-                renderQueue();
-                continue;
-              }
+          const resp = await fetch('/api/ocr/analyze', { method: 'POST', body: formData });
+          if (!resp.ok) throw new Error(`Server lỗi ${resp.status}`);
+          const data = await resp.json();
+
+          const persons = Array.isArray(data.persons) ? data.persons : [];
+          const properties = Array.isArray(data.properties) ? data.properties : [];
+          const marriages = Array.isArray(data.marriages) ? data.marriages : [];
+          const byFile = {};
+
+          for (const p of persons) {
+            const sourceType = String(p.source_type || 'AI').toUpperCase();
+            const files = Array.isArray(p._files) && p._files.length ? p._files : [];
+            for (const f of files.filter(Boolean)) {
+              (byFile[f] = byFile[f] || []).push({
+                type: 'person',
+                data: p,
+                source: sourceType,
+                source_type: sourceType,
+                filename: f,
+              });
             }
           }
-        });
-        await Promise.all(qrWorkers);
-        const needsAI = pending.filter(item => item.status !== 'qr');
+          for (const pr of properties) {
+            const filename = pr._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'property',
+              data: pr,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+          for (const m of marriages) {
+            const filename = m._file || '';
+            (byFile[filename] = byFile[filename] || []).push({
+              type: 'marriage',
+              data: m,
+              source: 'AI',
+              source_type: 'AI',
+              filename,
+            });
+          }
+
+          for (const item of pending) {
+            const results = byFile[item.name] || [];
+            if (results.length) {
+              const r = results[0];
+              const sourceType = String(r.source_type || r.source || 'AI').toUpperCase();
+              item.status = sourceType === 'QR' ? 'qr' : 'ai';
+              item._result = { ...r, filename: item.name };
+            } else {
+              item.status = 'error';
+              item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
+            }
+            renderQueue();
+          }
+
+          ocrResults.push(...persons.map(p => ({
+            type: 'person',
+            data: p,
+            source: String(p.source_type || 'AI').toUpperCase(),
+            source_type: String(p.source_type || 'AI').toUpperCase(),
+            side: p.side || 'unknown',
+          })));
+          ocrResults.push(...properties.map(p => ({ type: 'property', data: p, source: 'AI', source_type: 'AI' })));
+          ocrResults.push(...marriages.map(m => ({ type: 'marriage', data: m, source: 'AI', source_type: 'AI' })));
+        } catch (e) {
+          for (const item of pending) {
+            item.status = 'error';
+            item._errorMsg = e.message;
+            renderQueue();
+          }
+          showToast('Lỗi OCR: ' + e.message, 'danger');
+        }
+
+        mergeOcrResultsInPlace();
+        renderResults();
+        autoStageOcrResults();
+
+        btn.disabled = false;
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
+        return;
+        document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Đang xử lý...';
+
+        // ── Bước 1: QR scan tất cả (client-side, miễn phí) ──────────────────
+        const needsAI = [];
+        for (const item of pending) {
+          item.status = 'processing';
+          renderQueue();
+          const qrText = await tryQRScan(item.qrDataUrl || item.dataUrl);
+          if (qrText) {
+            const person = parseQRToPerson(qrText);
+            if (person) {
+              item.status = 'qr';
+              item._result = { type: 'person', data: person, source: 'QR', filename: item.name };
+              renderQueue();
+              continue;
+            }
+          }
+          needsAI.push(item);
+        }
 
         // ── Bước 2: Gửi ảnh cần AI (1 lần gọi duy nhất) ────────────────────
         if (needsAI.length) {
@@ -3871,7 +3932,6 @@ endif %}
             const persons = data.persons || [];
             const properties = data.properties || [];
             const marriages = data.marriages || [];
-            const rawResults = Array.isArray(data.raw_results) ? data.raw_results : [];
 
             // Map filename → kết quả (index TẤT CẢ files trong _files[] để back cũng được đánh dấu)
             const byFile = {};
@@ -3882,37 +3942,18 @@ endif %}
             }
             for (const pr of properties) (byFile[pr._file || ''] = byFile[pr._file || ''] || []).push({ type: 'property', data: pr });
             for (const m of marriages) (byFile[m._file || ''] = byFile[m._file || ''] || []).push({ type: 'marriage', data: m });
-            const rawByFile = {};
-            for (const rr of rawResults) {
-              const filename = String(rr?.filename || '').trim();
-              if (!filename) continue;
-              rawByFile[filename] = rr;
-            }
 
             for (const item of needsAI) {
               const results = byFile[item.name] || [];
-              const rawForItem = rawByFile[item.name] || null;
-              const rawUsesQr = Boolean(rawForItem?._img_has_qr) || Object.values(rawForItem?.field_sources || {})
-                .some(v => String(v || '').toLowerCase() === 'qr');
               if (results.length) {
                 const r = results[0];
                 // Mặt sau CCCD đã ghép → show "ai (mặt sau)" không cần thêm vào ocrResults
-                const isBackOnly = r.type === 'person' && r.data?._source?.includes('+back')
-                  && r.data?._files?.[1] === item.name;
-                if (rawUsesQr) {
-                  item.status = isBackOnly ? 'qr_back' : 'qr';
-                } else {
-                  item.status = isBackOnly ? 'ai_back' : 'ai';
-                }
+                const isBackOnly = false;
+                item.status = isBackOnly ? 'ai_back' : 'ai';
                 item._result = { ...r, source: 'AI', filename: item.name };
               } else {
                 item.status = 'error';
                 item._errorMsg = data.errors?.find(e => e.filename === item.name)?.error || 'Không nhận diện được';
-              }
-              if (item.status === 'error' && rawByFile[item.name]) {
-                item.status = 'ai_manual';
-                item._errorMsg = '';
-                item._rawResult = rawByFile[item.name];
               }
               renderQueue();
             }
@@ -3938,7 +3979,7 @@ endif %}
         autoStageOcrResults();  // Tự động đưa vào staging + pool
 
         btn.disabled = false;
-        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR (GPT)';
+        document.getElementById('ocr-btn-text').innerHTML = '<i class="bi bi-robot me-1"></i>AI OCR';
       };
 
       // ── Trích xuất Local RapidOCR ────────────────────────────────────
@@ -3998,7 +4039,6 @@ endif %}
           if (!submitResp.ok) throw new Error(`Server lỗi ${submitResp.status}`);
           const submitData = await submitResp.json();
           const jobId = submitData.job_id;
-          ocrLocalSessionJobId = jobId;
           if (!jobId) throw new Error('Không nhận được job_id từ server');
 
           const maxAttempts = 300; // ~10 phút
@@ -4010,7 +4050,6 @@ endif %}
             if (data.status === 'completed') {
               const rjson = data.result_json || {};
               const imageResults = Array.isArray(rjson.image_results) ? rjson.image_results : [];
-              ocrLocalImageResults = imageResults;
               const imageByIndex = new Map();
               imageResults.forEach(ir => imageByIndex.set(Number(ir.index), ir));
 
@@ -4057,13 +4096,11 @@ endif %}
                   side,
                   profile: p.profile || personData.profile || 'unknown',
                   field_sources: p.field_sources || {},
-                  image_refs: normalizeImageRefs(p.image_refs),
                   warnings,
                   raw_text: personData._raw_text || p.raw_text || '',
                   filename: Array.isArray(p._files) && p._files.length ? p._files[0] : ''
                 });
               }
-              imageQueue = [];
 
               const summary = rjson.summary || {};
               const qrHits = Number(summary.qr_hits || 0);
@@ -4135,46 +4172,10 @@ endif %}
       }
 
       // ── Render kết quả ─────────────────────────────────────────────────────
-      function renderLocalUnknownPanel(rows) {
-        if (!rows.length) return '';
-        let html = `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#92400e;margin:14px 0 10px;">
-        <i class="bi bi-exclamation-triangle me-1"></i>Anh can xem tay (${rows.length})
-      </div>`;
-        rows.forEach((row, pos) => {
-          const index = Number(row?.index || pos);
-          const title = String(row?.filename || `Anh #${index + 1}`);
-          const triage = String(row?.triage_state || 'unknown');
-          html += `
-      <div style="border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fffbeb;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-        <div style="min-width:0;">
-          <div style="font-size:13px;font-weight:600;color:#78350f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
-          <div style="font-size:12px;color:#92400e;">triage: ${triage}</div>
-        </div>
-        <button type="button" class="btn btn-sm btn-outline-warning"
-          onmouseenter="ocrPrimeSessionImage(${index})"
-          onclick="ocrPreviewSessionImage(${index}, '${title.replace(/'/g, "\\'")}')">
-          Xem anh
-        </button>
-      </div>`;
-        });
-        return html;
-      }
-
       function renderResults() {
         const empty = document.getElementById('ocr-results-empty');
         const list = document.getElementById('ocr-results-list');
-        const localUnknownRows = (ocrLocalImageResults || []).filter(row => {
-          const triage = String(row?.triage_state || '').toLowerCase();
-          const src = String(row?.source_type || '').toUpperCase();
-          return triage === 'unknown' || src === 'ERROR';
-        });
-        if (!ocrResults.length && !localUnknownRows.length) {
-          empty.style.display = 'flex';
-          list.style.display = 'none';
-          list.innerHTML = '';
-          document.getElementById('ocr-summary-text').textContent = '';
-          return;
-        }
+        if (!ocrResults.length) return;
 
         empty.style.display = 'none';
         list.style.display = '';
@@ -4215,20 +4216,13 @@ endif %}
           });
         }
 
-        if (localUnknownRows.length) {
-          html += renderLocalUnknownPanel(localUnknownRows);
-        }
-
         list.innerHTML = html;
 
         // Summary
-        const unknownCount = localUnknownRows.length;
-        const qrCount = persons.filter(personUsesQr).length;
-        const aiCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'AI').length;
-        const ocrCount = persons.filter(r => !personUsesQr(r) && String(r.source || '').toUpperCase() === 'OCR').length;
-        if (!persons.length && !properties.length && !marriages.length) {
-          document.getElementById('ocr-summary-text').textContent = `${unknownCount} anh can xem tay`;
-        } else if (aiCount > 0 && ocrCount === 0) {
+        const qrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'QR').length;
+        const ocrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'OCR').length;
+        const aiCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'AI').length;
+        if (aiCount > 0 && ocrCount === 0) {
           document.getElementById('ocr-summary-text').textContent =
             `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
         } else {
@@ -4254,36 +4248,9 @@ endif %}
         return total;
       }
 
-      function personUsesQr(result) {
-        const d = result?.data || {};
-        if (d._qr) return true;
-        const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
-        if (sourceType === 'QR') return true;
-        const fieldSources = {
-          ...(d.field_sources || {}),
-          ...(result?.field_sources || {})
-        };
-        return Object.values(fieldSources).some(v => String(v || '').toLowerCase() === 'qr');
-      }
-
-      function renderPersonImageRefs(result) {
-        const refs = normalizeImageRefs(result?.image_refs);
-        if (!refs.length || !ocrLocalSessionJobId) return '';
-        return refs.map(ref => {
-          const label = ref.side === 'front' ? 'MT' : ref.side === 'back' ? 'MS' : `#${ref.index + 1}`;
-          const title = `${label} - ${ref.triage_state || 'unknown'}`;
-          return `<button type="button" class="btn btn-sm btn-outline-secondary"
-            style="font-size:11px;padding:2px 7px;flex-shrink:0;"
-            title="${title}"
-            onmouseenter="ocrPrimeSessionImage(${ref.index})"
-            onclick="ocrPreviewSessionImage(${ref.index}, '${title.replace(/'/g, "\\'")}')">${label}</button>`;
-        }).join('');
-      }
-
       function personCard(d, idx, result) {
         // Tên: nếu có dấu (từ QR hoặc ảnh mặt trước) → Title Case
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
-        const imageRefButtons = renderPersonImageRefs(result);
         const sourceTagForRaw = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
         const rawTextValue = sourceTagForRaw === 'OCR'
           ? String((d._raw_text || d.raw_text || result?.raw_text || '') || '')
@@ -4313,7 +4280,6 @@ endif %}
         // Badge + note + supplement button theo nguồn
         let srcBadge, suppNote = '', suppBtn = '';
         const _src = d._source || '';
-        const usesQr = personUsesQr(result);
         const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
         const side = String(result?.side || d.side || '').toLowerCase();
         const sideLabel = side === 'front' ? 'mặt trước' : side === 'back' ? 'mặt sau' : 'không rõ mặt';
@@ -4322,9 +4288,9 @@ endif %}
         } else if (sourceType === 'OCR') {
           srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">OCR • ${sideLabel}</span>`;
         } else if (_src.includes('+back')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">${usesQr ? '2 mặt • QR' : '2 mặt ✓'}</span>`;
+          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓</span>`;
         } else if (_src.includes('thiếu mặt sau')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">${usesQr ? 'QR • thiếu mặt sau' : 'Thiếu mặt sau'}</span>`;
+          srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt sau</span>`;
           suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'back')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt sau CCCD (lấy ngày cấp)"><i class="bi bi-camera"></i> Bổ sung</button>`;
         } else if (_src === 'cccd_back only') {
           srcBadge = `<span class="ocr-src-badge" style="background:#ffedd5;color:#9a3412;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt trước</span>`;
@@ -4363,7 +4329,7 @@ endif %}
         ${inp('ngay_sinh', d.ngay_sinh, 'Ngày sinh')}
         ${inp('so_giay_to', d.so_giay_to, 'Số CCCD/CMND', 'flex:1.4;min-width:100px;')}
         ${inp('ngay_cap', d.ngay_cap, 'Ngày cấp', 'flex:1;min-width:80px;')}
-        ${srcBadge}${imageRefButtons}${suppNote}${suppBtn}
+        ${srcBadge}${suppNote}${suppBtn}
       </div>
       <div style="margin-top:5px;">
         ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
@@ -4749,21 +4715,16 @@ endif %}
 
       // ── Khi đóng modal: đẩy người chưa thêm ra staging area ──
       document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal', () => {
-        ocrDeleteLocalSession('modal-hide').catch(() => {});
         ocrResults.filter(r => r.type === 'person').forEach(r => {
           if (!r._staged && !r._added && r.data) {
             const added = window.addToOcrStaging(r.data);
             if (added) r._added = true;
           }
         });
-        ocrResults = []; imageQueue = []; ocrLocalImageResults = [];
+        ocrResults = []; imageQueue = [];
         const st = document.getElementById('ocr-local-status');
         if (st) st.textContent = '';
         renderQueue(); renderResults();
-      });
-
-      window.addEventListener('beforeunload', () => {
-        ocrDeleteLocalSession('beforeunload', true).catch(() => {});
       });
 
       document.getElementById('ocr-btn-confirm-save')?.addEventListener('click', ocrConfirmSave);
