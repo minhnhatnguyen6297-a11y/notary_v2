@@ -1,178 +1,211 @@
 # Plan: OCR Local (CPU-only)
 
-**Trạng thái:** active  
-**Cập nhật:** 2026-04-07  
-**Files liên quan:** `routers/ocr_local.py`, `tasks.py`  
+**Trang thai:** active  
+**Cap nhat:** 2026-04-14  
+**Files lien quan:** `routers/ocr_local.py`, `tasks.py`  
 **API endpoints:**
-- `POST /api/ocr/local/submit` — submit 1 ảnh, nhận job_id
-- `POST /api/ocr/local/submit-batch` — submit nhiều ảnh, nhận job_id
-- `GET /api/ocr/local/status/{job_id}` — poll kết quả
+- `POST /api/ocr/local/submit` - submit 1 anh, nhan `job_id`
+- `POST /api/ocr/local/submit-batch` - submit nhieu anh, nhan `job_id`
+- `GET /api/ocr/local/status/{job_id}` - poll ket qua
 
 ---
 
-## Tinh thần / Mục tiêu
+## Tinh than / Muc tieu
 
-OCR Local là pipeline **không phụ thuộc API key, chạy hoàn toàn offline trên CPU**. Tối ưu cho máy Windows văn phòng. Mục tiêu: xử lý CCCD Việt Nam đủ tốt để staff chỉ cần verify, không phải nhập lại từ đầu.
+OCR Local la pipeline **khong phu thuoc API key, chay hoan toan offline tren CPU**. Toi uu cho may Windows van phong. Muc tieu la xu ly CCCD Viet Nam du tot de staff chu yeu chi verify, khong phai nhap lai tu dau.
 
-Không cố gắng 100% tự động — thiết kế có **human-in-the-loop**: trả về `warnings[]` khi có trường thiếu hoặc không chắc, để UI hiển thị cảnh báo đỏ cho người dùng tự sửa.
+Khong co gang 100% tu dong. Thiet ke co **human-in-the-loop**:
+- Tra ve `warnings[]` khi co truong thieu hoac khong chac.
+- UI hien thi canh bao de nguoi dung sua tay khi can.
+
+OCR Local van phai uu tien **dung nghiep vu truoc**:
+- Khi thay output sai, phai ghi ro case sai, anh sai, field sai, va stage sai.
+- Neu gap rule nghiep vu mo ho hoac mau thuan, khong duoc tu quyet.
+- Phai hoi lai user de chot huong truoc khi sua logic nghiep vu.
 
 ---
 
-## Architecture tổng quan
+## Architecture tong quan
 
-```
-[HTTP Request] → [FastAPI router: ocr_local.py]
-    → Lưu file tạm → tạo OCRJob DB record → enqueue Celery task
-    → Response ngay: {"job_id": "...", "status": "pending"}
+```text
+[HTTP Request] -> [FastAPI router: ocr_local.py]
+    -> Luu file tam -> tao OCRJob DB record -> enqueue Celery task
+    -> Response ngay: {"job_id": "...", "status": "pending"}
 
 [Celery Worker: tasks.py]
-    → process_ocr_job / process_ocr_batch_job
-    → Đọc file từ disk → gọi local_ocr_from_bytes() / local_ocr_batch_from_inputs()
-    → Lưu kết quả vào OCRJob.result_json
-    → Xóa file tạm
+    -> process_ocr_job / process_ocr_batch_job
+    -> Doc file tu disk -> goi local_ocr_from_bytes() / local_ocr_batch_from_inputs()
+    -> Luu ket qua vao OCRJob.result_json
+    -> Xoa file tam
 
 [Frontend poll GET /status/{job_id}]
-    → Trả về kết quả khi status = "completed"
+    -> Tra ve ket qua khi status = "completed"
 ```
 
 ---
 
-## Pipeline xử lý chi tiết (V4)
+## Pipeline xu ly chi tiet (V4)
 
-### Bước 1: Smart Crop
-- Dùng OpenCV Canny edge + contour detection tìm vùng giấy tờ trong ảnh.
-- Nếu không tìm được contour đủ tin cậy (`confidence < LOCAL_OCR_SMART_CROP_MIN_CONF = 0.22`) → fallback dùng full image.
-- Tạo 2 version: `img_native` (full res để rotate sau) và `img_ocr` (chuẩn hóa max_side_len cho OCR).
+### Buoc 1: Smart Crop
+- Dung OpenCV Canny edge + contour detection tim vung giay to trong anh.
+- Neu khong tim duoc contour du tin cay (`confidence < LOCAL_OCR_SMART_CROP_MIN_CONF = 0.22`) thi fallback ve full image.
+- Tao 2 version:
+  - `img_native`: full resolution de phuc vu rotate sau
+  - `img_ocr`: chuan hoa `max_side_len` de OCR
 
-### Bước 2: Preprocess nhẹ
-- Sharpen kernel: `[[0,-1,0],[-1,5,-1],[0,-1,0]]` — tăng độ nét cạnh chữ.
-- **Không dùng bilateral filter** (từng dùng, bỏ vì chậm 3x mà không cải thiện).
-- Denoise toggle qua `LOCAL_OCR_DENOISE` (default: on).
+### Buoc 2: Preprocess nhe
+- Sharpen kernel `[[0,-1,0],[-1,5,-1],[0,-1,0]]` de tang do net canh chu.
+- Khong dung bilateral filter vi cham hon nhieu ma khong cai thien du.
+- Denoise duoc dieu khien boi `LOCAL_OCR_DENOISE`.
 
-### Bước 3: Triage V2
-**Mục đích:** xác định ảnh là mặt nào của loại CCCD nào → chọn ROI đúng.
+### Buoc 3: Triage V2
+Muc dich: xac dinh anh la mat nao cua loai CCCD nao de chon ROI dung.
 
-- Tạo proxy image nhỏ (max 720px).
-- Thử 4 hướng (0°, 90°, 180°, 270°).
-- Mỗi hướng: detect Face (Haar cascade) + QR + tính MRZ score (regex `IDVNM\d{10}(\d{12})`).
-- **Logic phân loại:**
-  - Có Face + QR → `front_new` (CCCD mới mặt trước, có cả Face lẫn QR)
-  - Có Face, không QR → `front_old` (CCCD cũ mặt trước)
-  - Có QR, không Face → `back_new` (CCCD mới mặt sau, có QR)
-  - Có MRZ score cao → `back_old` (CCCD cũ mặt sau)
-  - Không detect được gì → `unknown`
-- Rotate ảnh gốc high-res theo hướng tốt nhất.
+- Tao proxy image nho, max `720px`.
+- Thu 4 huong: `0`, `90`, `180`, `270` do.
+- Moi huong:
+  - detect face bang Haar cascade
+  - detect QR
+  - tinh MRZ score bang regex `IDVNM\\d{10}(\\d{12})`
 
-**Tại sao quan trọng:** ROI extraction sau đó phụ thuộc hoàn toàn vào `triage_state`. Sai triage → sai ROI → miss field.
+Logic phan loai:
+- Co face + QR -> `front_new`
+- Co face, khong QR -> `front_old`
+- Co QR, khong face -> `back_new`
+- Co MRZ score cao -> `back_old`
+- Khong detect duoc gi -> `unknown`
 
-### Bước 4: QR rescue
-Dù frontend đã thử QR (và báo `client_qr_failed`), backend **vẫn thử lại QR** sau khi đã rotate ảnh đúng hướng. Lý do: ảnh bị xoay ngang thường làm QR decode thất bại ở frontend.
+Anh goc se duoc rotate theo huong tot nhat.
 
-`client_qr_failed` chỉ là **telemetry**, không phải lệnh "bỏ qua QR".
+### Buoc 4: QR rescue
+- Du frontend da thu QR va gui `client_qr_failed`, backend van thu lai QR sau khi da rotate dung huong.
+- `client_qr_failed` chi la telemetry, khong phai lenh bo qua QR.
 
-### Bước 5: Targeted Extraction
+### Buoc 5: Targeted Extraction
 
-**ROI presets theo triage_state:**
-| State | ROI (x1, y1, x2, y2 dạng tỷ lệ) |
+ROI presets theo `triage_state`:
+
+| State | ROI |
 |---|---|
-| `front_old:detail` | (0.22, 0.20, 0.98, 0.92) |
-| `front_new:detail` | (0.22, 0.20, 0.98, 0.80) |
-| `back_new:detail` | (0.06, 0.18, 0.98, 0.94) |
-| `back_old:detail` | (0.06, 0.18, 0.98, 0.96) |
-| `unknown:detail` | (0.08, 0.14, 0.98, 0.96) |
+| `front_old:detail` | `(0.22, 0.20, 0.98, 0.92)` |
+| `front_new:detail` | `(0.22, 0.20, 0.98, 0.80)` |
+| `back_new:detail` | `(0.06, 0.18, 0.98, 0.94)` |
+| `back_old:detail` | `(0.06, 0.18, 0.98, 0.96)` |
+| `unknown:detail` | `(0.08, 0.14, 0.98, 0.96)` |
 
-**Engine:**
-1. **RapidOCR** (det only): Detect bounding boxes vùng text. **Không dùng RapidOCR recognition** — từng dùng, bỏ vì tiếng Việt kém.
-2. **VietOCR** (`vgg_transformer`): Crop từng bbox → batch recognition → ra text tiếng Việt.
+Engine:
+1. RapidOCR chi dung cho detection.
+2. VietOCR (`vgg_transformer`) nhan bbox crops theo batch de doc text tieng Viet.
 
-Sau đó dùng regex + heuristic để map text → fields (so_giay_to, ho_ten, ngay_sinh, ...).
+Sau do dung regex + heuristic de map text sang fields nhu `so_giay_to`, `ho_ten`, `ngay_sinh`, `dia_chi`.
 
-### Bước 6: Deterministic Merge (Batch only)
-- Ghép cặp ảnh theo **số CCCD 12 chữ số** (key tuyệt đối).
-- Ảnh không có ID → vào `unpaired[]` + warning.
-- **Delta merge**: nếu mặt trước có `ho_ten` nhưng không có `dia_chi`, lấy `dia_chi` từ mặt sau.
-- Ưu tiên field theo profile: `front_old > front_new > back_new > back_old > unknown`.
+### Buoc 6: Deterministic Merge (Batch only)
+- Ghep cap theo **so CCCD 12 chu so**.
+- Anh khong co ID vao `unpaired[]` + warning.
+- Delta merge:
+  - Neu mat truoc co `ho_ten` nhung thieu `dia_chi`, co the lay `dia_chi` tu mat sau.
+- Thu tu uu tien profile:
+  - `front_old > front_new > back_new > back_old > unknown`
 
-### Bước 7: Wide Fallback (chỉ khi triage = unknown)
-Thử lần lượt: ROI `id_front` → `id_back` → `detail` rộng hơn.  
-**Không còn legacy fallback và không còn score rollback.**
-
----
-
-## Luật dữ liệu nghiệp vụ
-
-- **Tên**: ưu tiên QR > mặt trước > MRZ (MRZ chỉ là fallback cuối).
-- **Địa chỉ**:
-  - CCCD **cũ** (trước 01/07/2024): lấy từ block `Nơi thường trú` ở **mặt trước**.
-  - CCCD **mới** (sau 01/07/2024): lấy từ block `Nơi cư trú` ở **mặt sau**.
-- **`ngay_het_han`**: **không đưa vào dữ liệu participant nghiệp vụ** (chỉ lưu metadata, không dùng trong hợp đồng).
+### Buoc 7: Wide Fallback
+- Chi chay khi `triage_state = unknown`.
+- Thu lan luot ROI rong hon.
+- Khong con legacy fallback va khong con score rollback.
 
 ---
 
-## Task Celery — KHÔNG ĐỔI TÊN
+## Luat du lieu nghiep vu
+
+- Ten:
+  - Uu tien `QR > mat truoc > MRZ`
+  - MRZ chi la fallback cuoi.
+- Dia chi:
+  - CCCD cu, truoc `01/07/2024`: uu tien block `Noi thuong tru` o mat truoc.
+  - CCCD moi, sau `01/07/2024`: uu tien block `Noi cu tru` o mat sau.
+- `ngay_het_han`:
+  - Khong dua vao participant nghiep vu.
+  - Chi luu metadata neu can.
+
+---
+
+## Task Celery - khong doi ten
 
 ```python
-@celery_app.task(name="process_ocr_job")       # single image
-@celery_app.task(name="process_ocr_batch_job") # batch
+@celery_app.task(name="process_ocr_job")
+@celery_app.task(name="process_ocr_batch_job")
 ```
 
-Task name là **contract cứng** — nếu đổi tên, các job đang pending trong queue sẽ bị mồ côi.
+Task name la contract cung. Doi ten se lam job pending trong queue bi mo coi.
 
 ---
 
-## Các trường hợp đặc biệt / Gotchas
+## Cac truong hop dac biet / gotchas
 
-- **`client_qr_failed` = True từ frontend**: Backend vẫn thử QR, không bỏ qua. Đây chỉ là hint để log, không phải skip flag.
-- **CCCD 9 số cũ**: Pipeline nhận dạng nhưng không ghép cặp được (key ghép cặp yêu cầu 12 số).
-- **Ảnh chụp nghiêng**: Smart crop có thể fail, fallback về full image. Triage vẫn thử 4 hướng.
-- **Batch manifest**: File `manifest.json` trong thư mục temp batch phải có field `items[].index`, `items[].filename`, `items[].stored_name`.
+- `client_qr_failed = true` tu frontend:
+  - Backend van thu QR.
+  - Day chi la hint de log, khong phai skip flag.
+- CCCD 9 so cu:
+  - Co the nhan dang mot phan.
+  - Khong ghep cap theo key 12 so.
+- Anh chup nghieng:
+  - Smart crop co the fail va fallback ve full image.
+  - Triage van thu 4 huong.
+- Batch manifest:
+  - `manifest.json` phai co `items[].index`, `items[].filename`, `items[].stored_name`.
 
 ---
 
-## Những thứ đã thử và thất bại
+## Nhung thu da thu va that bai
 
-- **Full RapidOCR (det + rec)**: Bỏ recognition của RapidOCR vì model nhận dạng tiếng Việt kém. Chỉ giữ detection.
-- **Bilateral filter trong preprocess**: Chậm 3x, không cải thiện kết quả thực tế.
-- **LLM fallback tự động sửa lỗi**: Tạm tắt để tối ưu tốc độ. Thay bằng cảnh báo đỏ trên UI để staff sửa tay. Sẽ làm lại sau.
-- **Score rollback**: Từng có cơ chế "nếu score thấp thì dùng fallback kết quả cũ". Đã bỏ — phức tạp mà không rõ ràng hơn.
+- Full RapidOCR det + rec:
+  - Bo recognition cua RapidOCR vi doc tieng Viet kem.
+- Bilateral filter:
+  - Cham hon nhieu ma khong cai thien ket qua.
+- LLM fallback tu dong sua loi:
+  - Tam tat de uu tien toc do.
+  - Thay bang canh bao tren UI de staff sua tay.
+- Score rollback:
+  - Da bo vi phuc tap ma khong ro rang hon.
 
 ---
 
 ## Env variables
 
-| Var | Default | Ý nghĩa |
+| Var | Default | Y nghia |
 |---|---|---|
 | `LOCAL_OCR_DET_MAX_SIDE_LEN` | `3000` | Max side len cho RapidOCR det |
 | `LOCAL_OCR_VIETOCR_MODEL` | `vgg_transformer` | Model VietOCR |
 | `LOCAL_OCR_VIETOCR_BATCH_SIZE` | `24` | Batch size recognition |
-| `LOCAL_OCR_TORCH_THREADS` | `2` | Số thread PyTorch |
-| `LOCAL_OCR_DENOISE` | `1` | Bật/tắt denoise |
-| `LOCAL_OCR_SMART_CROP_MIN_CONF` | `0.22` | Ngưỡng confidence Smart Crop |
+| `LOCAL_OCR_TORCH_THREADS` | `2` | So thread PyTorch |
+| `LOCAL_OCR_DENOISE` | `1` | Bat/tat denoise |
+| `LOCAL_OCR_SMART_CROP_MIN_CONF` | `0.22` | Nguong confidence smart crop |
 | `LOCAL_OCR_TRIAGE_PROXY_MAX_SIDE` | `720` | Size proxy image cho triage |
-| `LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE` | `0.20` | Ngưỡng MRZ score để classify back_old |
-| `LOCAL_OCR_REC_PAD_RATIO` | `0.10` | Padding khi crop bbox cho VietOCR |
-| `LOCAL_OCR_REC_MIN_HEIGHT` | `48` | Min height bbox để nhận dạng |
+| `LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE` | `0.20` | Nguong MRZ score de classify `back_old` |
+| `LOCAL_OCR_REC_PAD_RATIO` | `0.10` | Padding khi crop bbox |
+| `LOCAL_OCR_REC_MIN_HEIGHT` | `48` | Min height bbox |
 | `LOCAL_OCR_REC_MAX_SCALE` | `3.0` | Max scale khi upscale bbox |
-| `LOCAL_OCR_TIMING_LOG` | `1` | Bật log timing |
-| `LOCAL_OCR_TIMING_SLOW_MS` | `1500` | Ngưỡng log slow warning |
-| `LOCAL_OCR_DEBUG_LOG` | `1` | Bật debug log |
+| `LOCAL_OCR_TIMING_LOG` | `1` | Bat log timing |
+| `LOCAL_OCR_TIMING_SLOW_MS` | `1500` | Nguong log slow warning |
+| `LOCAL_OCR_DEBUG_LOG` | `1` | Bat debug log |
 
 ---
 
-## Khi cần debug
+## Khi can debug
 
-1. Bật `LOCAL_OCR_DEBUG_LOG=1` và `LOCAL_OCR_TIMING_LOG=1`.
-2. Xem log: `logs/worker.log` (VPS) hoặc console (local).
-3. Tìm `[OCR_LOCAL_TIMING]` và `[OCR_LOCAL_DEBUG]` trong log.
-4. Trường `triage_state` trong response cho biết pipeline đã classify ảnh thế nào.
-5. Trường `timing_ms` breakdown từng phase: triage / targeted_extract / merge / fallback.
+1. Bat `LOCAL_OCR_DEBUG_LOG=1` va `LOCAL_OCR_TIMING_LOG=1`.
+2. Xem `logs/worker.log` hoac console local.
+3. Tim `[OCR_LOCAL_TIMING]` va `[OCR_LOCAL_DEBUG]` trong log.
+4. Xem `triage_state` trong response de biet pipeline classify anh the nao.
+5. Xem `timing_ms` de biet phase nao cham: triage / targeted_extract / merge / fallback.
+6. Neu sai nghiep vu, phai ghi ro anh nao sai, field nao sai, va sai o phase nao.
+7. Neu can sua rule nghiep vu ma bang chung chua du, dung lai va hoi user truoc khi sua.
 
 ---
 
-## Checklist trước khi sửa file này
+## Checklist truoc khi sua file nay
 
-- [ ] Đọc plan này xong rồi mới sửa.
-- [ ] Không đổi tên Celery task.
-- [ ] Không thay đổi DB schema trừ khi bắt buộc.
-- [ ] Sau khi sửa: `python -m py_compile routers/ocr_local.py tasks.py`
-- [ ] Test regression với ít nhất 10 ảnh CCCD.
+- [ ] Doc plan nay xong roi moi sua.
+- [ ] Khong doi ten Celery task.
+- [ ] Khong thay doi DB schema tru khi bat buoc.
+- [ ] Sau khi sua: `python -m py_compile routers/ocr_local.py tasks.py`
+- [ ] Test regression voi it nhat 10 anh CCCD.

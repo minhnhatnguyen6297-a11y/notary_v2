@@ -37,6 +37,8 @@ Ket qua tra ve phai dung contract JSON hien tai, nhung AI path khong duoc keo th
 - Khong xoay anh de suy side trong AI path.
 - Khong auto-ghep front/back o backend AI. Moi anh/person duoc tra rieng; pairing neu can de lop sau xu ly.
 - Frontend AI path khong scan QR client-side truoc khi goi server.
+- Muc tieu uu tien la dung nghiep vu cuoi cung.
+- Neu gap ca sai ma khong ro rule nghiep vu, phai log ro case sai va hoi lai user truoc khi quyet dinh logic.
 
 ---
 
@@ -160,6 +162,7 @@ Thu tu debug bat buoc:
   - Qwen/model output
   - normalize JSON
   - response shaping
+ - Neu thay sai co the do rule nghiep vu, ghi ro ca sai va dung lai de hoi user neu chua du can cu.
 
 4. Fix dung tang gay sai
 - Khong nhay sang fix UI neu router output chua dung.

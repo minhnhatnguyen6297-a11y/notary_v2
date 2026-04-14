@@ -18,6 +18,10 @@ Cap nhat: 13/04/2026.
   - Chi them fallback khi co benchmark moi chung minh recall tang dang ke va latency van chap nhan duoc.
   - Cloud AI hien tai: `server QR raw_only -> false => AI ngay`.
   - Local OCR la pipeline nghien cuu rieng; neu can fallback/triage/rotate thi ly do phai nam trong local, khong keo sang AI.
+- Muc tieu OCR la **dung nghiep vu truoc**, khong phai chi dep output:
+  - Khi thay output sai, phai ghi ro case sai va stage sai.
+  - Neu gap cho mo ho nghiep vu, khong duoc tu quyet rule.
+  - Phai hoi lai user de chot huong truoc khi sua logic nghiep vu.
 ## Tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
@@ -130,9 +134,10 @@ Cap nhat: 13/04/2026.
   3. Chi sau khi co output dung/gan dung o tang ham/router moi chay project/UI de doi chieu.
   4. Doi chieu `expected -> router output -> project/UI output`.
   5. Khoanh ro sai o dau: QR, preprocess, AI/local OCR, normalize, pairing, hay UI mapping.
-  6. Fix dung tang gay sai.
-  7. Lap lai vong `doi chieu -> tim nguyen nhan sai -> fix` den khi ket qua trung muc tieu tren bo anh cua phien do.
-  8. Cuoi cung moi chay regression rong hon.
+  6. Neu sai lien quan nghiep vu hoac rule mapping, phai ghi ro case sai va hoi lai user neu chua du can cu.
+  7. Fix dung tang gay sai.
+  8. Lap lai vong `doi chieu -> tim nguyen nhan sai -> fix` den khi ket qua trung muc tieu tren bo anh cua phien do.
+  9. Cuoi cung moi chay regression rong hon.
 - Neu bo anh dang debug la anh local cua phien hien tai, uu tien dung bo anh do truoc bo regression cu.
 - Muc tieu dung la ket qua JSON/cu phap nghiep vu cuoi cung, khong chi la text OCR tho.
 
