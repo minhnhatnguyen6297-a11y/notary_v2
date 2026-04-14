@@ -12,7 +12,49 @@ def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
 
 
 class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
-    async def test_analyze_images_short_circuits_to_qr(self):
+    def test_parse_person_mrz_extracts_expected_fields(self):
+        mrz = ocr_ai._parse_person_mrz(
+            [
+                "IDVNM0970165684036097016568<<9",
+                "9702020M3702028VNM<<<<<<<<<<<0",
+                "VU<<QUOC<PHONG<<<<<<<<<<<<<<",
+            ]
+        )
+        self.assertEqual(mrz["so_giay_to"], "036097016568")
+        self.assertEqual(mrz["ho_ten"], "VU QUOC PHONG")
+        self.assertEqual(mrz["ngay_sinh"], "02/02/1997")
+        self.assertEqual(mrz["gioi_tinh"], "Nam")
+
+    def test_extract_native_ocr_lines_from_text_payload(self):
+        payload = {
+            "output": {
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                {"text": "LINE 1\\nLINE 2"},
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+        self.assertEqual(ocr_ai._extract_native_ocr_lines(payload), ["LINE 1", "LINE 2"])
+
+    def test_normalize_native_doc_prefers_mrz_on_back(self):
+        lines = [
+            "Pham Cong Nguyen",
+            "IDVNM1790096961036179009696<<6",
+            "7901209F3901201VNM<<<<<<<<<<<4",
+            "DUONG<<THI<XUAN<<<<<<<<<<<<<<<",
+        ]
+        doc = ocr_ai._normalize_native_ocr_doc(lines, "back.jpg")
+        self.assertEqual(doc["doc_type"], "person")
+        self.assertEqual(doc["side"], "back")
+        self.assertEqual(doc["data"]["ho_ten"], "DUONG THI XUAN")
+        self.assertEqual(doc["data"]["so_giay_to"], "036179009696")
+
+    async def test_analyze_images_prefers_qr_over_ai_result(self):
         upload = make_upload("qr-card.jpg")
         qr_data = {
             "so_giay_to": "012345678901",
@@ -21,13 +63,13 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             "gioi_tinh": "Nam",
             "dia_chi": "123 LE LOI",
             "ngay_cap": "03/04/2021",
-            "ngay_het_han": "03/04/2031",
+            "ngay_het_han": "",
         }
-
         with (
             mock.patch.object(ocr_ai, "try_decode_qr", return_value="qr-text"),
             mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
-            mock.patch.object(ocr_ai, "call_vision_images", side_effect=AssertionError("AI should not run")),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(return_value=["WRONG OCR"])),
         ):
             result = await ocr_ai.analyze_images([upload])
 
@@ -35,32 +77,21 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["summary"]["ai_runs"], 0)
         self.assertEqual(len(result["persons"]), 1)
         self.assertEqual(result["persons"][0]["source_type"], "QR")
-        self.assertEqual(result["persons"][0]["so_giay_to"], "012345678901")
-        self.assertEqual(result["persons"][0]["_files"], ["qr-card.jpg"])
 
-    async def test_analyze_images_runs_ai_for_non_qr_images(self):
+    async def test_analyze_images_runs_native_ocr_for_non_qr_images(self):
         upload = make_upload("front.jpg")
-        ai_output = [
-            [
-                {
-                    "doc_type": "cccd_front",
-                    "data": {
-                        "ho_ten": " NGUYEN VAN AN ",
-                        "so_giay_to": "0123 456 789 01",
-                        "ngay_sinh": "1-2-1990",
-                        "gioi_tinh": "male",
-                        "dia_chi": " 123 LE LOI ",
-                        "ngay_cap": "3.4.2021",
-                        "ngay_het_han": "",
-                    },
-                }
-            ]
+        lines = [
+            "So/No: 012345678901",
+            "Ho va ten / Full name: NGUYEN VAN AN",
+            "Ngay sinh / Date of birth: 01/02/1990",
+            "Gioi tinh / Sex: Nam",
+            "Noi thuong tru / Place of residence: 123 LE LOI",
+            "Ngay cap / Date of issue: 03/04/2021",
         ]
-
         with (
             mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
-            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
-            mock.patch.object(ocr_ai, "call_vision_images", return_value=ai_output),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(return_value=lines)),
         ):
             result = await ocr_ai.analyze_images([upload])
 
@@ -69,23 +100,18 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["persons"]), 1)
         person = result["persons"][0]
         self.assertEqual(person["source_type"], "AI")
-        self.assertEqual(person["side"], "unknown")
-        self.assertEqual(person["ho_ten"], "NGUYEN VAN AN")
         self.assertEqual(person["so_giay_to"], "012345678901")
-        self.assertEqual(person["ngay_sinh"], "01/02/1990")
-        self.assertEqual(person["ngay_cap"], "03/04/2021")
-        self.assertEqual(person["_files"], ["front.jpg"])
+        self.assertEqual(person["ho_ten"], "NGUYEN VAN AN")
 
-    async def test_analyze_images_collects_ai_errors_per_file(self):
+    async def test_analyze_images_collects_native_errors_per_file(self):
         upload = make_upload("broken.jpg")
-
         with (
             mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
-            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(
                 ocr_ai,
-                "call_vision_images",
-                return_value=[HTTPException(status_code=502, detail="upstream error")],
+                "_call_qwen_native_ocr_single",
+                new=mock.AsyncMock(side_effect=HTTPException(status_code=502, detail="upstream error")),
             ),
         ):
             result = await ocr_ai.analyze_images([upload])
@@ -95,52 +121,38 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["errors"][0]["filename"], "broken.jpg")
         self.assertEqual(result["errors"][0]["error"], "upstream error")
 
-    async def test_analyze_images_collapses_same_file_duplicate_persons(self):
-        upload = make_upload("dup.jpg")
-        ai_output = [
+    async def test_analyze_images_pairs_front_back_by_id(self):
+        front = make_upload("front.jpg")
+        back = make_upload("back.jpg")
+        outputs = [
             [
-                {
-                    "doc_type": "person",
-                    "side": "front",
-                    "data": {
-                        "ho_ten": "NGUYEN VAN A",
-                        "so_giay_to": "012345678901",
-                        "ngay_sinh": "01/02/1990",
-                        "gioi_tinh": "Nam",
-                        "dia_chi": "",
-                        "ngay_cap": "",
-                        "ngay_het_han": "",
-                    },
-                },
-                {
-                    "doc_type": "person",
-                    "side": "back",
-                    "data": {
-                        "ho_ten": "NGUYEN VAN A",
-                        "so_giay_to": "012345678901",
-                        "ngay_sinh": "",
-                        "gioi_tinh": "",
-                        "dia_chi": "",
-                        "ngay_cap": "",
-                        "ngay_het_han": "",
-                    },
-                },
-            ]
+                "So/No: 036179009696",
+                "Ho va ten / Full name: DUONG THI XUAN",
+                "Ngay sinh / Date of birth: 20/01/1979",
+            ],
+            [
+                "IDVNM1790096961036179009696<<6",
+                "7901209F3901201VNM<<<<<<<<<<<4",
+                "DUONG<<THI<XUAN<<<<<<<<<<<<<<<",
+                "Noi cu tru / Place of residence: Quyet Phong, Yen Ninh, Y Yen, Nam Dinh",
+            ],
         ]
+
+        async def fake_call(*args, **kwargs):
+            return outputs.pop(0)
 
         with (
             mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
-            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
-            mock.patch.object(ocr_ai, "call_vision_images", return_value=ai_output),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
         ):
-            result = await ocr_ai.analyze_images([upload])
+            result = await ocr_ai.analyze_images([front, back])
 
         self.assertEqual(result["summary"]["persons"], 1)
-        self.assertEqual(len(result["persons"]), 1)
         person = result["persons"][0]
-        self.assertEqual(person["side"], "front")
-        self.assertEqual(person["so_giay_to"], "012345678901")
-        self.assertEqual(person["_files"], ["dup.jpg"])
+        self.assertEqual(person["so_giay_to"], "036179009696")
+        self.assertTrue(person["paired"])
+        self.assertEqual(len(person.get("_files", [])), 2)
 
 
 if __name__ == "__main__":

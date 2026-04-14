@@ -35,7 +35,7 @@ Ket qua tra ve phai dung contract JSON hien tai, nhung AI path khong duoc keo th
 - Neu `QR=false` thi chuyen AI ngay.
 - Khong dung `upscale`, `threshold`, `cv2 QRCodeDetector` trong AI path.
 - Khong xoay anh de suy side trong AI path.
-- Khong auto-ghep front/back o backend AI. Moi anh/person duoc tra rieng; pairing neu can de lop sau xu ly.
+- AI goi native OCR `text_recognition`, backend parse text + MRZ + side + pair theo ID 12 so.
 - Frontend AI path khong scan QR client-side truoc khi goi server.
 - Muc tieu uu tien la dung nghiep vu cuoi cung.
 - Neu gap ca sai ma khong ro rule nghiep vu, phai log ro case sai va hoi lai user truoc khi quyet dinh logic.
@@ -48,13 +48,12 @@ Ket qua tra ve phai dung contract JSON hien tai, nhung AI path khong duoc keo th
 [AI button]
   -> frontend gui toan bo files len /api/ocr/analyze
   -> routers/ocr_ai.py doc tung file
-  -> try_decode_qr(raw image)
-     -> QR hit: parse_cccd_qr() -> append person {source_type=QR, paired=false}
-     -> QR miss: preprocess nhe -> queue Qwen/AI
-  -> call_vision_images()
-  -> normalize JSON
-  -> append AI docs
-  -> mark persons unpaired
+  -> chay song song theo tung anh:
+     - QR server raw_only (zxingcpp)
+     - Qwen native OCR task (text_recognition)
+  -> neu QR hit: uu tien QR, bo ket qua AI cua anh do
+  -> neu QR miss: backend parse text lines, parse MRZ, detect side
+  -> backend pair deterministic front/back theo so giay to 12 so
   -> tra response
 ```
 
@@ -68,16 +67,17 @@ Log bat buoc:
 - request-level:
   - `event=ocr_ai_done`
   - `model`
-  - `total_images`
+  - `images`
   - `qr_hits`
-  - `ai_runs`
+  - `ai_started`
+  - `ai_selected`
+  - `ai_discarded_by_qr`
   - `total_ms`
-  - `qr_ms`
-  - `prepare_ms`
-  - `qwen_ms`
+  - `ocr_native_ms`
+  - `backend_parse_ms`
   - `pair_ms`
 - per AI call:
-  - `event=qwen_call` khi model la Qwen
+  - `event=qwen_call`
   - `filename`
   - `model`
   - `latency_ms`
@@ -125,8 +125,9 @@ Response shape giu nguyen:
 - `summary`
 
 Luu y:
-- `paired_persons` tren AI path hien tai mac dinh `0`.
-- Moi person tu AI path duoc tra rieng theo file; khong merge front/back o backend.
+- `paired_persons` duoc tinh sau khi backend pair theo ID 12 so.
+- `summary` co them telemetry native path: `ocr_native_ms`, `backend_parse_ms`,
+  `ai_started`, `ai_selected`, `ai_discarded_by_qr`.
 
 ---
 

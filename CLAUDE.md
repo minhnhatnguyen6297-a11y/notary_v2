@@ -69,7 +69,7 @@ Cap nhat: 13/04/2026.
   - `main.py` -> load env -> migrate DB -> include routers -> warmup `routers.ocr_local.warmup_local_ocr()`.
 - Cloud OCR sync
   - Frontend `frontend/templates/cases/form.html` -> `POST /api/ocr/analyze` -> `routers/ocr_ai.py:analyze_images()`.
-  - Flow trong `routers/ocr_ai.py`: server QR `raw_only` 1 lan -> neu QR hop le thi tra QR result rieng -> neu khong co QR thi preprocess nhe -> goi Qwen/AI model -> normalize JSON -> khong auto-ghep front/back o backend.
+  - Flow trong `routers/ocr_ai.py`: QR server `raw_only` va Qwen native OCR chay song song theo tung anh -> QR hit thi uu tien QR -> QR miss thi backend parse text/MRZ/suy side -> pair deterministic theo ID 12 so.
 - Local OCR async
   - Frontend `frontend/templates/cases/form.html` -> `POST /api/ocr/local/submit-batch`.
   - `routers/ocr_local.py` tao `OCRJob`, luu file tam, enqueue `tasks.process_ocr_batch_job`.
@@ -119,7 +119,8 @@ Cap nhat: 13/04/2026.
 - OCR AI:
   - Uu tien latency.
   - QR chi scan 1 lan tren server, `raw_only`.
-  - QR hit thi tra ket qua rieng; khong xoay, khong triage, khong auto-pair front/back o backend.
+  - QR hit thi uu tien QR cho anh do; AI ket qua anh do bi discard.
+  - Qwen native OCR chi doc text (`text_recognition`); backend parse field/suy side/pair.
   - Frontend AI path khong duoc scan QR client-side truoc khi goi server.
 - OCR Local:
   - Uu tien nghien cuu/chinh xac/pairing.
