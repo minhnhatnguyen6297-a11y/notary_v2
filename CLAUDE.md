@@ -122,6 +122,20 @@ Cap nhat: 13/04/2026.
   - Duoc giu triage, rotate, crop, QR rescue, deterministic merge.
 - Khong import helper QR/parser giua AI va Local. Neu can giong nhau thi duplicate co chu dich de giu kha nang debug doc lap.
 
+## Vong lap kiem thu OCR bat buoc
+- Khi debug OCR, khong duoc chay UI/project truoc roi moi doan nguyen nhan.
+- Thu tu bat buoc:
+  1. Chot bo anh cua phien dang debug va ket qua dung ky vong tren tung anh.
+  2. Test truc tiep tren bo anh nay o tang ham/router truoc de lay output that.
+  3. Chi sau khi co output dung/gan dung o tang ham/router moi chay project/UI de doi chieu.
+  4. Doi chieu `expected -> router output -> project/UI output`.
+  5. Khoanh ro sai o dau: QR, preprocess, AI/local OCR, normalize, pairing, hay UI mapping.
+  6. Fix dung tang gay sai.
+  7. Lap lai vong `doi chieu -> tim nguyen nhan sai -> fix` den khi ket qua trung muc tieu tren bo anh cua phien do.
+  8. Cuoi cung moi chay regression rong hon.
+- Neu bo anh dang debug la anh local cua phien hien tai, uu tien dung bo anh do truoc bo regression cu.
+- Muc tieu dung la ket qua JSON/cu phap nghiep vu cuoi cung, khong chi la text OCR tho.
+
 ## Chay du an
 ```bash
 # Windows

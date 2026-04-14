@@ -137,3 +137,40 @@ Bug AI OCR mo theo thu tu:
 4. `frontend/templates/cases/form.html`
 
 Khong debug AI bang cach doc `ocr_local.py` tru khi dang dieu tra mot side effect ro rang.
+
+---
+
+## Vong lap kiem thu khi fix AI OCR
+
+Thu tu debug bat buoc:
+
+1. Chot bo anh cua phien dang debug
+- Uu tien dung bo anh vua gay sai trong phien lam viec hien tai.
+- Ghi ro ky vong dung tren moi anh: QR hit/miss, loai giay to, JSON field can co.
+
+2. Test truoc o tang router/ham
+- Chay truc tiep tren `routers/ocr_ai.py` hoac script benchmark/phu tro de lay output that cua AI path.
+- Chua chay UI o buoc nay.
+
+3. Doi chieu voi ket qua ky vong
+- So `expected` voi `router output`.
+- Neu sai, khoanh stage sai:
+  - QR raw_only
+  - preprocess
+  - Qwen/model output
+  - normalize JSON
+  - response shaping
+
+4. Fix dung tang gay sai
+- Khong nhay sang fix UI neu router output chua dung.
+- Khong them fallback neu chua co benchmark moi chung minh can thiet.
+
+5. Chay project/UI de doi chieu
+- Sau khi router output da dung/gần dung, moi chay full project hoac UI.
+- So `router output` voi `UI/project output` de bat loi mapping/merge o frontend.
+
+6. Lap lai den khi dung
+- Lap vong `doi chieu -> tim nguyen nhan sai -> fix` den khi bo anh cua phien hien tai cho ket qua dung.
+
+7. Regression cuoi cung
+- Sau khi fix xong bo anh cua phien hien tai, moi chay regression rong hon.
