@@ -95,6 +95,53 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["errors"][0]["filename"], "broken.jpg")
         self.assertEqual(result["errors"][0]["error"], "upstream error")
 
+    async def test_analyze_images_collapses_same_file_duplicate_persons(self):
+        upload = make_upload("dup.jpg")
+        ai_output = [
+            [
+                {
+                    "doc_type": "person",
+                    "side": "front",
+                    "data": {
+                        "ho_ten": "NGUYEN VAN A",
+                        "so_giay_to": "012345678901",
+                        "ngay_sinh": "01/02/1990",
+                        "gioi_tinh": "Nam",
+                        "dia_chi": "",
+                        "ngay_cap": "",
+                        "ngay_het_han": "",
+                    },
+                },
+                {
+                    "doc_type": "person",
+                    "side": "back",
+                    "data": {
+                        "ho_ten": "NGUYEN VAN A",
+                        "so_giay_to": "012345678901",
+                        "ngay_sinh": "",
+                        "gioi_tinh": "",
+                        "dia_chi": "",
+                        "ngay_cap": "",
+                        "ngay_het_han": "",
+                    },
+                },
+            ]
+        ]
+
+        with (
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "resize_to_base64", return_value="b64"),
+            mock.patch.object(ocr_ai, "call_vision_images", return_value=ai_output),
+        ):
+            result = await ocr_ai.analyze_images([upload])
+
+        self.assertEqual(result["summary"]["persons"], 1)
+        self.assertEqual(len(result["persons"]), 1)
+        person = result["persons"][0]
+        self.assertEqual(person["side"], "front")
+        self.assertEqual(person["so_giay_to"], "012345678901")
+        self.assertEqual(person["_files"], ["dup.jpg"])
+
 
 if __name__ == "__main__":
     unittest.main()

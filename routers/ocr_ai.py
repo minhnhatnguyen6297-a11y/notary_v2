@@ -821,6 +821,49 @@ def _mark_unpaired_persons(persons: list[dict]) -> list[dict]:
     return result
 
 
+def _person_completeness_score(person: dict[str, Any]) -> tuple[int, int, int]:
+    side = str(person.get("side") or "unknown").lower()
+    score = 0
+    data = person
+    for key in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap", "ngay_het_han"):
+        if _clean_text(data.get(key)):
+            score += 1
+    if side == "front":
+        for key in ("ho_ten", "ngay_sinh", "gioi_tinh"):
+            if _clean_text(data.get(key)):
+                score += 2
+    elif side == "back":
+        for key in ("dia_chi", "ngay_cap"):
+            if _clean_text(data.get(key)):
+                score += 2
+    side_rank = 2 if side == "front" else 1 if side == "back" else 0
+    doc_len = len(_clean_text(data.get("so_giay_to")))
+    return (score, side_rank, doc_len)
+
+
+def _collapse_same_file_duplicates(persons: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for person in persons:
+        files = person.get("_files") if isinstance(person.get("_files"), list) else []
+        filename = str(files[0]) if files else ""
+        id_no = re.sub(r"\D", "", str(person.get("so_giay_to") or ""))
+        if filename and id_no:
+            grouped.setdefault((filename, id_no), []).append(person)
+        else:
+            passthrough.append(person)
+
+    result: list[dict] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            result.append(group[0])
+            continue
+        result.append(max(group, key=_person_completeness_score))
+
+    result.extend(passthrough)
+    return result
+
+
 @router.post("/analyze")
 async def analyze_images(files: List[UploadFile] = File(...)):
     if not files:
@@ -891,6 +934,7 @@ async def analyze_images(files: List[UploadFile] = File(...)):
                 )
 
     t_pair = perf_counter()
+    persons = _collapse_same_file_duplicates(persons)
     persons = _mark_unpaired_persons(persons)
     pair_ms = perf_counter() - t_pair
     paired_count = 0
