@@ -25,6 +25,12 @@ tools/upload_lab/nd_storage_state.json
 # Test data / fixtures (không phải source code)
 ocr test/
 ID template/
+tests/QR test/
+tests/bad QR test/
+benchmark_qr.py
+
+# Local scratch / benchmark
+.tmp_enotary/
 
 # Runtime dirs
 runtime/
