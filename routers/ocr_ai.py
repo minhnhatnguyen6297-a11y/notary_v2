@@ -635,11 +635,23 @@ def _extract_birth_date(lines: list[str]) -> str:
 
 
 def _extract_gender(lines: list[str]) -> str:
-    for line in lines:
+    for idx, line in enumerate(lines):
         if _looks_like_label(line, ["gioi tinh", "sex"]):
             g = _normalize_gender(line)
             if g:
                 return g
+            if idx + 1 < len(lines):
+                g_next = _normalize_gender(lines[idx + 1])
+                if g_next:
+                    return g_next
+
+    # Standalone gender token line (common OCR split case): "Nam", "Nu", "Male", "Female".
+    for line in lines:
+        compact = re.sub(r"[^a-z]", "", _fold_text(line))
+        if compact in {"nam", "male"}:
+            return "Nam"
+        if compact in {"nu", "female"}:
+            return "Nu"
     return ""
 
 

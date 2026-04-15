@@ -3492,12 +3492,12 @@ endif %}
         const errMsg = typeof item === 'object' ? (item._errorMsg || '') : '';
         if (s === 'pending') return '<span style="color:#64748b;">⏳ Chờ xử lý</span>';
         if (s === 'queued') return '<span style="color:#0f172a;">⏳ Đang xếp hàng</span>';
-        if (s === 'qr') return '<span style="color:#059669;">✅ QR (miễn phí)</span>';
+        if (s === 'qr') return '<span style="color:#059669;">✅ Đã nhận diện</span>';
         if (s === 'processing') return '<span style="color:#d97706;">⚙️ Đang trích xuất...</span>';
-        if (s === 'ocr') return '<span style="color:#2563eb;">🧾 OCR</span>';
-        if (s === 'ocr_back') return '<span style="color:#7c3aed;">🧾 OCR • mặt sau đã ghép</span>';
-        if (s === 'ai') return '<span style="color:#2563eb;">🤖 AI OCR</span>';
-        if (s === 'ai_back') return '<span style="color:#7c3aed;">🤖 Mặt sau (đã ghép)</span>';
+        if (s === 'ocr') return '<span style="color:#059669;">✅ Đã nhận diện</span>';
+        if (s === 'ocr_back') return '<span style="color:#059669;">✅ Đã nhận diện</span>';
+        if (s === 'ai') return '<span style="color:#059669;">✅ Đã nhận diện</span>';
+        if (s === 'ai_back') return '<span style="color:#059669;">✅ Đã nhận diện</span>';
         if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}">❌ ${errMsg || 'Lỗi'}</span>`;
         return s;
       }
@@ -4218,17 +4218,8 @@ endif %}
 
         list.innerHTML = html;
 
-        // Summary
-        const qrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'QR').length;
-        const ocrCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'OCR').length;
-        const aiCount = ocrResults.filter(r => String(r.source || '').toUpperCase() === 'AI').length;
-        if (aiCount > 0 && ocrCount === 0) {
-          document.getElementById('ocr-summary-text').textContent =
-            `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${aiCount} từ AI`;
-        } else {
-          document.getElementById('ocr-summary-text').textContent =
-            `${persons.length} người, ${properties.length} tài sản — ${qrCount} từ QR (miễn phí), ${ocrCount} từ OCR`;
-        }
+        document.getElementById('ocr-summary-text').textContent =
+          `${persons.length} người, ${properties.length} tài sản`;
       }
 
       // ── Helpers tên tiếng Việt ─────────────────────────────────────────────
@@ -4246,6 +4237,33 @@ endif %}
           if (/[\u0300-\u036f]/.test(nfd)) total += 1;
         }
         return total;
+      }
+
+      function foldVnSimple(str) {
+        return String(str || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/Đ/g, 'D')
+          .toLowerCase();
+      }
+
+      function findPreviewItemForCard(result, data) {
+        const fileNames = [];
+        const pushName = (name) => {
+          const n = String(name || '').trim();
+          if (n && !fileNames.includes(n)) fileNames.push(n);
+        };
+        pushName(result?.filename);
+        (Array.isArray(result?._files) ? result._files : []).forEach(pushName);
+        (Array.isArray(result?.data?._files) ? result.data._files : []).forEach(pushName);
+        (Array.isArray(data?._files) ? data._files : []).forEach(pushName);
+
+        for (const name of fileNames) {
+          const item = imageQueue.find(i => i?.name === name && i?.dataUrl);
+          if (item) return item;
+        }
+        return null;
       }
 
       function personCard(d, idx, result) {
@@ -4277,27 +4295,17 @@ endif %}
           warningFields.add('dia_chi');
         }
 
-        // Badge + note + supplement button theo nguồn
-        let srcBadge, suppNote = '', suppBtn = '';
-        const _src = d._source || '';
-        const sourceType = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
-        const side = String(result?.side || d.side || '').toLowerCase();
-        const sideLabel = side === 'front' ? 'mặt trước' : side === 'back' ? 'mặt sau' : 'không rõ mặt';
-        if (sourceType === 'QR') {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">QR • ${sideLabel}</span>`;
-        } else if (sourceType === 'OCR') {
-          srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">OCR • ${sideLabel}</span>`;
-        } else if (_src.includes('+back')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#d1fae5;color:#065f46;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">2 mặt ✓</span>`;
-        } else if (_src.includes('thiếu mặt sau')) {
-          srcBadge = `<span class="ocr-src-badge" style="background:#fef9c3;color:#854d0e;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt sau</span>`;
+        let suppBtn = '';
+        const srcKey = foldVnSimple(d._source || '').replace(/[^a-z0-9_+]/g, '');
+        if (srcKey.includes('thieumatsau')) {
           suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'back')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt sau CCCD (lấy ngày cấp)"><i class="bi bi-camera"></i> Bổ sung</button>`;
-        } else if (_src === 'cccd_back only') {
-          srcBadge = `<span class="ocr-src-badge" style="background:#ffedd5;color:#9a3412;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">Thiếu mặt trước</span>`;
+        } else if (srcKey.includes('cccd_backonly') || srcKey.includes('cccdbackonly')) {
           suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt trước CCCD (lấy tên + địa chỉ)"><i class="bi bi-camera"></i> Bổ sung</button>`;
-        } else {
-          srcBadge = `<span class="ocr-src-badge" style="background:#dbeafe;color:#1e40af;font-size:11px;padding:2px 7px;border-radius:8px;font-weight:700;flex-shrink:0;">AI</span>`;
         }
+        const previewItem = findPreviewItemForCard(result, d);
+        const previewBtn = previewItem
+          ? `<button type="button" class="btn btn-sm btn-outline-secondary" onclick="ocrPreviewImg('${previewItem.id}')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Xem lại ảnh nguồn"><i class="bi bi-image"></i> Xem ảnh</button>`
+          : '';
 
         const inp = (key, val, ph, flex = 'flex:1;min-width:80px;') =>
           `<input type="text" class="form-control form-control-sm ocr-input ${warningFields.has(key) ? 'ocr-input-warning' : ''}" data-idx="${idx}" data-key="${key}"
@@ -4329,7 +4337,7 @@ endif %}
         ${inp('ngay_sinh', d.ngay_sinh, 'Ngày sinh')}
         ${inp('so_giay_to', d.so_giay_to, 'Số CCCD/CMND', 'flex:1.4;min-width:100px;')}
         ${inp('ngay_cap', d.ngay_cap, 'Ngày cấp', 'flex:1;min-width:80px;')}
-        ${srcBadge}${suppNote}${suppBtn}
+        ${previewBtn}${suppBtn}
       </div>
       <div style="margin-top:5px;">
         ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
