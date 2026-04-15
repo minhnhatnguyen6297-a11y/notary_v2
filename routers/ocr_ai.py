@@ -410,8 +410,10 @@ async def _call_qwen_native_ocr_single(
     model: str,
     image_b64: str,
     filename: str,
+    enable_rotate: bool | None = None,
 ) -> list[str]:
     url = f"{QWEN_OCR_BASE_URL}/api/v1/services/aigc/multimodal-generation/generation"
+    rotate_flag = QWEN_OCR_ENABLE_ROTATE if enable_rotate is None else bool(enable_rotate)
     body = {
         "model": model,
         "input": {
@@ -423,7 +425,7 @@ async def _call_qwen_native_ocr_single(
                             "image": f"data:image/jpeg;base64,{image_b64}",
                             "min_pixels": QWEN_OCR_MIN_PIXELS,
                             "max_pixels": QWEN_OCR_MAX_PIXELS,
-                            "enable_rotate": QWEN_OCR_ENABLE_ROTATE,
+                            "enable_rotate": rotate_flag,
                         }
                     ],
                 }
@@ -717,6 +719,341 @@ def _extract_id(lines: list[str]) -> str:
         if id12:
             return id12
     return ""
+
+
+_PROPERTY_BOOK_TYPE_OLD = "Giay chung nhan quyen su dung dat"
+_PROPERTY_BOOK_TYPE_PINK_FULL = "Giay chung nhan quyen su dung dat, quyen so huu nha o va tai san khac gan lien voi dat"
+_PROPERTY_BOOK_TYPE_PINK_SHORT = "Giay chung nhan quyen su dung dat, quyen so huu tai san gan lien voi dat"
+
+
+def _looks_like_property_doc(lines: list[str]) -> bool:
+    score = 0
+    for line in lines:
+        key = _fold_text(line)
+        if "giay chung nhan" in key:
+            score += 2
+        if "quyen su dung dat" in key:
+            score += 2
+        if "so vao so" in key:
+            score += 2
+        if "thua dat" in key or "to ban do" in key:
+            score += 1
+        if "dien tich" in key:
+            score += 1
+        if "van phong dang ky" in key or "uy ban nhan dan" in key:
+            score += 1
+    return score >= 3
+
+
+def _classify_property_book_type(lines: list[str]) -> str:
+    joined = " ".join(_fold_text(line) for line in lines)
+    if "quyen su dung dat, quyen so huu nha o va tai san khac gan lien voi dat" in joined:
+        return _PROPERTY_BOOK_TYPE_PINK_FULL
+    if "quyen su dung dat, quyen so huu tai san gan lien voi dat" in joined:
+        return _PROPERTY_BOOK_TYPE_PINK_SHORT
+    if "quyen su dung dat" in joined:
+        return _PROPERTY_BOOK_TYPE_OLD
+    return ""
+
+
+def _clean_property_code(value: str) -> str:
+    text = _clean_text(value).strip(" .,:;-")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _extract_code_like(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    patterns = [
+        r"\b([A-Z]{1,4}\s*\d{4,12}(?:/\d{1,8})?)\b",
+        r"\b([A-Z]{1,4}\d{4,12}(?:/\d{1,8})?)\b",
+        r"\b([0-9]{4,}[A-Z0-9/]{0,8})\b",
+    ]
+    upper = text.upper()
+    for pattern in patterns:
+        m = re.search(pattern, upper)
+        if m:
+            return _clean_property_code(m.group(1))
+    return ""
+
+
+def _extract_property_serial(lines: list[str]) -> str:
+    for line in lines:
+        key = _fold_text(line)
+        if "so vao so" in key:
+            continue
+        if "so" not in key:
+            continue
+        code = _extract_code_like(line)
+        if code:
+            return code
+    for line in lines:
+        code = _extract_code_like(line)
+        key = _fold_text(line)
+        if "so vao so" in key:
+            continue
+        if code and any(ch.isalpha() for ch in code):
+            return code
+    return ""
+
+
+def _extract_property_registry_no(lines: list[str]) -> str:
+    labels = ["so vao so", "so vao so cap giay chung nhan", "so vao so cap gcn"]
+    for idx, line in enumerate(lines):
+        if not _looks_like_label(line, labels):
+            continue
+        if ":" in line:
+            after = _clean_property_code(line.split(":", 1)[1])
+            if after:
+                return after
+        code = _extract_code_like(line)
+        if code:
+            return code
+        if idx + 1 < len(lines):
+            next_line = _clean_property_code(lines[idx + 1])
+            if next_line and not _looks_like_label(next_line, labels):
+                return next_line
+    return ""
+
+
+def _extract_first_number(line: str) -> str:
+    m = re.search(r"(?<!\d)(\d{1,6})(?!\d)", line)
+    return m.group(1) if m else ""
+
+
+def _extract_property_plot_no(lines: list[str]) -> str:
+    for line in lines:
+        if _looks_like_label(line, ["thua dat", "thua so"]):
+            number = _extract_first_number(line)
+            if number:
+                return number
+    return ""
+
+
+def _extract_property_map_sheet(lines: list[str]) -> str:
+    for line in lines:
+        if _looks_like_label(line, ["to ban do", "to so"]):
+            number = _extract_first_number(line)
+            if number:
+                return number
+    return ""
+
+
+def _extract_property_area(lines: list[str]) -> str:
+    for line in lines:
+        if not _looks_like_label(line, ["dien tich"]):
+            continue
+        m = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)(?:\s*(?:m2|m²))?", line, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).replace(",", ".")
+    return ""
+
+
+_PROPERTY_ADDRESS_STOP_LABELS = [
+    "dien tich",
+    "loai dat",
+    "thoi han",
+    "nguon goc",
+    "ngay cap",
+    "co quan cap",
+    "so vao so",
+]
+
+
+def _strip_property_address_noise(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    parts: list[str] = []
+    for segment in [s.strip() for s in text.split(",") if s and s.strip()]:
+        if _looks_like_label(segment, _PROPERTY_ADDRESS_STOP_LABELS):
+            break
+        parts.append(segment)
+    merged = _clean_text(", ".join(parts) if parts else text)
+    return merged.strip(" ,.;:-")
+
+
+def _extract_property_address(lines: list[str]) -> str:
+    labels = ["dia chi", "dia chi thua dat"]
+    for idx, line in enumerate(lines):
+        if not _looks_like_label(line, labels):
+            continue
+        parts: list[str] = []
+        if ":" in line:
+            parts.append(line.split(":", 1)[1])
+        elif idx + 1 < len(lines):
+            parts.append(lines[idx + 1])
+        if idx + 2 < len(lines) and not _looks_like_label(lines[idx + 2], _PROPERTY_ADDRESS_STOP_LABELS):
+            if any(token in _fold_text(lines[idx + 2]) for token in ["xa", "huyen", "quan", "tinh", "thanh pho", "thon"]):
+                parts.append(lines[idx + 2])
+        address = _strip_property_address_noise(", ".join(_clean_text(p) for p in parts if _clean_text(p)))
+        if address:
+            return address
+    for line in lines:
+        key = _fold_text(line)
+        if any(token in key for token in ["thon", "to dan pho", "xa ", "phuong", "huyen", "quan", "tinh", "thanh pho"]):
+            if "," in line and len(line) >= 10:
+                return _strip_property_address_noise(line)
+    return ""
+
+
+def _extract_property_field_by_label(lines: list[str], labels: list[str]) -> str:
+    for idx, line in enumerate(lines):
+        if not _looks_like_label(line, labels):
+            continue
+        if ":" in line:
+            after = _clean_text(line.split(":", 1)[1])
+            if after:
+                return after
+        if idx + 1 < len(lines):
+            nxt = _clean_text(lines[idx + 1])
+            if nxt and not _looks_like_label(nxt, labels):
+                return nxt
+    return ""
+
+
+def _extract_property_issue_date(lines: list[str]) -> str:
+    authority_markers = [
+        "uy ban nhan dan",
+        "van phong dang ky",
+        "so tai nguyen",
+        "co quan cap",
+        "kt. giam doc",
+        "pho giam doc",
+    ]
+    candidates: list[tuple[int, int, str]] = []
+    for idx, line in enumerate(lines):
+        dates = _extract_dates_from_line(line)
+        if not dates:
+            continue
+        score = 0
+        key = _fold_text(line)
+        if "ngay" in key or "date" in key:
+            score += 2
+        if any(marker in key for marker in authority_markers):
+            score += 2
+        for n in range(max(0, idx - 2), min(len(lines), idx + 3)):
+            n_key = _fold_text(lines[n])
+            if any(marker in n_key for marker in authority_markers):
+                score += 1
+                break
+        for date_val in dates:
+            candidates.append((score, idx, date_val))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return candidates[0][2]
+
+
+def _extract_property_authority(lines: list[str], issue_date: str) -> str:
+    markers = ["uy ban nhan dan", "van phong dang ky", "so tai nguyen", "co quan cap", "giam doc", "pho giam doc"]
+    date_line_idx = -1
+    if issue_date:
+        for idx, line in enumerate(lines):
+            if issue_date in _extract_dates_from_line(line):
+                date_line_idx = idx
+                break
+    scan_order: list[int] = []
+    if date_line_idx >= 0:
+        for radius in range(0, 4):
+            left = date_line_idx - radius
+            right = date_line_idx + radius
+            if left >= 0:
+                scan_order.append(left)
+            if right < len(lines):
+                scan_order.append(right)
+    scan_order.extend(range(len(lines)))
+    seen: set[int] = set()
+    for idx in scan_order:
+        if idx in seen:
+            continue
+        seen.add(idx)
+        line = _clean_text(lines[idx])
+        key = _fold_text(line)
+        if any(marker in key for marker in markers):
+            return _clean_text(re.sub(r"\b\d{1,2}/\d{1,2}/\d{4}\b", "", line)).strip(" ,.;:-")
+    return ""
+
+
+def _normalize_property_data(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "loai_so": _clean_text(data.get("loai_so")),
+        "so_serial": _clean_property_code(str(data.get("so_serial") or "")),
+        "so_vao_so": _clean_property_code(str(data.get("so_vao_so") or "")),
+        "so_thua_dat": _clean_text(data.get("so_thua_dat")),
+        "so_to_ban_do": _clean_text(data.get("so_to_ban_do")),
+        "dien_tich": _clean_text(data.get("dien_tich")),
+        "dia_chi": _strip_property_address_noise(str(data.get("dia_chi") or "")),
+        "ngay_cap": _normalize_date(data.get("ngay_cap")),
+        "co_quan_cap": _clean_text(data.get("co_quan_cap")),
+        "loai_dat": _clean_text(data.get("loai_dat")),
+        "thoi_han": _clean_text(data.get("thoi_han")),
+        "nguon_goc": _clean_text(data.get("nguon_goc")),
+    }
+
+
+def _normalize_property_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]:
+    cleaned_lines = [_clean_text(ln) for ln in lines if _clean_text(ln)]
+    if not cleaned_lines:
+        return {"doc_type": "unknown", "side": "unknown", "data": {}, "filename": filename, "text_lines": []}
+    if not _looks_like_property_doc(cleaned_lines):
+        return {"doc_type": "unknown", "side": "unknown", "data": {}, "filename": filename, "text_lines": cleaned_lines}
+
+    issue_date = _extract_property_issue_date(cleaned_lines)
+    data = _normalize_property_data(
+        {
+            "loai_so": _classify_property_book_type(cleaned_lines),
+            "so_serial": _extract_property_serial(cleaned_lines),
+            "so_vao_so": _extract_property_registry_no(cleaned_lines),
+            "so_thua_dat": _extract_property_plot_no(cleaned_lines),
+            "so_to_ban_do": _extract_property_map_sheet(cleaned_lines),
+            "dien_tich": _extract_property_area(cleaned_lines),
+            "dia_chi": _extract_property_address(cleaned_lines),
+            "ngay_cap": issue_date,
+            "co_quan_cap": _extract_property_authority(cleaned_lines, issue_date),
+            "loai_dat": _extract_property_field_by_label(cleaned_lines, ["loai dat", "muc dich su dung"]),
+            "thoi_han": _extract_property_field_by_label(cleaned_lines, ["thoi han su dung", "thoi han"]),
+            "nguon_goc": _extract_property_field_by_label(cleaned_lines, ["nguon goc su dung", "nguon goc"]),
+        }
+    )
+    non_empty = sum(1 for v in data.values() if _clean_text(v))
+    warnings = []
+    for key in ("so_serial", "so_vao_so", "dia_chi", "ngay_cap"):
+        if not _clean_text(data.get(key)):
+            warnings.append(key)
+    return {
+        "doc_type": "property" if non_empty > 0 else "unknown",
+        "side": "unknown",
+        "data": data if non_empty > 0 else {},
+        "filename": filename,
+        "text_lines": cleaned_lines,
+        "warnings": warnings,
+    }
+
+
+def _property_doc_score(doc: dict[str, Any]) -> int:
+    if doc.get("doc_type") != "property":
+        return 0
+    data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    score = 0
+    for key in ("so_serial", "so_vao_so", "dia_chi", "ngay_cap"):
+        if _clean_text(data.get(key)):
+            score += 2
+    for key in ("so_thua_dat", "so_to_ban_do", "dien_tich", "co_quan_cap", "loai_so"):
+        if _clean_text(data.get(key)):
+            score += 1
+    return score
+
+
+def _should_retry_property_rotate(doc: dict[str, Any]) -> bool:
+    if doc.get("doc_type") != "property":
+        return False
+    data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    critical = ["so_serial", "so_vao_so", "dia_chi", "ngay_cap"]
+    filled = sum(1 for key in critical if _clean_text(data.get(key)))
+    return filled < 3
 
 
 def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]:
@@ -1104,6 +1441,64 @@ async def _process_single_image(
     return out
 
 
+async def _process_single_property_image(
+    upload: UploadFile,
+    *,
+    model: str,
+    api_key: str,
+    ai_semaphore: asyncio.Semaphore,
+    client: httpx.AsyncClient,
+) -> dict[str, Any]:
+    filename = upload.filename or "unknown"
+    file_bytes = await upload.read()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Missing API key for OCR AI model")
+
+    image_jpeg = _prepare_ai_image_bytes(file_bytes)
+    image_b64 = base64.b64encode(image_jpeg).decode()
+    used_rotate_retry = False
+
+    async with ai_semaphore:
+        lines = await _call_qwen_native_ocr_single(
+            client,
+            api_key=api_key,
+            model=model,
+            image_b64=image_b64,
+            filename=filename,
+            enable_rotate=False,
+        )
+    doc = _normalize_property_ocr_doc(lines, filename)
+
+    if _should_retry_property_rotate(doc):
+        try:
+            async with ai_semaphore:
+                lines_rotate = await _call_qwen_native_ocr_single(
+                    client,
+                    api_key=api_key,
+                    model=model,
+                    image_b64=image_b64,
+                    filename=filename,
+                    enable_rotate=True,
+                )
+            rotated_doc = _normalize_property_ocr_doc(lines_rotate, filename)
+            if _property_doc_score(rotated_doc) >= _property_doc_score(doc):
+                doc = rotated_doc
+            used_rotate_retry = True
+        except Exception as exc:
+            _log_ocr_ai(
+                "property_rotate_retry_error",
+                level="warning",
+                filename=filename,
+                error=str(exc)[:240],
+            )
+
+    return {
+        "filename": filename,
+        "doc": doc,
+        "used_rotate_retry": used_rotate_retry,
+    }
+
+
 @router.post("/analyze")
 async def analyze_images(files: list[UploadFile] = File(...)):
     if not files:
@@ -1226,6 +1621,107 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             "ocr_native_ms": _ms(qr_ai_ms),
             "backend_parse_ms": _ms(backend_parse_ms),
             "pair_ms": _ms(pair_ms),
+            "total_ms": _ms(total_ms),
+        },
+    }
+
+
+@router.post("/analyze-property")
+async def analyze_property_images(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No images uploaded")
+
+    t_total = perf_counter()
+    properties: list[dict[str, Any]] = []
+    raw_results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    model = _get_model()
+    api_key = _get_api_key(model)
+    ai_semaphore = asyncio.Semaphore(OCR_AI_CONCURRENCY)
+
+    results: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=AI_TIMEOUT_SECONDS) as client:
+        tasks = [
+            _process_single_property_image(
+                upload,
+                model=model,
+                api_key=api_key,
+                ai_semaphore=ai_semaphore,
+                client=client,
+            )
+            for upload in files
+        ]
+        for item in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(item, Exception):
+                detail = item.detail if isinstance(item, HTTPException) else str(item)
+                errors.append({"filename": "unknown", "error": str(detail)})
+            else:
+                results.append(item)
+
+    used_rotate_retry = 0
+    unknowns = 0
+    for item in results:
+        filename = str(item.get("filename") or "unknown")
+        doc = item.get("doc") if isinstance(item.get("doc"), dict) else {}
+        used_rotate_retry += 1 if item.get("used_rotate_retry") else 0
+        if not doc:
+            errors.append({"filename": filename, "error": "No OCR result"})
+            continue
+
+        doc_type = str(doc.get("doc_type") or "unknown")
+        data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+        warnings = doc.get("warnings") if isinstance(doc.get("warnings"), list) else []
+        raw_results.append(
+            {
+                "doc_type": doc_type,
+                "filename": filename,
+                "side": "unknown",
+                "source_type": "AI",
+                "data": data,
+                "text_lines": doc.get("text_lines") if isinstance(doc.get("text_lines"), list) else [],
+                "warnings": warnings,
+                "status": "ok" if doc_type == "property" else "skipped",
+            }
+        )
+        if doc_type == "property":
+            properties.append(
+                {
+                    **data,
+                    "_file": filename,
+                    "_source": "AI",
+                    "source_type": "AI",
+                    "warnings": warnings,
+                }
+            )
+        else:
+            unknowns += 1
+
+    total_ms = perf_counter() - t_total
+    _log_ocr_ai(
+        "ocr_property_done",
+        model=model,
+        images=len(files),
+        properties=len(properties),
+        unknowns=unknowns,
+        errors=len(errors),
+        rotate_retry=used_rotate_retry,
+        total_ms=_ms(total_ms),
+    )
+    return {
+        "persons": [],
+        "properties": properties,
+        "marriages": [],
+        "raw_results": raw_results,
+        "errors": errors,
+        "summary": {
+            "total_images": len(files),
+            "model": model,
+            "persons": 0,
+            "properties": len(properties),
+            "marriages": 0,
+            "unknowns": unknowns,
+            "rotate_retry": used_rotate_retry,
             "total_ms": _ms(total_ms),
         },
     }

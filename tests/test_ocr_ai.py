@@ -12,6 +12,30 @@ def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
 
 
 class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
+    def test_normalize_property_doc_extracts_core_fields(self):
+        lines = [
+            "GIAY CHUNG NHAN",
+            "QUYEN SU DUNG DAT, QUYEN SO HUU TAI SAN GAN LIEN VOI DAT",
+            "So vao so cap GCN: VP00166",
+            "AA07488103",
+            "Thua dat: 66",
+            "To ban do so: 29",
+            "Dia chi: Thon Phuong Nhi, xa Tan Minh, tinh Ninh Binh",
+            "Nam Dinh, ngay 10/07/2023",
+            "VAN PHONG DANG KY DAT DAI",
+        ]
+        doc = ocr_ai._normalize_property_ocr_doc(lines, "property.jpg")
+        self.assertEqual(doc["doc_type"], "property")
+        self.assertEqual(doc["data"]["so_serial"], "AA07488103")
+        self.assertEqual(doc["data"]["so_vao_so"], "VP00166")
+        self.assertEqual(doc["data"]["so_thua_dat"], "66")
+        self.assertEqual(doc["data"]["so_to_ban_do"], "29")
+        self.assertEqual(doc["data"]["ngay_cap"], "10/07/2023")
+
+    def test_normalize_property_doc_unknown_for_non_property(self):
+        doc = ocr_ai._normalize_property_ocr_doc(["Hoa don dien tu", "Tong tien: 123000"], "bill.jpg")
+        self.assertEqual(doc["doc_type"], "unknown")
+
     def test_parse_person_mrz_extracts_expected_fields(self):
         mrz = ocr_ai._parse_person_mrz(
             [
@@ -166,6 +190,34 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(person["so_giay_to"], "036179009696")
         self.assertTrue(person["paired"])
         self.assertEqual(len(person.get("_files", [])), 2)
+
+    async def test_analyze_property_images_returns_properties_only(self):
+        uploads = [make_upload("property-1.jpg"), make_upload("unknown-1.jpg")]
+        outputs = [
+            [
+                "GIAY CHUNG NHAN",
+                "QUYEN SU DUNG DAT",
+                "So A 692942",
+                "So vao so cap Giay chung nhan: VP56315",
+                "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+            ],
+            ["Anh chup khong phai so do"],
+        ]
+
+        async def fake_call(*args, **kwargs):
+            return outputs.pop(0)
+
+        with (
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+        ):
+            result = await ocr_ai.analyze_property_images(uploads)
+
+        self.assertEqual(result["persons"], [])
+        self.assertEqual(len(result["properties"]), 1)
+        self.assertEqual(result["properties"][0]["so_serial"], "A 692942")
+        self.assertEqual(result["summary"]["properties"], 1)
+        self.assertEqual(result["summary"]["unknowns"], 1)
 
     def test_pair_persons_allows_fuzzy_id_when_name_matches(self):
         front = {

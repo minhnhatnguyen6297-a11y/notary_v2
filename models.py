@@ -77,6 +77,7 @@ class Property(Base):
 
     # Quan hệ
     inheritance_cases = relationship("InheritanceCase", back_populates="tai_san")
+    case_links = relationship("InheritanceCaseProperty", back_populates="property", cascade="all, delete-orphan")
 
 
 class InheritanceCase(Base):
@@ -96,6 +97,7 @@ class InheritanceCase(Base):
     # Quan hệ
     nguoi_chet   = relationship("Customer", back_populates="inheritance_cases", foreign_keys=[nguoi_chet_id])
     tai_san      = relationship("Property", back_populates="inheritance_cases")
+    property_links = relationship("InheritanceCaseProperty", back_populates="case", cascade="all, delete-orphan")
     participants = relationship("InheritanceParticipant", back_populates="ho_so", cascade="all, delete-orphan")
 
     @property
@@ -105,6 +107,21 @@ class InheritanceCase(Base):
     @property
     def tong_ty_le(self):
         return sum(p.ty_le or 0 for p in self.participants if p.co_nhan_tai_san)
+
+
+class InheritanceCaseProperty(Base):
+    """Lien ket nhieu tai san cho mot ho so."""
+    __tablename__ = "inheritance_case_properties"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("inheritance_cases.id"), nullable=False)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
+    is_primary = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    case = relationship("InheritanceCase", back_populates="property_links")
+    property = relationship("Property", back_populates="case_links")
 
 
 class InheritanceParticipant(Base):

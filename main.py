@@ -12,6 +12,7 @@ from database import (
     Base,
     engine,
     migrate_customers_nullable,
+    migrate_inheritance_case_properties_schema,
     migrate_inheritance_cases_schema,
     migrate_properties_schema,
 )
@@ -29,6 +30,7 @@ app_logger.info("Web logging initialized at %s", WEB_LOG_PATH)
 migrate_customers_nullable()
 migrate_inheritance_cases_schema()
 migrate_properties_schema()
+migrate_inheritance_case_properties_schema()
 Base.metadata.create_all(bind=engine)
 
 

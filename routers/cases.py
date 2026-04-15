@@ -13,7 +13,7 @@ from uuid import uuid4
 from types import SimpleNamespace
 
 from database import get_db
-from models import InheritanceCase, Customer, Property, InheritanceParticipant, WordTemplate
+from models import InheritanceCase, Customer, Property, InheritanceParticipant, InheritanceCaseProperty, WordTemplate
 
 router = APIRouter()
 templates = Jinja2Templates(directory="frontend/templates")
@@ -33,6 +33,56 @@ def _to_list(v):
     if isinstance(v, list):
         return v
     return [v]
+
+
+def _normalize_property_ids(primary_property_id: str, raw_property_ids: Optional[Union[List[str], str]]) -> list[int]:
+    values: list[str] = []
+    for item in _to_list(raw_property_ids):
+        if item is None:
+            continue
+        text = str(item).strip()
+        if not text:
+            continue
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+                for v in parsed if isinstance(parsed, list) else []:
+                    values.append(str(v).strip())
+                continue
+            except Exception:
+                pass
+        values.extend([x.strip() for x in text.split(",") if x and x.strip()])
+
+    if primary_property_id:
+        values.append(primary_property_id)
+    out: list[int] = []
+    seen: set[int] = set()
+    for v in values:
+        if not str(v).isdigit():
+            continue
+        pid = int(v)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    if primary_property_id and primary_property_id.isdigit():
+        primary = int(primary_property_id)
+        if primary in out:
+            out = [primary] + [x for x in out if x != primary]
+    return out
+
+
+def _sync_case_property_links(db: Session, case_id: int, property_ids: list[int], primary_property_id: int) -> None:
+    db.query(InheritanceCaseProperty).filter(InheritanceCaseProperty.case_id == case_id).delete()
+    for pid in property_ids:
+        db.add(
+            InheritanceCaseProperty(
+                case_id=case_id,
+                property_id=pid,
+                is_primary=(pid == primary_property_id),
+            )
+        )
+    db.commit()
 
 
 def _build_temp_participants(
@@ -108,7 +158,7 @@ def create_form(request: Request, db: Session = Depends(get_db)):
         "request": request, "obj": None,
         "deceased": deceased, "properties": properties, "errors": [],
         "field_errors": {}, "form": form,
-        "all_customers": all_customers, "participants": [], "participant_ids": set(),
+        "all_customers": all_customers, "participants": [], "participant_ids": set(), "case_property_ids": [],
     })
 
 
@@ -117,6 +167,7 @@ def create(
     request: Request,
     nguoi_chet_id: Optional[str] = Form(None),
     tai_san_id: Optional[str] = Form(None),
+    property_ids: Optional[Union[List[str], str]] = Form(None),
     participant_id: Optional[Union[List[str], str]] = Form(None),
     participant_role: Optional[Union[List[str], str]] = Form(None),
     participant_share: Optional[Union[List[str], str]] = Form(None),
@@ -129,6 +180,7 @@ def create(
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
     }
+    selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
@@ -151,6 +203,7 @@ def create(
             "all_customers": all_customers,
             "participants": posted_participants,
             "participant_ids": posted_participant_ids,
+            "case_property_ids": selected_property_ids,
         })
 
     try:
@@ -160,6 +213,8 @@ def create(
             loai_van_ban="khai_nhan", ghi_chu=None
         )
         db.add(c); db.commit(); db.refresh(c)
+        if selected_property_ids:
+            _sync_case_property_links(db, c.id, selected_property_ids, int(form["tai_san_id"]))
         pid_list = _to_list(participant_id)
         role_list = _to_list(participant_role)
         share_list = _to_list(participant_share)
@@ -204,6 +259,7 @@ def create(
             "all_customers": all_customers,
             "participants": posted_participants,
             "participant_ids": posted_participant_ids,
+            "case_property_ids": selected_property_ids,
         })
 
 
@@ -231,6 +287,9 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     properties = db.query(Property).order_by(Property.id.desc()).all()
     participants = case.participants
     participant_ids = {p.customer_id for p in participants}
+    case_property_ids = [int(link.property_id) for link in sorted(case.property_links, key=lambda x: (not x.is_primary, x.id))]
+    if not case_property_ids and case.tai_san_id:
+        case_property_ids = [int(case.tai_san_id)]
     form = {
         "nguoi_chet_id": str(case.nguoi_chet_id) if case.nguoi_chet_id else "",
         "tai_san_id": str(case.tai_san_id) if case.tai_san_id else "",
@@ -244,6 +303,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "deceased": deceased, "properties": properties, "errors": [],
         "field_errors": {}, "form": form,
         "all_customers": all_customers, "participants": participants, "participant_ids": participant_ids,
+        "case_property_ids": case_property_ids,
     })
 
 
@@ -251,6 +311,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
 def edit(
     cid: int, request: Request,
     nguoi_chet_id: Optional[str] = Form(None), tai_san_id: Optional[str] = Form(None),
+    property_ids: Optional[Union[List[str], str]] = Form(None),
     noi_niem_yet: Optional[str] = Form(None),
     participant_id: Optional[Union[List[str], str]] = Form(None),
     participant_role: Optional[Union[List[str], str]] = Form(None),
@@ -266,6 +327,7 @@ def edit(
         "tai_san_id": (tai_san_id or "").strip(),
         "noi_niem_yet": (noi_niem_yet or "").strip(),
     }
+    selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
     field_errors = {}
     if not form["nguoi_chet_id"]:
@@ -287,12 +349,15 @@ def edit(
             "all_customers": all_customers,
             "participants": posted_participants,
             "participant_ids": posted_participant_ids,
+            "case_property_ids": selected_property_ids,
         })
 
     try:
         case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
         case.noi_niem_yet = form["noi_niem_yet"] or None
         db.commit()
+        if selected_property_ids:
+            _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))
         db.query(InheritanceParticipant).filter(InheritanceParticipant.ho_so_id == case.id).delete()
         db.commit()
         pid_list = _to_list(participant_id)
@@ -339,6 +404,7 @@ def edit(
             "all_customers": all_customers,
             "participants": posted_participants,
             "participant_ids": posted_participant_ids,
+            "case_property_ids": selected_property_ids,
         })
 
 
@@ -1225,4 +1291,3 @@ def export_preview(cid: int, html_content: str = Form(""), db: Session = Depends
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
-

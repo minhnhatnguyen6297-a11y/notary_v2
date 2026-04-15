@@ -82,6 +82,34 @@ def migrate_properties_schema():
     con.close()
 
 
+def migrate_inheritance_case_properties_schema():
+    """Tao bang lien ket nhieu tai san cho ho so neu chua co."""
+    con = sqlite3.connect("notary.db")
+    cur = con.cursor()
+    cur.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS inheritance_case_properties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            property_id INTEGER NOT NULL,
+            is_primary BOOLEAN NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
+            updated_at DATETIME DEFAULT (CURRENT_TIMESTAMP),
+            FOREIGN KEY(case_id) REFERENCES inheritance_cases(id),
+            FOREIGN KEY(property_id) REFERENCES properties(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_case_property_unique
+        ON inheritance_case_properties(case_id, property_id);
+        CREATE INDEX IF NOT EXISTS ix_case_property_case
+        ON inheritance_case_properties(case_id);
+        CREATE INDEX IF NOT EXISTS ix_case_property_property
+        ON inheritance_case_properties(property_id);
+        """
+    )
+    con.commit()
+    con.close()
+
+
 def get_db():
     """Cung cấp kết nối DB cho mỗi request, tự đóng sau khi xong."""
     db = SessionLocal()

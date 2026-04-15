@@ -30,6 +30,7 @@ endif %}
   <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
   <input type="hidden" name="noi_niem_yet" id="case-noi-niem-yet"
     value="{{ f.get('noi_niem_yet', obj.noi_niem_yet if obj and obj.noi_niem_yet else '') }}">
+  <div id="case-property-ids-holder"></div>
   <input type="hidden" id="case-id-hidden" value="{{ obj.id if obj else '' }}">
   <style>
     .page-header {
@@ -883,7 +884,13 @@ endif %}
       <!-- Tài sản (~36%) -->
       <div style="flex: 0 0 36%; min-width: 0; overflow-y: auto;">
         <div class="card property-compact mb-0">
-          <div class="card-header compact-title"><i class="bi bi-house-add me-1"></i>Tài sản</div>
+          <div class="card-header compact-title d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-house-add me-1"></i>Tài sản</span>
+            <button type="button" class="btn btn-sm btn-outline-warning fw-bold" data-bs-toggle="modal"
+              data-bs-target="#propertyOcrModal" title="OCR tài sản tự động điền form">
+              <i class="bi bi-camera me-1"></i>OCR Tài sản
+            </button>
+          </div>
           <div class="card-body inline-form">
             <div id="inline-prop-error" class="alert alert-danger d-none"></div>
             <div class="row g-2">
@@ -945,6 +952,35 @@ endif %}
                     </tfoot>
                   </table>
                   <input type="hidden" id="pr-land-rows" value="">
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="border rounded p-2 bg-white">
+                  <div class="d-flex gap-2 align-items-center mb-2">
+                    <button type="button" class="btn btn-sm btn-primary" id="btn-add-prop">
+                      <i class="bi bi-plus-lg me-1"></i>Lưu tài sản
+                    </button>
+                    <select class="form-select form-select-sm" id="pr-tai-san-select">
+                      <option value="">-- Tài sản chính --</option>
+                      {% for p in properties %}
+                      <option value="{{ p.id }}" {% if f.get('tai_san_id','')|string == p.id|string %}selected{% endif %}
+                        data-ngay-cap="{{ p.ngay_cap.isoformat() if p.ngay_cap else '' }}">
+                        {{ p.so_serial }} — Thửa {{ p.so_thua_dat or '?' }} ({{ (p.dia_chi or '')[:40] }}{% if (p.dia_chi or '')|length > 40 %}...{% endif %})
+                      </option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div>
+                    <label class="form-label mb-1" style="font-size:12px;">Danh sách tài sản hồ sơ (chọn nhiều)</label>
+                    <select class="form-select form-select-sm" id="pr-properties-multi" multiple size="4">
+                      {% for p in properties %}
+                      {% set selected_multi = (case_property_ids and (p.id in case_property_ids)) or ((not case_property_ids) and (f.get('tai_san_id','')|string == p.id|string)) %}
+                      <option value="{{ p.id }}" {% if selected_multi %}selected{% endif %}>
+                        {{ p.so_serial }} — {{ p.so_thua_dat or '?' }} / {{ p.so_to_ban_do or '?' }}
+                      </option>
+                      {% endfor %}
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1213,6 +1249,60 @@ endif %}
     </div>
   </div>
   <!-- ═══ /Modal OCR ══════════════════════════════════════════════════════════ -->
+
+  <!-- Modal OCR Tai san -->
+  <div class="modal fade" id="propertyOcrModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content" style="min-height:60vh;">
+        <div class="modal-header py-2" style="background:linear-gradient(135deg,#14532d,#22c55e);color:#fff;">
+          <h5 class="modal-title"><i class="bi bi-house-check me-2"></i>OCR Tài sản</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-0 d-flex" style="min-height:48vh;">
+          <div
+            style="width:300px;min-width:300px;border-right:1px solid #e5e7eb;padding:14px;display:flex;flex-direction:column;gap:10px;background:#fafafa;">
+            <div id="property-ocr-drop-zone"
+              style="border:2px dashed #86efac;border-radius:10px;padding:18px 10px;text-align:center;cursor:pointer;background:#f0fdf4;transition:.2s;"
+              onclick="document.getElementById('property-ocr-file-input').click()"
+              ondragover="propertyOcrDragOver(event)" ondrop="propertyOcrDrop(event)"
+              ondragleave="propertyOcrDragLeave(event)">
+              <input type="file" id="property-ocr-file-input" accept="image/*" multiple style="display:none"
+                onchange="propertyOcrHandleFiles(this.files)">
+              <div style="font-size:28px;margin-bottom:6px;">📄</div>
+              <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Tải ảnh sổ đỏ/sổ hồng</div>
+              <div style="font-size:11px;color:#64748b;">Nhận nhiều ảnh cùng lúc</div>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm btn-success flex-grow-1" id="property-ocr-btn-extract"
+                onclick="propertyOcrExtract()" disabled>
+                <i class="bi bi-robot me-1"></i>OCR Tài sản
+              </button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="propertyOcrClearAll()" title="Xóa tất cả">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+            <div id="property-ocr-queue"
+              style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;min-height:80px;">
+              <div id="property-ocr-queue-empty"
+                style="font-size:11px;color:#94a3b8;text-align:center;padding:12px 0;">Chưa có ảnh nào</div>
+            </div>
+          </div>
+          <div style="flex:1;padding:14px;overflow-y:auto;">
+            <div id="property-ocr-results-empty"
+              style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#94a3b8;">
+              <div style="font-size:42px;margin-bottom:8px;opacity:.35;">🏠</div>
+              <div style="font-size:13px;font-weight:600;">Kết quả OCR tài sản sẽ hiển thị ở đây</div>
+            </div>
+            <div id="property-ocr-results-list" style="display:none;"></div>
+          </div>
+        </div>
+        <div class="modal-footer py-2 justify-content-between">
+          <div id="property-ocr-summary" style="font-size:12px;color:#64748b;"></div>
+          <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Đóng</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal Import Excel -->
   <div class="modal fade" id="importExcelModal" tabindex="-1" aria-labelledby="importExcelModalLabel"
@@ -1691,6 +1781,269 @@ endif %}
       bootstrap.Modal.getInstance(document.getElementById('exportWordModal'))?.hide();
     });
 }) ();
+  </script>
+  <script>
+    (() => {
+      let propertyQueue = [];
+      let propertyResults = [];
+
+      const fold = (s) => String(s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .trim();
+
+      function normalizeDate(s) {
+        const t = String(s || '').trim();
+        const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+        return t;
+      }
+
+      function setPropSummary(text) {
+        const el = document.getElementById('property-ocr-summary');
+        if (el) el.textContent = text || '';
+      }
+
+      function statusHtml(status) {
+        if (status === 'done') return '<span style="color:#16a34a">✓ OCR xong</span>';
+        if (status === 'skipped') return '<span style="color:#64748b">• Bỏ qua (không phải tài sản)</span>';
+        if (status === 'error') return '<span style="color:#dc2626">✕ Lỗi OCR</span>';
+        if (status === 'running') return '<span style="color:#2563eb">… Đang OCR</span>';
+        return '<span style="color:#94a3b8">Chờ xử lý</span>';
+      }
+
+      async function fileToDataUrl(file) {
+        return new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function renderPropertyQueue() {
+        const wrap = document.getElementById('property-ocr-queue');
+        const empty = document.getElementById('property-ocr-queue-empty');
+        if (!wrap || !empty) return;
+        wrap.innerHTML = '';
+        if (!propertyQueue.length) {
+          wrap.appendChild(empty);
+          empty.style.display = 'block';
+          document.getElementById('property-ocr-btn-extract').disabled = true;
+          return;
+        }
+        empty.style.display = 'none';
+        for (const item of propertyQueue) {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;';
+          row.innerHTML = `
+            <img src="${item.preview || ''}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0;background:#f1f5f9;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>
+              <div style="font-size:11px;">${statusHtml(item.status)}</div>
+            </div>
+            <button type="button" onclick="propertyOcrRemoveItem('${item.id}')" style="border:none;background:none;color:#94a3b8;">✕</button>
+          `;
+          wrap.appendChild(row);
+        }
+        document.getElementById('property-ocr-btn-extract').disabled = false;
+      }
+
+      function renderPropertyResults() {
+        const empty = document.getElementById('property-ocr-results-empty');
+        const list = document.getElementById('property-ocr-results-list');
+        if (!empty || !list) return;
+        if (!propertyResults.length) {
+          empty.style.display = 'flex';
+          list.style.display = 'none';
+          list.innerHTML = '';
+          return;
+        }
+        empty.style.display = 'none';
+        list.style.display = 'block';
+        list.innerHTML = '';
+
+        propertyResults.forEach((item, idx) => {
+          if (item.kind === 'property') {
+            const d = item.data || {};
+            const box = document.createElement('div');
+            box.style.cssText = 'border:1px solid #d1fae5;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#f0fdf4;';
+            box.innerHTML = `
+              <div style="font-size:12px;font-weight:700;color:#065f46;margin-bottom:6px;">
+                <i class="bi bi-house me-1"></i>${d.so_serial || 'Chưa có serial'} <span style="color:#64748b;font-weight:400;">(${item.file || 'unknown'})</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+                <div><span style="color:#64748b;">Số vào sổ:</span> ${d.so_vao_so || '—'}</div>
+                <div><span style="color:#64748b;">Ngày cấp:</span> ${d.ngay_cap || '—'}</div>
+                <div><span style="color:#64748b;">Số thửa:</span> ${d.so_thua_dat || '—'}</div>
+                <div><span style="color:#64748b;">Số tờ:</span> ${d.so_to_ban_do || '—'}</div>
+                <div style="grid-column:1/-1;"><span style="color:#64748b;">Địa chỉ:</span> ${d.dia_chi || '—'}</div>
+              </div>
+              ${item.warnings?.length ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">Thiếu: ${item.warnings.join(', ')}</div>` : ''}
+              <div style="text-align:right;margin-top:8px;">
+                <button class="btn btn-sm btn-outline-success" onclick="propertyOcrFill(${idx})">
+                  <i class="bi bi-check2 me-1"></i>Điền vào form
+                </button>
+              </div>
+            `;
+            list.appendChild(box);
+          } else {
+            const box = document.createElement('div');
+            box.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;';
+            box.innerHTML = `
+              <div style="font-size:12px;font-weight:600;color:#334155;">
+                <i class="bi bi-skip-forward me-1"></i>${item.file || 'unknown'}
+              </div>
+              <div style="font-size:11px;color:#64748b;">Không nhận diện là giấy tờ tài sản, đã bỏ qua.</div>
+            `;
+            list.appendChild(box);
+          }
+        });
+      }
+
+      function setMainPropertyField(id, val) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const value = String(val || '').trim();
+        if (!value) return;
+        el.value = value;
+      }
+
+      function applyLoaiSo(value) {
+        if (!value) return;
+        const sel = document.getElementById('pr-loai-so');
+        if (!sel) return;
+        const target = fold(value);
+        const opt = Array.from(sel.options).find(o => {
+          const ov = fold(o.value || o.textContent);
+          return ov && (ov.includes(target) || target.includes(ov));
+        });
+        if (opt) sel.value = opt.value;
+      }
+
+      window.propertyOcrFill = function (idx) {
+        const item = propertyResults[idx];
+        if (!item || item.kind !== 'property') return;
+        const d = item.data || {};
+        setMainPropertyField('pr-so-serial', d.so_serial);
+        setMainPropertyField('pr-so-vao-so', d.so_vao_so);
+        setMainPropertyField('pr-so-thua', d.so_thua_dat);
+        setMainPropertyField('pr-so-to', d.so_to_ban_do);
+        setMainPropertyField('pr-dia-chi', d.dia_chi);
+        setMainPropertyField('pr-ngay-cap', normalizeDate(d.ngay_cap));
+        setMainPropertyField('pr-co-quan', d.co_quan_cap);
+        setMainPropertyField('pr-nguon-goc', d.nguon_goc);
+        applyLoaiSo(d.loai_so);
+
+        const firstRow = document.querySelector('#land-rows tr');
+        if (firstRow) {
+          const loaiDatInput = firstRow.querySelector('.land-type');
+          const areaInput = firstRow.querySelector('.land-area');
+          const thoiHanInput = firstRow.querySelector('.land-term');
+          if (loaiDatInput && d.loai_dat) loaiDatInput.value = d.loai_dat;
+          if (areaInput && d.dien_tich) areaInput.value = d.dien_tich;
+          if (thoiHanInput && d.thoi_han) thoiHanInput.value = d.thoi_han;
+        }
+        if (typeof rebuildLandRowsValue === 'function') rebuildLandRowsValue();
+
+        bootstrap.Modal.getInstance(document.getElementById('propertyOcrModal'))?.hide();
+        document.getElementById('pr-so-serial')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (typeof showToast === 'function') showToast('Đã điền dữ liệu tài sản từ OCR', 'success');
+      };
+
+      window.propertyOcrRemoveItem = function (id) {
+        propertyQueue = propertyQueue.filter(x => x.id !== id);
+        renderPropertyQueue();
+      };
+
+      window.propertyOcrClearAll = function () {
+        propertyQueue = [];
+        propertyResults = [];
+        setPropSummary('');
+        renderPropertyQueue();
+        renderPropertyResults();
+      };
+
+      window.propertyOcrHandleFiles = async function (files) {
+        for (const file of Array.from(files || [])) {
+          if (!file || !String(file.type || '').startsWith('image/')) continue;
+          const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const preview = await fileToDataUrl(file);
+          propertyQueue.push({ id, file, name: file.name || 'image', preview, status: 'pending' });
+        }
+        renderPropertyQueue();
+      };
+
+      window.propertyOcrDragOver = function (e) {
+        e.preventDefault();
+        const dz = document.getElementById('property-ocr-drop-zone');
+        if (dz) dz.style.borderColor = '#16a34a';
+      };
+      window.propertyOcrDragLeave = function () {
+        const dz = document.getElementById('property-ocr-drop-zone');
+        if (dz) dz.style.borderColor = '#86efac';
+      };
+      window.propertyOcrDrop = function (e) {
+        e.preventDefault();
+        window.propertyOcrDragLeave();
+        window.propertyOcrHandleFiles(e.dataTransfer?.files || []);
+      };
+
+      window.propertyOcrExtract = async function () {
+        if (!propertyQueue.length) return;
+        propertyQueue = propertyQueue.map(x => ({ ...x, status: 'running' }));
+        renderPropertyQueue();
+        setPropSummary(`Đang xử lý ${propertyQueue.length} ảnh...`);
+
+        const fd = new FormData();
+        propertyQueue.forEach(item => fd.append('files', item.file, item.name));
+        try {
+          const resp = await fetch('/api/ocr/analyze-property', { method: 'POST', body: fd });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          const props = Array.isArray(data.properties) ? data.properties : [];
+          const raws = Array.isArray(data.raw_results) ? data.raw_results : [];
+          const errors = Array.isArray(data.errors) ? data.errors : [];
+
+          const skippedFiles = raws
+            .filter(r => String(r.doc_type || '') !== 'property')
+            .map(r => String(r.filename || 'unknown'));
+          propertyResults = [
+            ...props.map(p => ({ kind: 'property', file: p._file || '', data: p, warnings: Array.isArray(p.warnings) ? p.warnings : [] })),
+            ...skippedFiles.map(f => ({ kind: 'skipped', file: f })),
+          ];
+
+          propertyQueue = propertyQueue.map(item => {
+            const found = props.find(p => String(p._file || '') === item.name);
+            const failed = errors.find(e => String(e.filename || '') === item.name);
+            if (failed) return { ...item, status: 'error' };
+            if (found) return { ...item, status: 'done' };
+            return { ...item, status: 'skipped' };
+          });
+
+          const summary = data.summary || {};
+          setPropSummary(
+            `${summary.properties || props.length} tài sản, ${summary.unknowns || skippedFiles.length} bỏ qua, ${errors.length} lỗi`
+          );
+          renderPropertyQueue();
+          renderPropertyResults();
+        } catch (err) {
+          propertyQueue = propertyQueue.map(x => ({ ...x, status: 'error' }));
+          renderPropertyQueue();
+          setPropSummary(`Lỗi OCR: ${err.message}`);
+          if (typeof showToast === 'function') showToast(`Lỗi OCR tài sản: ${err.message}`, 'danger');
+        }
+      };
+
+      document.getElementById('propertyOcrModal')?.addEventListener('hidden.bs.modal', () => {
+        window.propertyOcrClearAll();
+        const input = document.getElementById('property-ocr-file-input');
+        if (input) input.value = '';
+      });
+    })();
   </script>
   {% endblock %}
 
@@ -2565,7 +2918,6 @@ endif %}
       }
     });
     marriageInput?.addEventListener('input', recalcShares);
-    document.getElementById('pr-tai-san-select')?.addEventListener('change', recalcShares);
 
     function setOwnerFromSelect() {
       if (!ownerInput || !ownerInput.value) return;
@@ -2839,6 +3191,50 @@ endif %}
       }
     })();
 
+    function syncPrimaryPropertySelection() {
+      const hidden = document.getElementById('case-tai-san');
+      const primarySel = document.getElementById('pr-tai-san-select');
+      const multiSel = document.getElementById('pr-properties-multi');
+      if (!hidden || !primarySel) return;
+      hidden.value = primarySel.value || '';
+      if (!multiSel || !primarySel.value) return;
+      const opt = Array.from(multiSel.options).find(o => String(o.value) === String(primarySel.value));
+      if (opt) opt.selected = true;
+    }
+
+    function collectSelectedPropertyIds() {
+      const hidden = document.getElementById('case-tai-san');
+      const multiSel = document.getElementById('pr-properties-multi');
+      const ids = [];
+      if (hidden?.value) ids.push(String(hidden.value));
+      if (multiSel) {
+        Array.from(multiSel.selectedOptions || []).forEach(o => ids.push(String(o.value)));
+      }
+      return Array.from(new Set(ids.filter(Boolean)));
+    }
+
+    document.getElementById('pr-tai-san-select')?.addEventListener('change', () => {
+      syncPrimaryPropertySelection();
+      recalcShares();
+    });
+
+    document.getElementById('pr-properties-multi')?.addEventListener('change', () => {
+      const hidden = document.getElementById('case-tai-san');
+      const primarySel = document.getElementById('pr-tai-san-select');
+      const selected = collectSelectedPropertyIds();
+      if (!selected.length) {
+        if (hidden) hidden.value = '';
+        if (primarySel) primarySel.value = '';
+        return;
+      }
+      if (!hidden?.value || !selected.includes(String(hidden.value))) {
+        if (hidden) hidden.value = selected[0];
+        if (primarySel) primarySel.value = selected[0];
+      }
+    });
+
+    syncPrimaryPropertySelection();
+
     document.getElementById('btn-add-prop')?.addEventListener('click', async () => {
       const err = document.getElementById('inline-prop-error');
       err.classList.add('d-none'); err.textContent = '';
@@ -2875,6 +3271,14 @@ endif %}
       opt.textContent = `${p.so_serial} — Thửa ${p.so_thua_dat || '?'} (${(p.dia_chi || '').slice(0, 40)}...)`;
       sel.appendChild(opt);
       sel.value = p.id;
+      const multi = document.getElementById('pr-properties-multi');
+      if (multi) {
+        const optMulti = document.createElement('option');
+        optMulti.value = p.id;
+        optMulti.textContent = `${p.so_serial} - ${p.so_thua_dat || '?'} / ${p.so_to_ban_do || '?'}`;
+        optMulti.selected = true;
+        multi.appendChild(optMulti);
+      }
       const hidden = document.getElementById('case-tai-san');
       if (hidden) hidden.value = p.id;
     });
@@ -3024,10 +3428,18 @@ endif %}
       const sel = document.getElementById('pr-tai-san-select');
       const hidden = document.getElementById('case-tai-san');
       if (sel && hidden && !hidden.value && sel.value) hidden.value = sel.value;
+      syncPrimaryPropertySelection();
       // Sync noi_niem_yet từ visible input vào hidden field
       const noiInput = document.getElementById('pr-noi-niem-yet');
       const noiFld = document.getElementById('case-noi-niem-yet');
       if (noiInput && noiFld) noiFld.value = noiInput.value;
+      const propertyHolder = document.getElementById('case-property-ids-holder');
+      if (propertyHolder) {
+        propertyHolder.innerHTML = '';
+        collectSelectedPropertyIds().forEach(pid => {
+          propertyHolder.insertAdjacentHTML('beforeend', `<input type="hidden" name="property_ids" value="${pid}">`);
+        });
+      }
       const holder = document.getElementById('participants-hidden');
       holder.innerHTML = '';
 
