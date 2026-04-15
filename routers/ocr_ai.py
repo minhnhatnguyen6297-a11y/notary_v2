@@ -270,6 +270,29 @@ def parse_cccd_qr(text: str) -> dict[str, str] | None:
             if not expiry and _looks_like_label(part, ["co gia tri den", "ngay het han", "date of expiry"]):
                 expiry = dates[-1]
 
+    # Canonical CCCD QR payload is often positional without labels:
+    # new_id|old_id|name|dob(ddmmyyyy)|gender|address|issue(ddmmyyyy)|...
+    has_pipe_style = "|" in raw and len(parts) >= 6
+    if has_pipe_style:
+        if not name and len(parts) >= 3 and not re.search(r"\d", parts[2]):
+            name = _clean_text(parts[2])
+        if not birth and len(parts) >= 4:
+            compact_dob = re.sub(r"\s+", "", parts[3] or "")
+            if re.fullmatch(r"\d{8}", compact_dob):
+                birth = _normalize_date(f"{compact_dob[0:2]}/{compact_dob[2:4]}/{compact_dob[4:8]}")
+        if not gender and len(parts) >= 5:
+            g = _normalize_gender(parts[4])
+            if g:
+                gender = g
+        if not address and len(parts) >= 6:
+            candidate_addr = _clean_text(parts[5])
+            if candidate_addr and not _looks_like_label(candidate_addr, ["bo cong an", "ministry", "public security"]):
+                address = candidate_addr
+        if not issue and len(parts) >= 7:
+            compact_issue = re.sub(r"\s+", "", parts[6] or "")
+            if re.fullmatch(r"\d{8}", compact_issue):
+                issue = _normalize_date(f"{compact_issue[0:2]}/{compact_issue[2:4]}/{compact_issue[4:8]}")
+
     all_dates: list[str] = []
     for part in parts:
         all_dates.extend(collect_dates(part))
@@ -295,6 +318,17 @@ def parse_cccd_qr(text: str) -> dict[str, str] | None:
         candidates = [d for d in all_dates if year_of(d) >= now_year]
         if candidates:
             expiry = sorted(candidates, key=year_of)[-1]
+
+    if not address:
+        for part in parts:
+            candidate = _clean_text(part)
+            if not candidate:
+                continue
+            folded = _fold_text(candidate)
+            if re.search(r"\b(thon|to|to dan pho|tt|xa|phuong|huyen|quan|tinh|thanh pho|tp)\b", folded) or "," in candidate:
+                if not re.search(r"bo cong an|ministry|public security|cong hoa|socialist", folded):
+                    address = candidate
+                    break
 
     result = _normalize_person_data(
         {
@@ -574,12 +608,20 @@ def _extract_address(lines: list[str]) -> str:
     return ""
 
 
-def _extract_issue_date(lines: list[str]) -> str:
-    for line in lines:
-        if _looks_like_label(line, ["ngay cap", "date of issue"]):
+def _extract_issue_date(lines: list[str], side: str = "unknown") -> str:
+    labels = ["ngay cap", "date of issue"]
+    if side == "back":
+        labels.extend(["ngay thang nam", "date month year"])
+
+    for idx, line in enumerate(lines):
+        if _looks_like_label(line, labels):
             dates = _extract_dates_from_line(line)
             if dates:
                 return dates[0]
+            if idx + 1 < len(lines):
+                next_dates = _extract_dates_from_line(lines[idx + 1])
+                if next_dates:
+                    return next_dates[0]
     return ""
 
 
@@ -625,7 +667,7 @@ def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]
             "ngay_sinh": _extract_birth_date(cleaned_lines),
             "gioi_tinh": _extract_gender(cleaned_lines),
             "dia_chi": _extract_address(cleaned_lines),
-            "ngay_cap": _extract_issue_date(cleaned_lines),
+            "ngay_cap": _extract_issue_date(cleaned_lines, side=side),
             "ngay_het_han": "",
         }
     )
