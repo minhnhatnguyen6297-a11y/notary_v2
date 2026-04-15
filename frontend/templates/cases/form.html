@@ -1270,7 +1270,7 @@ endif %}
                 onchange="propertyOcrHandleFiles(this.files)">
               <div style="font-size:28px;margin-bottom:6px;">📄</div>
               <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Tải ảnh sổ đỏ/sổ hồng</div>
-              <div style="font-size:11px;color:#64748b;">Nhận nhiều ảnh cùng lúc</div>
+              <div style="font-size:11px;color:#64748b;">Tải nhiều ảnh, chọn 1 mặt trước + 1 mặt sau bằng radio</div>
             </div>
             <div class="d-flex gap-2">
               <button class="btn btn-sm btn-success flex-grow-1" id="property-ocr-btn-extract"
@@ -1786,6 +1786,8 @@ endif %}
     (() => {
       let propertyQueue = [];
       let propertyResults = [];
+      let propertyFrontId = '';
+      let propertyBackId = '';
 
       const fold = (s) => String(s || '')
         .normalize('NFD')
@@ -1815,6 +1817,31 @@ endif %}
         return '<span style="color:#94a3b8">Chờ xử lý</span>';
       }
 
+      function statusHtml(status) {
+        if (status === 'done') return '<span style="color:#16a34a">OCR xong</span>';
+        if (status === 'error') return '<span style="color:#dc2626">Loi OCR</span>';
+        if (status === 'running') return '<span style="color:#2563eb">Dang OCR</span>';
+        return '<span style="color:#94a3b8">Cho xu ly</span>';
+      }
+
+      function getQueueItem(id) {
+        return propertyQueue.find(x => x.id === id) || null;
+      }
+
+      function roleValidity() {
+        if (!propertyQueue.length) return { ok: false, message: 'Chua co anh tai san.' };
+        if (!propertyFrontId || !propertyBackId) return { ok: false, message: 'Chon du 1 mat truoc va 1 mat sau.' };
+        if (propertyFrontId === propertyBackId) return { ok: false, message: 'Mat truoc va mat sau khong duoc trung.' };
+        if (!getQueueItem(propertyFrontId) || !getQueueItem(propertyBackId)) return { ok: false, message: 'Cap anh da thay doi, vui long chon lai.' };
+        return { ok: true, message: '' };
+      }
+
+      function syncExtractButtonState() {
+        const btn = document.getElementById('property-ocr-btn-extract');
+        if (!btn) return;
+        btn.disabled = !roleValidity().ok;
+      }
+
       async function fileToDataUrl(file) {
         return new Promise(resolve => {
           const reader = new FileReader();
@@ -1832,24 +1859,36 @@ endif %}
         if (!propertyQueue.length) {
           wrap.appendChild(empty);
           empty.style.display = 'block';
-          document.getElementById('property-ocr-btn-extract').disabled = true;
+          syncExtractButtonState();
           return;
         }
         empty.style.display = 'none';
         for (const item of propertyQueue) {
+          const isFront = propertyFrontId === item.id;
+          const isBack = propertyBackId === item.id;
           const row = document.createElement('div');
-          row.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;';
+          row.style.cssText = `display:flex;align-items:center;gap:8px;background:#fff;border:1px solid ${isFront || isBack ? '#22c55e' : '#e5e7eb'};border-radius:6px;padding:6px 8px;`;
           row.innerHTML = `
             <img src="${item.preview || ''}" style="width:44px;height:30px;object-fit:cover;border-radius:3px;flex-shrink:0;background:#f1f5f9;">
             <div style="flex:1;min-width:0;">
               <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.name}</div>
               <div style="font-size:11px;">${statusHtml(item.status)}</div>
+              <div style="margin-top:4px;display:flex;gap:10px;align-items:center;font-size:11px;color:#334155;">
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="radio" name="property-role-front" ${isFront ? 'checked' : ''} onchange="propertyOcrSelectRole('${item.id}','front')">
+                  Mat truoc
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+                  <input type="radio" name="property-role-back" ${isBack ? 'checked' : ''} onchange="propertyOcrSelectRole('${item.id}','back')">
+                  Mat sau
+                </label>
+              </div>
             </div>
             <button type="button" onclick="propertyOcrRemoveItem('${item.id}')" style="border:none;background:none;color:#94a3b8;">✕</button>
           `;
           wrap.appendChild(row);
         }
-        document.getElementById('property-ocr-btn-extract').disabled = false;
+        syncExtractButtonState();
       }
 
       function renderPropertyResults() {
@@ -1867,13 +1906,13 @@ endif %}
         list.innerHTML = '';
 
         propertyResults.forEach((item, idx) => {
-          if (item.kind === 'property') {
+          if (item.kind === 'pair') {
             const d = item.data || {};
             const box = document.createElement('div');
             box.style.cssText = 'border:1px solid #d1fae5;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#f0fdf4;';
             box.innerHTML = `
               <div style="font-size:12px;font-weight:700;color:#065f46;margin-bottom:6px;">
-                <i class="bi bi-house me-1"></i>${d.so_serial || 'Chưa có serial'} <span style="color:#64748b;font-weight:400;">(${item.file || 'unknown'})</span>
+                <i class="bi bi-house me-1"></i>${d.so_serial || 'Chưa có serial'}
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
                 <div><span style="color:#64748b;">Số vào sổ:</span> ${d.so_vao_so || '—'}</div>
@@ -1882,7 +1921,9 @@ endif %}
                 <div><span style="color:#64748b;">Số tờ:</span> ${d.so_to_ban_do || '—'}</div>
                 <div style="grid-column:1/-1;"><span style="color:#64748b;">Địa chỉ:</span> ${d.dia_chi || '—'}</div>
               </div>
-              ${item.warnings?.length ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">Thiếu: ${item.warnings.join(', ')}</div>` : ''}
+              ${Array.isArray(item.missingFields) && item.missingFields.length ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">Thiếu: ${item.missingFields.join(', ')}</div>` : ''}
+              ${Array.isArray(item.warnings) && item.warnings.length ? `<div style="margin-top:4px;font-size:11px;color:#92400e;">Cảnh báo: ${item.warnings.join(', ')}</div>` : ''}
+              <div style="margin-top:4px;font-size:11px;color:#475569;">Front: ${item.perSide?.front?.doc_type || 'unknown'} | Back: ${item.perSide?.back?.doc_type || 'unknown'}</div>
               <div style="text-align:right;margin-top:8px;">
                 <button class="btn btn-sm btn-outline-success" onclick="propertyOcrFill(${idx})">
                   <i class="bi bi-check2 me-1"></i>Điền vào form
@@ -1890,14 +1931,14 @@ endif %}
               </div>
             `;
             list.appendChild(box);
-          } else {
+          } else if (item.kind === 'error') {
             const box = document.createElement('div');
-            box.style.cssText = 'border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff;';
+            box.style.cssText = 'border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:10px;background:#fff1f2;';
             box.innerHTML = `
-              <div style="font-size:12px;font-weight:600;color:#334155;">
-                <i class="bi bi-skip-forward me-1"></i>${item.file || 'unknown'}
+              <div style="font-size:12px;font-weight:600;color:#991b1b;">
+                <i class="bi bi-x-circle me-1"></i>${item.file || 'unknown'}
               </div>
-              <div style="font-size:11px;color:#64748b;">Không nhận diện là giấy tờ tài sản, đã bỏ qua.</div>
+              <div style="font-size:11px;color:#7f1d1d;">${item.error || 'Loi OCR'}</div>
             `;
             list.appendChild(box);
           }
@@ -1926,7 +1967,7 @@ endif %}
 
       window.propertyOcrFill = function (idx) {
         const item = propertyResults[idx];
-        if (!item || item.kind !== 'property') return;
+        if (!item || item.kind !== 'pair') return;
         const d = item.data || {};
         setMainPropertyField('pr-so-serial', d.so_serial);
         setMainPropertyField('pr-so-vao-so', d.so_vao_so);
@@ -1935,17 +1976,31 @@ endif %}
         setMainPropertyField('pr-dia-chi', d.dia_chi);
         setMainPropertyField('pr-ngay-cap', normalizeDate(d.ngay_cap));
         setMainPropertyField('pr-co-quan', d.co_quan_cap);
+        setMainPropertyField('pr-hinh-thuc', d.hinh_thuc_su_dung);
         setMainPropertyField('pr-nguon-goc', d.nguon_goc);
         applyLoaiSo(d.loai_so);
 
-        const firstRow = document.querySelector('#land-rows tr');
-        if (firstRow) {
-          const loaiDatInput = firstRow.querySelector('.land-type');
-          const areaInput = firstRow.querySelector('.land-area');
-          const thoiHanInput = firstRow.querySelector('.land-term');
-          if (loaiDatInput && d.loai_dat) loaiDatInput.value = d.loai_dat;
-          if (areaInput && d.dien_tich) areaInput.value = d.dien_tich;
-          if (thoiHanInput && d.thoi_han) thoiHanInput.value = d.thoi_han;
+        const tbody = document.getElementById('land-rows');
+        const rows = Array.isArray(d.land_rows) ? d.land_rows : [];
+        if (tbody && rows.length && typeof addLandRow === 'function') {
+          tbody.innerHTML = '';
+          rows.forEach(r => {
+            const tr = addLandRow(r.loai_dat || '');
+            const areaInput = tr?.querySelector('.land-area');
+            const termInput = tr?.querySelector('.land-term');
+            if (areaInput && r.dien_tich) areaInput.value = r.dien_tich;
+            if (termInput && r.thoi_han) termInput.value = r.thoi_han;
+          });
+        } else {
+          const firstRow = document.querySelector('#land-rows tr');
+          if (firstRow) {
+            const loaiDatInput = firstRow.querySelector('.land-type');
+            const areaInput = firstRow.querySelector('.land-area');
+            const thoiHanInput = firstRow.querySelector('.land-term');
+            if (loaiDatInput && d.loai_dat) loaiDatInput.value = d.loai_dat;
+            if (areaInput && d.dien_tich) areaInput.value = d.dien_tich;
+            if (thoiHanInput && d.thoi_han) thoiHanInput.value = d.thoi_han;
+          }
         }
         if (typeof rebuildLandRowsValue === 'function') rebuildLandRowsValue();
 
@@ -1956,15 +2011,30 @@ endif %}
 
       window.propertyOcrRemoveItem = function (id) {
         propertyQueue = propertyQueue.filter(x => x.id !== id);
+        if (propertyFrontId === id) propertyFrontId = '';
+        if (propertyBackId === id) propertyBackId = '';
         renderPropertyQueue();
       };
 
       window.propertyOcrClearAll = function () {
         propertyQueue = [];
         propertyResults = [];
+        propertyFrontId = '';
+        propertyBackId = '';
         setPropSummary('');
         renderPropertyQueue();
         renderPropertyResults();
+      };
+
+      window.propertyOcrSelectRole = function (id, role) {
+        if (role === 'front') {
+          propertyFrontId = id;
+          if (propertyBackId === id) propertyBackId = '';
+        } else if (role === 'back') {
+          propertyBackId = id;
+          if (propertyFrontId === id) propertyFrontId = '';
+        }
+        renderPropertyQueue();
       };
 
       window.propertyOcrHandleFiles = async function (files) {
@@ -1973,6 +2043,11 @@ endif %}
           const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const preview = await fileToDataUrl(file);
           propertyQueue.push({ id, file, name: file.name || 'image', preview, status: 'pending' });
+          if (!propertyFrontId) {
+            propertyFrontId = id;
+          } else if (!propertyBackId && propertyFrontId !== id) {
+            propertyBackId = id;
+          }
         }
         renderPropertyQueue();
       };
@@ -2035,6 +2110,78 @@ endif %}
           renderPropertyQueue();
           setPropSummary(`Lỗi OCR: ${err.message}`);
           if (typeof showToast === 'function') showToast(`Lỗi OCR tài sản: ${err.message}`, 'danger');
+        }
+      };
+
+      // Override: deterministic pair OCR (1 front + 1 back) with manual radio mapping.
+      window.propertyOcrExtract = async function () {
+        const valid = roleValidity();
+        if (!valid.ok) {
+          setPropSummary(valid.message);
+          if (typeof showToast === 'function') showToast(valid.message, 'warning');
+          renderPropertyQueue();
+          return;
+        }
+        const frontItem = getQueueItem(propertyFrontId);
+        const backItem = getQueueItem(propertyBackId);
+        if (!frontItem || !backItem) return;
+
+        propertyQueue = propertyQueue.map(x => ({
+          ...x,
+          status: x.id === propertyFrontId || x.id === propertyBackId ? 'running' : 'pending',
+        }));
+        renderPropertyQueue();
+        setPropSummary(`Dang OCR: ${frontItem.name} + ${backItem.name}`);
+
+        const fd = new FormData();
+        fd.append('front_file', frontItem.file, frontItem.name);
+        fd.append('back_file', backItem.file, backItem.name);
+        try {
+          const resp = await fetch('/api/ocr/analyze-property-pair', { method: 'POST', body: fd });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          const errors = Array.isArray(data.errors) ? data.errors : [];
+          const property = data.property && typeof data.property === 'object' ? data.property : null;
+          const perSide = data.per_side && typeof data.per_side === 'object' ? data.per_side : {};
+
+          propertyResults = [];
+          if (property) {
+            propertyResults.push({
+              kind: 'pair',
+              data: property,
+              perSide,
+              warnings: Array.isArray(data.warnings) ? data.warnings : [],
+              missingFields: Array.isArray(data.missing_fields) ? data.missing_fields : [],
+            });
+          }
+          errors.forEach(err => {
+            propertyResults.push({
+              kind: 'error',
+              file: String(err.filename || err.side || 'unknown'),
+              error: String(err.error || 'Loi OCR'),
+            });
+          });
+
+          const sideErrors = new Set(errors.map(e => String(e.side || '').toLowerCase()));
+          propertyQueue = propertyQueue.map(item => {
+            if (item.id !== propertyFrontId && item.id !== propertyBackId) return item;
+            if (item.id === propertyFrontId && sideErrors.has('front')) return { ...item, status: 'error' };
+            if (item.id === propertyBackId && sideErrors.has('back')) return { ...item, status: 'error' };
+            return { ...item, status: 'done' };
+          });
+          const summary = data.summary || {};
+          const missingFields = Array.isArray(data.missing_fields) ? data.missing_fields : [];
+          setPropSummary(`Xong trong ${summary.total_ms || '?'} ms.${missingFields.length ? ` Thieu: ${missingFields.join(', ')}` : ''}`);
+          renderPropertyQueue();
+          renderPropertyResults();
+        } catch (err) {
+          propertyQueue = propertyQueue.map(x => {
+            if (x.id === propertyFrontId || x.id === propertyBackId) return { ...x, status: 'error' };
+            return x;
+          });
+          renderPropertyQueue();
+          setPropSummary(`Loi OCR: ${err.message}`);
+          if (typeof showToast === 'function') showToast(`Loi OCR tai san: ${err.message}`, 'danger');
         }
       };
 
@@ -2180,7 +2327,7 @@ endif %}
     // ─── DRAG STATE (HTML5 NATIVE FOR REACT FLOW) ──────────────────────────────────────────────────────────────
     window.handleNativeDragStart = function (evt, personData) {
       evt.dataTransfer.setData('application/json', personData);
-      evt.dataTransfer.effectAllowed = 'copy';
+      evt.dataTransfer.effectAllowed = 'all';
     }
 
     let dragState = null;
@@ -2861,7 +3008,16 @@ endif %}
       chosenClass: 'drag-chosen',
       draggable: '.person-row',
       onStart: onDragStart,
-      onEnd: onDragEnd
+      onEnd: onDragEnd,
+      setData: function(dataTransfer, dragEl) {
+        const data = JSON.stringify({
+          id: dragEl.dataset.id, name: dragEl.dataset.name || '',
+          doc: dragEl.dataset.doc || '', gender: dragEl.dataset.gender || '',
+          birth: dragEl.dataset.birth || '', death: dragEl.dataset.death || ''
+        });
+        dataTransfer.setData('application/json', data);
+        dataTransfer.setData('Text', data);
+      }
     });
 
     function updateGrandZones() {
@@ -3502,13 +3658,10 @@ endif %}
     });
     // Load React app
   </script>
-  <link rel="stylesheet" href="/static/vendor/reactflow.style.css">
   <script src="/static/vendor/react.production.min.js"></script>
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
-  <script src="/static/vendor/reactflow.umd.js"></script>
-  <script src="/static/vendor/dagre.min.js"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260415b"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────

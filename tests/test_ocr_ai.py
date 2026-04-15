@@ -219,6 +219,45 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["summary"]["properties"], 1)
         self.assertEqual(result["summary"]["unknowns"], 1)
 
+    async def test_analyze_property_pair_merges_front_back_with_precedence(self):
+        front = make_upload("front.jpg")
+        back = make_upload("back.jpg")
+        outputs = [
+            [
+                "GIAY CHUNG NHAN",
+                "QUYEN SU DUNG DAT",
+                "So A 692942",
+                "Thua dat: 66",
+                "To ban do so: 29",
+                "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+            ],
+            [
+                "GIAY CHUNG NHAN",
+                "So vao so cap GCN: VP00166",
+                "Nam Dinh, ngay 10/07/2023",
+                "VAN PHONG DANG KY DAT DAI",
+            ],
+        ]
+
+        async def fake_call(*args, **kwargs):
+            return outputs.pop(0)
+
+        with (
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+            mock.patch.object(ocr_ai, "_should_retry_property_rotate", return_value=False),
+        ):
+            result = await ocr_ai.analyze_property_pair(front, back)
+
+        prop = result["property"]
+        self.assertEqual(prop["so_serial"], "A 692942")
+        self.assertEqual(prop["so_vao_so"], "VP00166")
+        self.assertEqual(prop["ngay_cap"], "10/07/2023")
+        self.assertEqual(prop["so_thua_dat"], "66")
+        self.assertEqual(prop["so_to_ban_do"], "29")
+        self.assertEqual(result["per_side"]["front"]["doc_type"], "property")
+        self.assertEqual(result["per_side"]["back"]["doc_type"], "property")
+
     def test_pair_persons_allows_fuzzy_id_when_name_matches(self):
         front = {
             "ho_ten": "DƯƠNG THỊ XUÂN",

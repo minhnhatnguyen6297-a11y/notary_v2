@@ -724,6 +724,44 @@ def _extract_id(lines: list[str]) -> str:
 _PROPERTY_BOOK_TYPE_OLD = "Giay chung nhan quyen su dung dat"
 _PROPERTY_BOOK_TYPE_PINK_FULL = "Giay chung nhan quyen su dung dat, quyen so huu nha o va tai san khac gan lien voi dat"
 _PROPERTY_BOOK_TYPE_PINK_SHORT = "Giay chung nhan quyen su dung dat, quyen so huu tai san gan lien voi dat"
+_PROPERTY_FRONT_PRIORITY_FIELDS = {"so_serial", "loai_so"}
+_PROPERTY_BACK_PRIORITY_FIELDS = {"so_vao_so", "ngay_cap", "co_quan_cap"}
+_PROPERTY_REQUIRED_CORE_FIELDS = ["so_serial", "so_vao_so", "dia_chi", "ngay_cap"]
+_PROPERTY_FORM_FIELDS = [
+    "so_serial",
+    "so_vao_so",
+    "so_thua_dat",
+    "so_to_ban_do",
+    "dia_chi",
+    "loai_so",
+    "hinh_thuc_su_dung",
+    "nguon_goc",
+    "ngay_cap",
+    "co_quan_cap",
+    "loai_dat",
+    "thoi_han",
+    "dien_tich",
+]
+_PROPERTY_LAND_TYPE_CODES = {
+    "ONT",
+    "ODT",
+    "CLN",
+    "NTS",
+    "LUC",
+    "BHK",
+    "SKC",
+    "TMD",
+    "DV",
+    "DGT",
+    "DKV",
+    "DHT",
+}
+
+
+def _property_has_value(value: Any) -> bool:
+    if isinstance(value, list):
+        return len(value) > 0
+    return bool(_clean_text(value))
 
 
 def _looks_like_property_doc(lines: list[str]) -> bool:
@@ -914,6 +952,74 @@ def _extract_property_field_by_label(lines: list[str], labels: list[str]) -> str
     return ""
 
 
+def _extract_property_land_use_form(lines: list[str]) -> str:
+    return _extract_property_field_by_label(lines, ["hinh thuc su dung"])
+
+
+def _extract_property_land_rows(lines: list[str]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for line in lines:
+        upper = _clean_text(line).upper()
+        if not upper:
+            continue
+        code_match = re.search(r"\b([A-Z]{2,4})\b", upper)
+        if not code_match:
+            continue
+        land_code = code_match.group(1)
+        if land_code not in _PROPERTY_LAND_TYPE_CODES:
+            continue
+        area_match = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)(?:\s*(?:M2|M²))?", upper)
+        if not area_match:
+            continue
+        term = ""
+        lower = _fold_text(line)
+        if "lau dai" in lower:
+            term = "Lau dai"
+        else:
+            term_match = re.search(r"(\d{1,3}\s*nam)", lower)
+            if term_match:
+                term = _clean_text(term_match.group(1))
+        rows.append(
+            {
+                "loai_dat": land_code,
+                "dien_tich": area_match.group(1).replace(",", "."),
+                "thoi_han": term,
+            }
+        )
+
+    unique_rows: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (row.get("loai_dat", ""), row.get("dien_tich", ""), row.get("thoi_han", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_rows.append(row)
+    return unique_rows
+
+
+def _sum_land_row_area(rows: list[dict[str, str]]) -> str:
+    total = 0.0
+    valid = False
+    for row in rows:
+        raw = str(row.get("dien_tich") or "").replace(",", ".")
+        try:
+            total += float(raw)
+            valid = True
+        except Exception:
+            continue
+    if not valid:
+        return ""
+    return f"{total:.2f}".rstrip("0").rstrip(".")
+
+
+def _normalize_property_side(side: str) -> str:
+    normalized = _clean_text(side).lower()
+    if normalized in {"front", "back"}:
+        return normalized
+    return "unknown"
+
+
 def _extract_property_issue_date(lines: list[str]) -> str:
     authority_markers = [
         "uy ban nhan dan",
@@ -977,7 +1083,26 @@ def _extract_property_authority(lines: list[str], issue_date: str) -> str:
     return ""
 
 
-def _normalize_property_data(data: dict[str, Any]) -> dict[str, str]:
+def _normalize_property_data(data: dict[str, Any]) -> dict[str, Any]:
+    rows_in = data.get("land_rows")
+    normalized_rows: list[dict[str, str]] = []
+    if isinstance(rows_in, list):
+        for row in rows_in:
+            if not isinstance(row, dict):
+                continue
+            loai_dat = _clean_text(row.get("loai_dat")).upper()
+            dien_tich = _clean_text(row.get("dien_tich")).replace(",", ".")
+            thoi_han = _clean_text(row.get("thoi_han"))
+            if not (loai_dat or dien_tich or thoi_han):
+                continue
+            normalized_rows.append(
+                {
+                    "loai_dat": loai_dat,
+                    "dien_tich": dien_tich,
+                    "thoi_han": thoi_han,
+                }
+            )
+
     return {
         "loai_so": _clean_text(data.get("loai_so")),
         "so_serial": _clean_property_code(str(data.get("so_serial") or "")),
@@ -990,18 +1115,54 @@ def _normalize_property_data(data: dict[str, Any]) -> dict[str, str]:
         "co_quan_cap": _clean_text(data.get("co_quan_cap")),
         "loai_dat": _clean_text(data.get("loai_dat")),
         "thoi_han": _clean_text(data.get("thoi_han")),
+        "hinh_thuc_su_dung": _clean_text(data.get("hinh_thuc_su_dung")),
         "nguon_goc": _clean_text(data.get("nguon_goc")),
+        "land_rows": normalized_rows,
     }
 
 
-def _normalize_property_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]:
+def _fill_property_from_land_rows(data: dict[str, Any]) -> None:
+    rows = data.get("land_rows")
+    if not isinstance(rows, list) or not rows:
+        return
+    if not _clean_text(data.get("dien_tich")):
+        total_area = _sum_land_row_area(rows)
+        if total_area:
+            data["dien_tich"] = total_area
+    if not _clean_text(data.get("loai_dat")):
+        first_type = _clean_text(rows[0].get("loai_dat")) if isinstance(rows[0], dict) else ""
+        if first_type:
+            data["loai_dat"] = first_type
+    if not _clean_text(data.get("thoi_han")):
+        terms: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            term = _clean_text(row.get("thoi_han"))
+            if term and term not in terms:
+                terms.append(term)
+        if terms:
+            data["thoi_han"] = ", ".join(terms)
+
+
+def _property_missing_fields(data: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for key in _PROPERTY_REQUIRED_CORE_FIELDS:
+        if not _property_has_value(data.get(key)):
+            missing.append(key)
+    return missing
+
+
+def _normalize_property_ocr_doc(lines: list[str], filename: str, side: str = "unknown") -> dict[str, Any]:
+    normalized_side = _normalize_property_side(side)
     cleaned_lines = [_clean_text(ln) for ln in lines if _clean_text(ln)]
     if not cleaned_lines:
-        return {"doc_type": "unknown", "side": "unknown", "data": {}, "filename": filename, "text_lines": []}
+        return {"doc_type": "unknown", "side": normalized_side, "data": {}, "filename": filename, "text_lines": []}
     if not _looks_like_property_doc(cleaned_lines):
-        return {"doc_type": "unknown", "side": "unknown", "data": {}, "filename": filename, "text_lines": cleaned_lines}
+        return {"doc_type": "unknown", "side": normalized_side, "data": {}, "filename": filename, "text_lines": cleaned_lines}
 
     issue_date = _extract_property_issue_date(cleaned_lines)
+    land_rows = _extract_property_land_rows(cleaned_lines)
     data = _normalize_property_data(
         {
             "loai_so": _classify_property_book_type(cleaned_lines),
@@ -1015,21 +1176,23 @@ def _normalize_property_ocr_doc(lines: list[str], filename: str) -> dict[str, An
             "co_quan_cap": _extract_property_authority(cleaned_lines, issue_date),
             "loai_dat": _extract_property_field_by_label(cleaned_lines, ["loai dat", "muc dich su dung"]),
             "thoi_han": _extract_property_field_by_label(cleaned_lines, ["thoi han su dung", "thoi han"]),
+            "hinh_thuc_su_dung": _extract_property_land_use_form(cleaned_lines),
             "nguon_goc": _extract_property_field_by_label(cleaned_lines, ["nguon goc su dung", "nguon goc"]),
+            "land_rows": land_rows,
         }
     )
-    non_empty = sum(1 for v in data.values() if _clean_text(v))
-    warnings = []
-    for key in ("so_serial", "so_vao_so", "dia_chi", "ngay_cap"):
-        if not _clean_text(data.get(key)):
-            warnings.append(key)
+    _fill_property_from_land_rows(data)
+    non_empty = sum(1 for v in data.values() if _property_has_value(v))
+    missing_fields = _property_missing_fields(data)
+    warnings = list(missing_fields)
     return {
         "doc_type": "property" if non_empty > 0 else "unknown",
-        "side": "unknown",
+        "side": normalized_side,
         "data": data if non_empty > 0 else {},
         "filename": filename,
         "text_lines": cleaned_lines,
         "warnings": warnings,
+        "missing_fields": missing_fields,
     }
 
 
@@ -1039,10 +1202,10 @@ def _property_doc_score(doc: dict[str, Any]) -> int:
     data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
     score = 0
     for key in ("so_serial", "so_vao_so", "dia_chi", "ngay_cap"):
-        if _clean_text(data.get(key)):
+        if _property_has_value(data.get(key)):
             score += 2
-    for key in ("so_thua_dat", "so_to_ban_do", "dien_tich", "co_quan_cap", "loai_so"):
-        if _clean_text(data.get(key)):
+    for key in ("so_thua_dat", "so_to_ban_do", "dien_tich", "co_quan_cap", "loai_so", "land_rows"):
+        if _property_has_value(data.get(key)):
             score += 1
     return score
 
@@ -1052,8 +1215,97 @@ def _should_retry_property_rotate(doc: dict[str, Any]) -> bool:
         return False
     data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
     critical = ["so_serial", "so_vao_so", "dia_chi", "ngay_cap"]
-    filled = sum(1 for key in critical if _clean_text(data.get(key)))
+    filled = sum(1 for key in critical if _property_has_value(data.get(key)))
     return filled < 3
+
+
+def _count_alpha_num(text: str) -> int:
+    return sum(1 for ch in text if ch.isalnum())
+
+
+def _property_value_clean_score(field: str, value: Any) -> tuple[int, int, int]:
+    if isinstance(value, list):
+        return (1 if len(value) > 0 else 0, len(value), 0)
+    text = _clean_text(value)
+    if not text:
+        return (0, 0, 0)
+    quality = 1
+    if field == "dia_chi":
+        quality += 2 if "," in text else 0
+        quality += 1 if len(text.split()) >= 4 else 0
+    elif field in {"so_thua_dat", "so_to_ban_do", "dien_tich"}:
+        quality += 1 if re.search(r"\d", text) else 0
+    elif field in {"loai_dat"}:
+        quality += 2 if _clean_text(text).upper() in _PROPERTY_LAND_TYPE_CODES else 0
+    return (quality, len(text), _count_alpha_num(text))
+
+
+def _pick_property_field_value(field: str, front_value: Any, back_value: Any) -> tuple[Any, str]:
+    front_has = _property_has_value(front_value)
+    back_has = _property_has_value(back_value)
+    if field in _PROPERTY_FRONT_PRIORITY_FIELDS:
+        if front_has:
+            return front_value, "front"
+        if back_has:
+            return back_value, "back"
+        return "", "none"
+    if field in _PROPERTY_BACK_PRIORITY_FIELDS:
+        if back_has:
+            return back_value, "back"
+        if front_has:
+            return front_value, "front"
+        return "", "none"
+    if front_has and not back_has:
+        return front_value, "front"
+    if back_has and not front_has:
+        return back_value, "back"
+    if not front_has and not back_has:
+        return "", "none"
+    if isinstance(front_value, list) and isinstance(back_value, list):
+        if len(back_value) > len(front_value):
+            return back_value, "back"
+        return front_value, "front"
+    if _property_value_clean_score(field, back_value) > _property_value_clean_score(field, front_value):
+        return back_value, "back"
+    return front_value, "front"
+
+
+def _merge_property_pair(front_doc: dict[str, Any], back_doc: dict[str, Any]) -> dict[str, Any]:
+    front_data = front_doc.get("data") if isinstance(front_doc.get("data"), dict) else {}
+    back_data = back_doc.get("data") if isinstance(back_doc.get("data"), dict) else {}
+    merged_seed: dict[str, Any] = {}
+    field_sources: dict[str, str] = {}
+
+    for field in _PROPERTY_FORM_FIELDS:
+        chosen, source = _pick_property_field_value(field, front_data.get(field), back_data.get(field))
+        merged_seed[field] = chosen
+        if source in {"front", "back"}:
+            field_sources[field] = source
+
+    front_rows = front_data.get("land_rows") if isinstance(front_data.get("land_rows"), list) else []
+    back_rows = back_data.get("land_rows") if isinstance(back_data.get("land_rows"), list) else []
+    merged_rows, rows_source = _pick_property_field_value("land_rows", front_rows, back_rows)
+    merged_seed["land_rows"] = merged_rows if isinstance(merged_rows, list) else []
+    if rows_source in {"front", "back"}:
+        field_sources["land_rows"] = rows_source
+
+    merged = _normalize_property_data(merged_seed)
+    _fill_property_from_land_rows(merged)
+
+    missing_fields = _property_missing_fields(merged)
+    warnings: list[str] = []
+    if front_doc.get("doc_type") != "property":
+        warnings.append("front_not_property")
+    if back_doc.get("doc_type") != "property":
+        warnings.append("back_not_property")
+    warnings.extend(f"missing_{field}" for field in missing_fields)
+
+    return {
+        **merged,
+        "field_sources": field_sources,
+        "missing_fields": missing_fields,
+        "warnings": warnings,
+    }
 
 
 def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]:
@@ -1448,6 +1700,7 @@ async def _process_single_property_image(
     api_key: str,
     ai_semaphore: asyncio.Semaphore,
     client: httpx.AsyncClient,
+    side: str = "unknown",
 ) -> dict[str, Any]:
     filename = upload.filename or "unknown"
     file_bytes = await upload.read()
@@ -1467,7 +1720,7 @@ async def _process_single_property_image(
             filename=filename,
             enable_rotate=False,
         )
-    doc = _normalize_property_ocr_doc(lines, filename)
+    doc = _normalize_property_ocr_doc(lines, filename, side=side)
 
     if _should_retry_property_rotate(doc):
         try:
@@ -1480,7 +1733,7 @@ async def _process_single_property_image(
                     filename=filename,
                     enable_rotate=True,
                 )
-            rotated_doc = _normalize_property_ocr_doc(lines_rotate, filename)
+            rotated_doc = _normalize_property_ocr_doc(lines_rotate, filename, side=side)
             if _property_doc_score(rotated_doc) >= _property_doc_score(doc):
                 doc = rotated_doc
             used_rotate_retry = True
@@ -1494,6 +1747,7 @@ async def _process_single_property_image(
 
     return {
         "filename": filename,
+        "side": _normalize_property_side(side),
         "doc": doc,
         "used_rotate_retry": used_rotate_retry,
     }
@@ -1649,6 +1903,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
                 api_key=api_key,
                 ai_semaphore=ai_semaphore,
                 client=client,
+                side="unknown",
             )
             for upload in files
         ]
@@ -1672,6 +1927,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
         doc_type = str(doc.get("doc_type") or "unknown")
         data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
         warnings = doc.get("warnings") if isinstance(doc.get("warnings"), list) else []
+        missing_fields = doc.get("missing_fields") if isinstance(doc.get("missing_fields"), list) else []
         raw_results.append(
             {
                 "doc_type": doc_type,
@@ -1681,6 +1937,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
                 "data": data,
                 "text_lines": doc.get("text_lines") if isinstance(doc.get("text_lines"), list) else [],
                 "warnings": warnings,
+                "missing_fields": missing_fields,
                 "status": "ok" if doc_type == "property" else "skipped",
             }
         )
@@ -1692,6 +1949,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
                     "_source": "AI",
                     "source_type": "AI",
                     "warnings": warnings,
+                    "missing_fields": missing_fields,
                 }
             )
         else:
@@ -1724,6 +1982,127 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
             "rotate_retry": used_rotate_retry,
             "total_ms": _ms(total_ms),
         },
+    }
+
+
+@router.post("/analyze-property-pair")
+async def analyze_property_pair(
+    front_file: UploadFile = File(...),
+    back_file: UploadFile = File(...),
+):
+    t_total = perf_counter()
+    model = _get_model()
+    api_key = _get_api_key(model)
+    ai_semaphore = asyncio.Semaphore(OCR_AI_CONCURRENCY)
+
+    errors: list[dict[str, Any]] = []
+    front_result: dict[str, Any] | None = None
+    back_result: dict[str, Any] | None = None
+
+    async with httpx.AsyncClient(timeout=AI_TIMEOUT_SECONDS) as client:
+        tasks = [
+            _process_single_property_image(
+                front_file,
+                model=model,
+                api_key=api_key,
+                ai_semaphore=ai_semaphore,
+                client=client,
+                side="front",
+            ),
+            _process_single_property_image(
+                back_file,
+                model=model,
+                api_key=api_key,
+                ai_semaphore=ai_semaphore,
+                client=client,
+                side="back",
+            ),
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for idx, item in enumerate(results):
+            side = "front" if idx == 0 else "back"
+            filename = front_file.filename if side == "front" else back_file.filename
+            safe_filename = str(filename or f"{side}.jpg")
+            if isinstance(item, Exception):
+                detail = item.detail if isinstance(item, HTTPException) else str(item)
+                errors.append({"side": side, "filename": safe_filename, "error": str(detail)})
+                continue
+            if side == "front":
+                front_result = item
+            else:
+                back_result = item
+
+    front_doc = (
+        (front_result or {}).get("doc")
+        if isinstance((front_result or {}).get("doc"), dict)
+        else {"doc_type": "unknown", "side": "front", "data": {}, "filename": str(front_file.filename or "front.jpg")}
+    )
+    back_doc = (
+        (back_result or {}).get("doc")
+        if isinstance((back_result or {}).get("doc"), dict)
+        else {"doc_type": "unknown", "side": "back", "data": {}, "filename": str(back_file.filename or "back.jpg")}
+    )
+
+    merged = _merge_property_pair(front_doc, back_doc)
+    property_data = {
+        **{k: merged.get(k, "") for k in _PROPERTY_FORM_FIELDS},
+        "land_rows": merged.get("land_rows") if isinstance(merged.get("land_rows"), list) else [],
+        "field_sources": merged.get("field_sources") if isinstance(merged.get("field_sources"), dict) else {},
+        "missing_fields": merged.get("missing_fields") if isinstance(merged.get("missing_fields"), list) else [],
+        "warnings": merged.get("warnings") if isinstance(merged.get("warnings"), list) else [],
+        "_source": "AI",
+        "source_type": "AI",
+        "_files": [
+            str(front_doc.get("filename") or front_file.filename or "front.jpg"),
+            str(back_doc.get("filename") or back_file.filename or "back.jpg"),
+        ],
+    }
+
+    per_side = {
+        "front": {
+            "file": str(front_doc.get("filename") or front_file.filename or "front.jpg"),
+            "doc_type": str(front_doc.get("doc_type") or "unknown"),
+            "data": front_doc.get("data") if isinstance(front_doc.get("data"), dict) else {},
+            "warnings": front_doc.get("warnings") if isinstance(front_doc.get("warnings"), list) else [],
+            "missing_fields": front_doc.get("missing_fields") if isinstance(front_doc.get("missing_fields"), list) else [],
+            "status": "ok" if str(front_doc.get("doc_type") or "") == "property" else "skipped",
+        },
+        "back": {
+            "file": str(back_doc.get("filename") or back_file.filename or "back.jpg"),
+            "doc_type": str(back_doc.get("doc_type") or "unknown"),
+            "data": back_doc.get("data") if isinstance(back_doc.get("data"), dict) else {},
+            "warnings": back_doc.get("warnings") if isinstance(back_doc.get("warnings"), list) else [],
+            "missing_fields": back_doc.get("missing_fields") if isinstance(back_doc.get("missing_fields"), list) else [],
+            "status": "ok" if str(back_doc.get("doc_type") or "") == "property" else "skipped",
+        },
+    }
+
+    total_ms = perf_counter() - t_total
+    _log_ocr_ai(
+        "ocr_property_pair_done",
+        model=model,
+        front_file=per_side["front"]["file"],
+        back_file=per_side["back"]["file"],
+        front_doc_type=per_side["front"]["doc_type"],
+        back_doc_type=per_side["back"]["doc_type"],
+        missing_fields=len(property_data.get("missing_fields") or []),
+        errors=len(errors),
+        total_ms=_ms(total_ms),
+    )
+
+    return {
+        "property": property_data,
+        "per_side": per_side,
+        "warnings": property_data.get("warnings") or [],
+        "missing_fields": property_data.get("missing_fields") or [],
+        "summary": {
+            "model": model,
+            "total_ms": _ms(total_ms),
+            "errors": len(errors),
+            "front_doc_type": per_side["front"]["doc_type"],
+            "back_doc_type": per_side["back"]["doc_type"],
+        },
+        "errors": errors,
     }
 
 
