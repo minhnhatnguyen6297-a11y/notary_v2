@@ -45,6 +45,8 @@ OCR_AI_CONCURRENCY = max(1, int(os.getenv("OCR_AI_CONCURRENCY", "6")))
 AI_TIMEOUT_SECONDS = float(os.getenv("OCR_AI_TIMEOUT_SECONDS", "90"))
 AI_MAX_IMAGE_PX = max(640, int(os.getenv("QWEN_MAX_IMAGE_PX", "1800")))
 JPEG_QUALITY = 82
+PAIR_FUZZY_MAX_ID_MISMATCH = max(0, min(3, int(os.getenv("OCR_PAIR_FUZZY_MAX_ID_MISMATCH", "1"))))
+PAIR_FUZZY_NAME_THRESHOLD = float(os.getenv("OCR_PAIR_FUZZY_NAME_THRESHOLD", "0.95"))
 
 
 def _ms(seconds: float) -> float:
@@ -146,7 +148,7 @@ def _normalize_gender(value: Any) -> str:
     if re.search(r"\b(nam|male|m)\b", folded):
         return "Nam"
     if re.search(r"\b(nu|female|f)\b", folded):
-        return "Nu"
+        return "Nữ"
     return ""
 
 
@@ -253,7 +255,7 @@ def parse_cccd_qr(text: str) -> dict[str, str] | None:
             if re.search(r"\b(nam|male)\b", folded):
                 gender = "Nam"
             elif re.search(r"\b(nu|female)\b", folded):
-                gender = "Nu"
+                gender = "Nữ"
 
         if not address and _looks_like_label(part, ["noi thuong tru", "noi cu tru", "place of residence"]):
             if after_colon:
@@ -529,7 +531,7 @@ def _parse_person_mrz(lines: list[str]) -> dict[str, str]:
             if m.group(2) == "M":
                 gioi_tinh = "Nam"
             elif m.group(2) == "F":
-                gioi_tinh = "Nu"
+                gioi_tinh = "Nữ"
             break
 
     return _normalize_person_data(
@@ -592,6 +594,58 @@ def _extract_name_candidate(lines: list[str], side: str) -> str:
     return ""
 
 
+_ADDRESS_STOP_LABELS = [
+    "co quan cap",
+    "date of expiry",
+    "date of issue",
+    "ngay cap",
+    "ngay het han",
+    "co gia tri den",
+    "que quan",
+]
+
+
+def _strip_address_noise(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    noise_patterns = [
+        r"\bcơ\s+quan\s+cấp\b",
+        r"\bco\s+quan\s+cap\b",
+        r"\bdate\s+of\s+expiry\b",
+        r"\bdate\s+of\s+issue\b",
+        r"\bngày\s+cấp\b",
+        r"\bngay\s+cap\b",
+        r"\bngày\s+hết\s+hạn\b",
+        r"\bngay\s+het\s+han\b",
+        r"\bcó\s+giá\s+trị\s+đến\b",
+        r"\bco\s+gia\s+tri\s+den\b",
+    ]
+    for pattern in noise_patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            text = text[: match.start()]
+    return _clean_text(text).strip(" ,.;:-")
+
+
+def _sanitize_address(value: str) -> str:
+    raw = _clean_text(value)
+    if not raw:
+        return ""
+    parts: list[str] = []
+    for segment in [s.strip() for s in raw.split(",") if s and s.strip()]:
+        segment_clean = _strip_address_noise(segment)
+        if _looks_like_label(segment, _ADDRESS_STOP_LABELS):
+            if segment_clean and not _looks_like_label(segment_clean, _ADDRESS_STOP_LABELS):
+                parts.append(segment_clean)
+            break
+        if segment_clean:
+            parts.append(segment_clean)
+    merged = _clean_text(", ".join(parts))
+    merged = _strip_address_noise(merged)
+    return merged
+
+
 def _extract_address(lines: list[str]) -> str:
     for idx, line in enumerate(lines):
         if _looks_like_label(line, ["noi thuong tru", "noi cu tru", "place of residence"]):
@@ -599,12 +653,10 @@ def _extract_address(lines: list[str]) -> str:
             parts = [after] if after else []
             if idx + 1 < len(lines):
                 next_line = _clean_text(lines[idx + 1])
-                if next_line and not _looks_like_label(
-                    next_line,
-                    ["ho va ten", "ngay sinh", "gioi tinh", "so/no", "ngay cap", "date of issue", "que quan"],
-                ):
-                    parts.append(next_line)
-            return _clean_text(", ".join([p for p in parts if p]))
+                next_clean = _sanitize_address(next_line) if next_line else ""
+                if next_clean:
+                    parts.append(next_clean)
+            return _sanitize_address(", ".join([p for p in parts if p]))
     return ""
 
 
@@ -626,11 +678,15 @@ def _extract_issue_date(lines: list[str], side: str = "unknown") -> str:
 
 
 def _extract_birth_date(lines: list[str]) -> str:
-    for line in lines:
+    for idx, line in enumerate(lines):
         if _looks_like_label(line, ["ngay sinh", "date of birth"]):
             dates = _extract_dates_from_line(line)
             if dates:
                 return dates[0]
+            if idx + 1 < len(lines):
+                next_dates = _extract_dates_from_line(lines[idx + 1])
+                if next_dates:
+                    return next_dates[0]
     return ""
 
 
@@ -651,7 +707,7 @@ def _extract_gender(lines: list[str]) -> str:
         if compact in {"nam", "male"}:
             return "Nam"
         if compact in {"nu", "female"}:
-            return "Nu"
+            return "Nữ"
     return ""
 
 
@@ -753,6 +809,88 @@ def _append_ai_doc(
     )
 
 
+def _has_diacritics(text: str) -> bool:
+    value = _clean_text(text)
+    if not value:
+        return False
+    if "đ" in value.lower():
+        return True
+    normalized = unicodedata.normalize("NFD", value)
+    return any(unicodedata.combining(ch) for ch in normalized)
+
+
+def _normalize_name_ascii(value: str) -> str:
+    folded = _fold_text(_clean_text(value))
+    folded = re.sub(r"[^a-z\s]", " ", folded)
+    return re.sub(r"\s+", " ", folded).strip()
+
+
+def _id_hamming_distance(left: str, right: str) -> int | None:
+    if len(left) != 12 or len(right) != 12:
+        return None
+    return sum(1 for a, b in zip(left, right) if a != b)
+
+
+def _name_match_strong(left: str, right: str) -> bool:
+    a = _normalize_name_ascii(left)
+    b = _normalize_name_ascii(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if SequenceMatcher(None, a, b).ratio() >= PAIR_FUZZY_NAME_THRESHOLD:
+        return True
+    tokens_a = {tok for tok in a.split() if len(tok) >= 2}
+    tokens_b = {tok for tok in b.split() if len(tok) >= 2}
+    if len(tokens_a) >= 2 and len(tokens_b) >= 2 and tokens_a == tokens_b:
+        return True
+    return False
+
+
+def _sides_can_pair(side_a: str, side_b: str) -> bool:
+    a = _clean_text(side_a).lower() or "unknown"
+    b = _clean_text(side_b).lower() or "unknown"
+    if a == "front_back" or b == "front_back":
+        return False
+    sides = {a, b}
+    if "front" in sides and "back" in sides:
+        return True
+    if "unknown" in sides and ("front" in sides or "back" in sides):
+        return True
+    return False
+
+
+def _is_optional_field_compatible(left: dict[str, Any], right: dict[str, Any], key: str) -> bool:
+    a = _clean_text(left.get(key))
+    b = _clean_text(right.get(key))
+    if not a or not b:
+        return True
+    if key in {"gioi_tinh"}:
+        return _fold_text(a) == _fold_text(b)
+    return a == b
+
+
+def _should_fuzzy_pair(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    id_left = re.sub(r"\D", "", str(left.get("so_giay_to") or ""))
+    id_right = re.sub(r"\D", "", str(right.get("so_giay_to") or ""))
+    if len(id_left) != 12 or len(id_right) != 12 or id_left == id_right:
+        return False
+
+    mismatch = _id_hamming_distance(id_left, id_right)
+    if mismatch is None or mismatch > PAIR_FUZZY_MAX_ID_MISMATCH:
+        return False
+
+    if not _name_match_strong(str(left.get("ho_ten") or ""), str(right.get("ho_ten") or "")):
+        return False
+    if not _sides_can_pair(str(left.get("side") or "unknown"), str(right.get("side") or "unknown")):
+        return False
+    if not _is_optional_field_compatible(left, right, "ngay_sinh"):
+        return False
+    if not _is_optional_field_compatible(left, right, "gioi_tinh"):
+        return False
+    return True
+
+
 def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
     merged = {
         "ho_ten": "",
@@ -804,6 +942,30 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
             elif len(incoming) > len(current):
                 merged[key] = incoming
 
+    # Name priority: QR > front > unknown > back; prefer Vietnamese diacritics over MRZ-style ASCII.
+    best_name = ""
+    best_name_source = ""
+    best_name_score = (-1, -1, -1, -1)
+    for item in group:
+        name = _clean_text(item.get("ho_ten"))
+        if not name:
+            continue
+        src = str(item.get("source_type") or "AI").upper()
+        side = str(item.get("side") or "unknown").lower()
+        score = (
+            source_priority.get(src, 1),
+            2 if side == "front" else 1 if side == "unknown" else 0,
+            1 if _has_diacritics(name) else 0,
+            len(name),
+        )
+        if score > best_name_score:
+            best_name_score = score
+            best_name = name
+            best_name_source = src.lower()
+    if best_name:
+        merged["ho_ten"] = best_name
+        merged["field_sources"]["ho_ten"] = best_name_source
+
     merged["_qr"] = qr_found
     if qr_found:
         merged["_source"] = "QR"
@@ -831,8 +993,46 @@ def _pair_persons(persons: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if not isinstance(one.get("_files"), list):
                 one["_files"] = []
             passthrough.append(one)
-    merged = [_merge_person_group(g) for g in groups.values()]
-    return merged + passthrough
+    merged_exact = [_merge_person_group(g) for g in groups.values()]
+    if len(merged_exact) < 2:
+        return merged_exact + passthrough
+
+    # Fuzzy stage for OCR slips: allow pairing when ID differs by <=1 digit,
+    # names strongly match (accent/no-accent tolerant), and sides complement.
+    parent = list(range(len(merged_exact)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra = find(a)
+        rb = find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(len(merged_exact)):
+        for j in range(i + 1, len(merged_exact)):
+            if _should_fuzzy_pair(merged_exact[i], merged_exact[j]):
+                union(i, j)
+
+    fuzzy_groups: dict[int, list[dict[str, Any]]] = {}
+    for idx, person in enumerate(merged_exact):
+        root = find(idx)
+        fuzzy_groups.setdefault(root, []).append(person)
+
+    merged_final: list[dict[str, Any]] = []
+    for group in fuzzy_groups.values():
+        if len(group) == 1:
+            one = dict(group[0])
+            if not isinstance(one.get("_files"), list):
+                one["_files"] = []
+            merged_final.append(one)
+        else:
+            merged_final.append(_merge_person_group(group))
+    return merged_final + passthrough
 
 
 async def _process_single_image(
@@ -1046,5 +1246,9 @@ async def ocr_config():
             "min_pixels": QWEN_OCR_MIN_PIXELS,
             "max_pixels": QWEN_OCR_MAX_PIXELS,
             "enable_rotate": QWEN_OCR_ENABLE_ROTATE,
+        },
+        "pairing": {
+            "fuzzy_max_id_mismatch": PAIR_FUZZY_MAX_ID_MISMATCH,
+            "fuzzy_name_threshold": PAIR_FUZZY_NAME_THRESHOLD,
         },
     }

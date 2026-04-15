@@ -1000,13 +1000,19 @@ function InheritanceNode({ data, id }) {
   const isOccupied = !!data.person;
   const isDead = !!data.person?.death;
   const canToggleReceive = !!data.person && data.allowsShare && !data.disabledReason && !isDead && data.role !== "Owner";
+  const [isDragOver, setIsDragOver] = useState(false);
+
   const nodeBorder = isGhost
     ? "2px dashed #c084fc"
+    : isDragOver
+    ? "2px solid #2563eb"
     : isOccupied
     ? "2px solid #d97706"
     : "2px dashed #9ca3af";
   const background = isGhost
     ? "linear-gradient(180deg, rgba(245, 243, 255, 1) 0%, rgba(250, 245, 255, 1) 100%)"
+    : isDragOver
+    ? "linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%)"
     : isOccupied
     ? isDead
       ? "linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)"
@@ -1016,12 +1022,23 @@ function InheritanceNode({ data, id }) {
   const handleDragOver = (event) => {
     if (isGhost) return;
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (event) => {
+    if (isGhost) return;
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setIsDragOver(false);
+    }
   };
 
   const handleDrop = (event) => {
     if (isGhost) return;
     event.preventDefault();
+    event.stopPropagation();
+    setIsDragOver(false);
     const personStr = event.dataTransfer.getData("application/json");
     if (!personStr) return;
     try {
@@ -1039,14 +1056,16 @@ function InheritanceNode({ data, id }) {
         border: nodeBorder,
         borderRadius: 18,
         background,
-        boxShadow: "0 12px 28px rgba(15, 23, 42, .10)",
+        boxShadow: isDragOver ? "0 0 0 4px rgba(37,99,235,.25), 0 12px 28px rgba(15,23,42,.10)" : "0 12px 28px rgba(15, 23, 42, .10)",
         padding: 14,
         position: "relative",
         color: "#0f172a",
         filter: isDead ? "grayscale(.22)" : "none",
         opacity: isDead ? 0.92 : 1,
+        transition: "border 0.15s, background 0.15s, box-shadow 0.15s",
       }}
       onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {data.handles.includes("target") && <Handle type="target" position={Position.Top} />}
@@ -1627,14 +1646,20 @@ function FamilyTreeApp() {
         fitView
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable
+        elementsSelectable={false}
+        zoomOnScroll={false}
+        zoomOnPinch={false}
         zoomOnDoubleClick={false}
-        minZoom={0.35}
+        panOnDrag={false}
+        panOnScroll={false}
+        preventScrolling={false}
+        minZoom={0.25}
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+        onDrop={(e) => e.preventDefault()}
       >
         <Background gap={24} size={1} color="#e2e8f0" />
-        <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   );

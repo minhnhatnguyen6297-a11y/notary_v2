@@ -25,6 +25,19 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mrz["ngay_sinh"], "02/02/1997")
         self.assertEqual(mrz["gioi_tinh"], "Nam")
 
+    def test_extract_address_strips_expiry_label_noise(self):
+        lines = [
+            "Nơi thường trú / Place of residence:",
+            "Thôn Tam Yên Bằng, Ý Yên, Nam Định, Cơ quan cấp / Date of expiry:",
+        ]
+        self.assertEqual(ocr_ai._extract_address(lines), "Thôn Tam Yên Bằng, Ý Yên, Nam Định")
+
+    def test_extract_address_strips_expiry_noise_same_line(self):
+        lines = [
+            "Nơi thường trú / Place of residence: Yên Tiến, Ý Yên, Nam Định, Cơ quan cấp / Date of expiry:",
+        ]
+        self.assertEqual(ocr_ai._extract_address(lines), "Yên Tiến, Ý Yên, Nam Định")
+
     def test_extract_native_ocr_lines_from_text_payload(self):
         payload = {
             "output": {
@@ -153,6 +166,83 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(person["so_giay_to"], "036179009696")
         self.assertTrue(person["paired"])
         self.assertEqual(len(person.get("_files", [])), 2)
+
+    def test_pair_persons_allows_fuzzy_id_when_name_matches(self):
+        front = {
+            "ho_ten": "DƯƠNG THỊ XUÂN",
+            "so_giay_to": "036179009696",
+            "ngay_sinh": "20/01/1979",
+            "gioi_tinh": "Nữ",
+            "dia_chi": "Quyet Phong",
+            "ngay_cap": "",
+            "ngay_het_han": "",
+            "_source": "AI",
+            "source_type": "AI",
+            "side": "front",
+            "_files": ["front.jpg"],
+            "_qr": False,
+            "field_sources": {},
+            "warnings": [],
+        }
+        back = {
+            "ho_ten": "DUONG THI XUAN",
+            "so_giay_to": "036179009697",
+            "ngay_sinh": "20/01/1979",
+            "gioi_tinh": "Nu",
+            "dia_chi": "",
+            "ngay_cap": "25/03/2021",
+            "ngay_het_han": "",
+            "_source": "AI",
+            "source_type": "AI",
+            "side": "back",
+            "_files": ["back.jpg"],
+            "_qr": False,
+            "field_sources": {},
+            "warnings": [],
+        }
+        merged = ocr_ai._pair_persons([front, back])
+        self.assertEqual(len(merged), 1)
+        self.assertTrue(merged[0]["paired"])
+        self.assertEqual(merged[0]["side"], "front_back")
+        self.assertEqual(len(merged[0].get("_files", [])), 2)
+
+    def test_pair_persons_rejects_fuzzy_id_when_mismatch_too_high(self):
+        front = {
+            "ho_ten": "DƯƠNG THỊ XUÂN",
+            "so_giay_to": "036179009696",
+            "ngay_sinh": "20/01/1979",
+            "gioi_tinh": "Nữ",
+            "dia_chi": "Quyet Phong",
+            "ngay_cap": "",
+            "ngay_het_han": "",
+            "_source": "AI",
+            "source_type": "AI",
+            "side": "front",
+            "_files": ["front.jpg"],
+            "_qr": False,
+            "field_sources": {},
+            "warnings": [],
+        }
+        back = {
+            "ho_ten": "DUONG THI XUAN",
+            "so_giay_to": "036179009786",
+            "ngay_sinh": "20/01/1979",
+            "gioi_tinh": "Nu",
+            "dia_chi": "",
+            "ngay_cap": "25/03/2021",
+            "ngay_het_han": "",
+            "_source": "AI",
+            "source_type": "AI",
+            "side": "back",
+            "_files": ["back.jpg"],
+            "_qr": False,
+            "field_sources": {},
+            "warnings": [],
+        }
+        merged = ocr_ai._pair_persons([front, back])
+        self.assertEqual(len(merged), 2)
+        self.assertFalse(merged[0]["paired"])
+        self.assertFalse(merged[1]["paired"])
 
 
 if __name__ == "__main__":
