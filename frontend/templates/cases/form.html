@@ -1924,6 +1924,27 @@ endif %}
               ${Array.isArray(item.missingFields) && item.missingFields.length ? `<div style="margin-top:6px;font-size:11px;color:#b45309;">Thiếu: ${item.missingFields.join(', ')}</div>` : ''}
               ${Array.isArray(item.warnings) && item.warnings.length ? `<div style="margin-top:4px;font-size:11px;color:#92400e;">Cảnh báo: ${item.warnings.join(', ')}</div>` : ''}
               <div style="margin-top:4px;font-size:11px;color:#475569;">Front: ${item.perSide?.front?.doc_type || 'unknown'} | Back: ${item.perSide?.back?.doc_type || 'unknown'}</div>
+              ${(function() {
+                const frontLines = Array.isArray(item.perSide?.front?.text_lines) ? item.perSide.front.text_lines : [];
+                const backLines = Array.isArray(item.perSide?.back?.text_lines) ? item.perSide.back.text_lines : [];
+                if (!frontLines.length && !backLines.length) return '';
+                const uid = 'raw-' + idx;
+                const frontHtml = frontLines.map(l => `<div>${l.replace(/</g,'&lt;')}</div>`).join('');
+                const backHtml = backLines.map(l => `<div>${l.replace(/</g,'&lt;')}</div>`).join('');
+                return `<details style="margin-top:6px;">
+                  <summary style="font-size:11px;color:#64748b;cursor:pointer;user-select:none;">Raw text AI (${frontLines.length + backLines.length} dòng)</summary>
+                  <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <div>
+                      <div style="font-size:10px;font-weight:700;color:#0369a1;margin-bottom:4px;">FRONT (${frontLines.length} dòng)</div>
+                      <div style="font-family:monospace;font-size:10px;color:#1e293b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;white-space:pre-wrap;max-height:180px;overflow-y:auto;">${frontHtml || '<span style="color:#94a3b8;">—</span>'}</div>
+                    </div>
+                    <div>
+                      <div style="font-size:10px;font-weight:700;color:#0369a1;margin-bottom:4px;">BACK (${backLines.length} dòng)</div>
+                      <div style="font-family:monospace;font-size:10px;color:#1e293b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;white-space:pre-wrap;max-height:180px;overflow-y:auto;">${backHtml || '<span style="color:#94a3b8;">—</span>'}</div>
+                    </div>
+                  </div>
+                </details>`;
+              })()}
               <div style="text-align:right;margin-top:8px;">
                 <button class="btn btn-sm btn-outline-success" onclick="propertyOcrFill(${idx})">
                   <i class="bi bi-check2 me-1"></i>Điền vào form
@@ -3661,7 +3682,7 @@ endif %}
   <script src="/static/vendor/react.production.min.js"></script>
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260415b"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260415c"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────

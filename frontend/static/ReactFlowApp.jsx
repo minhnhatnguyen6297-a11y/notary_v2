@@ -734,6 +734,11 @@ function BrickCard({ node, onAssign, onRemove, onToggleReceive, onToggleLandOwne
         onMoveWithin(payload.sourceNodeId, node.id);
       } else {
         onAssign(node.id, payload);
+        // Remove the person row from the HTML pool after assigning to diagram
+        if (payload.id) {
+          const poolRow = document.querySelector(`#people-pool .person-row[data-id="${payload.id}"]`);
+          if (poolRow) poolRow.remove();
+        }
       }
     } catch (err) { console.error("BrickCard drop error", err); }
   };
