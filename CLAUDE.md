@@ -269,6 +269,13 @@ Sau khi cai dat:
 - LLM Fallback (tu dong sua dau / bu truong) dang tam tat de toi uu toc do Local OCR.
 - Da chuyen sang co che canh bao do tren UI de nguoi dung tu sua tay.
 - Se phat trien lai LLM Fallback o giai doan sau.
+- **Word Template tuy bien sau** (deferred — 17/04/2026):
+  - Hien tai dung simple `[placeholder]` replace. Tam chap nhan vi luong van ban lon, code logic nghiep vu cho tung doan rat mat thoi gian.
+  - Y tuong: Them dynamic block markers `{%DS_HANG_THUA_KE%}`, `{%DOAN_VO_CHONG%}`... de backend tu generate/xoa doan van tuy dieu kien case (so nguoi, co/khong vo chong, co/khong nguoi tu choi, khai_nhan vs thoa_thuan).
+  - User cuoi chi sua text/format trong Word, logic dieu kien do developer quan ly trong code.
+  - Module moi: `services/word_engine.py` — chua engine xu ly block markers, chay truoc `_replace_in_doc()`.
+  - Backward compatible: template cu khong co markers van chay binh thuong.
+  - Plan chi tiet: xem commit hoac file `docs/plans/word_template_v2.md` khi bat dau trien khai.
 
 ## Quy uoc khi sua code
 - Uu tien fix theo huong giu contract API hien tai.
