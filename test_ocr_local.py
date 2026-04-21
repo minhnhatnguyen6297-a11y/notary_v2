@@ -15,10 +15,10 @@ async def test():
         print(f"Warmup failed: {err}")
         return
 
-    test_dir = Path("ocr test")
+    test_dir = Path(__file__).parent / "tests" / "fixtures" / "cccd"
     files = list(test_dir.glob("*.jpg"))
     if not files:
-        print("No images found in ocr test folder")
+        print("No images found in tests/fixtures/cccd")
         return
     
     inputs = []
