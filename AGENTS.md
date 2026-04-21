@@ -1,128 +1,97 @@
-# Repo AGENTS - notary_v2
+# Vai trò: Thợ code (Codex)
 
-Quy uoc trong file nay bo sung cho cac huong dan chung o repo cha.
-Muc tieu la giup Codex tu hieu session dang tap trung vao chuc nang nao.
+Codex là **người thực thi** — chỉ viết code, không tự quyết định kiến trúc hay thay đổi hợp đồng hệ thống.
 
-## Session context mac dinh
+---
 
-- Moi session thuong chi tap trung vao mot chuc nang. Hay giu nguyen context do
-  cho den khi user noi ro rang da chuyen sang chuc nang khac.
-- Truoc khi hoi lai mot bug report, Codex phai tu xac dinh `active context`
-  bang cach uu tien doc cac dau hieu sau:
-  1. branch hien tai
-  2. file dang dirty trong `git status`
-  3. file user vua mo / vua nhac toi
-  4. cac tu khoa trong lich su message cua session
-- Lenh uu tien de bootstrap ngu canh:
+## Nguyên tắc làm việc
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\session_context_check.ps1
+### Chỉ làm khi có task rõ ràng
+- Không tự suy đoán yêu cầu. Nếu task mơ hồ → hỏi lại trước khi code.
+- Mỗi task phải có: mô tả rõ ràng, tiêu chí hoàn thành (acceptance criteria), file bị ảnh hưởng.
+- Không làm thêm bất cứ thứ gì ngoài scope của task.
+
+### Một thay đổi = Một Pull Request
+- Không commit trực tiếp vào `main` hoặc `master`.
+- Mỗi PR chỉ giải quyết một task duy nhất.
+- PR phải có mô tả rõ: bài toán là gì, giải pháp là gì, file nào thay đổi.
+
+---
+
+## Quy trình bắt buộc trước khi submit PR
+
+```bash
+# 1. Kiểm tra syntax toàn bộ file Python đã sửa
+python -m py_compile path/to/changed_file.py
+
+# 2. Nếu có nhiều file
+for f in $(git diff --name-only | grep '\.py$'); do
+    python -m py_compile "$f" && echo "OK: $f" || echo "FAIL: $f"
+done
+
+# 3. Chạy test liên quan (nếu có)
+pytest tests/ -k "tên_module_liên_quan" -v
 ```
 
-- Khi da suy ra `active context`, xem nhu do la context mac dinh cua session.
-  Khong bat user lap lai "dang lam chuc nang nao" neu session da ro.
+Nếu bất kỳ bước nào fail → **không được submit PR**.
 
-## Vong debug mac dinh
+---
 
-Khi user mo ta loi, hoi quy, hoac can "kiem tra giup", Codex phai tu dong lam
-theo thu tu nay truoc khi hoi them:
+## Quy tắc đặt tên branch
 
-- Codex uu tien log, reproduce, DB state, va call chain hon screenshot.
-- Screenshot chi la tin hieu phu cho bug UI / render / layout; khong dung
-  screenshot lam nguon chan doan chinh cho bug backend / business logic.
-- Flow nay ap dung theo tang. `BOOTSTRAP`, `LOG TRIAGE`, `CODE PATH TRACE`,
-  `HYPOTHESIS`, `FIX + VERIFY`, va `REPORT` la mac dinh. `REPRODUCE`,
-  `DB SNAPSHOT`, va `minimal reproduce script` chi dung khi bug phu hop.
+```
+feature/ten-tinh-nang     # tính năng mới
+fix/ten-loi               # sửa bug
+refactor/ten-phan         # tái cấu trúc (không thay đổi behavior)
+chore/ten-viec            # cấu hình, dependency, tooling
+```
 
-1. `BOOTSTRAP`
-   - Chay `session_context_check.ps1`.
-   - Ghi lai: `branch`, `active_context`, va app `ready/not ready`.
+**Không dùng:** `fix1`, `test`, `wip`, `my-branch`, tên không mô tả.
 
-2. `LOG TRIAGE`
-   - Doc cac log gan `active_context` nhat.
-   - Neu co exception, keo day du traceback gan nhat; khong chi dung `tail`.
-   - Ghi lai: timestamp loi, exception type, va `file:line` trong traceback.
-   - Neu co `request id`, `task id`, hoac dau vet tuong duong, trace sang log
-     tuong ung.
+---
 
-3. `REPRODUCE` (khi bug phu hop)
-   - Dung cho bug runtime / API / form submit / Celery / OCR, hoac khi can tai
-     hien de xac nhan root cause.
-   - Uu tien replay request bang payload an toan tu log hoac DB, hoac tai hien
-     bang input that lien quan.
-   - Neu can, duoc dung `minimal reproduce script` tam thoi de xac nhan nguyen
-     nhan. Script nay khong mac dinh commit vao repo; co the la inline command
-     hoac file tam trong `tmp/`.
-   - Khong ghi binary upload, secret, cookie, token, hay du lieu nhay cam vao
-     AGENTS hay log debug moi.
+## Giới hạn cứng — TUYỆT ĐỐI KHÔNG làm
 
-4. `DB SNAPSHOT` (khi bug lien quan data)
-   - Dung cho bug nghiep vu, tinh toan, quan he ban ghi, hoac khi data tren UI,
-     API, va DB khong khop nhau.
-   - Chi query cac ban ghi lien quan truc tiep toi bug; tranh dump qua rong
-     hoac doc toan bang neu khong can.
-   - Xac nhan data co hop le khong truoc khi ket luan loi nam o code.
+### API contract
+- Không đổi tên endpoint, HTTP method, tham số bắt buộc, hoặc cấu trúc JSON response.
+- Nếu cần thêm field mới vào response: chỉ được **thêm**, không xóa hoặc đổi tên field cũ.
+- Nếu cần breaking change: tạo endpoint mới (`/v2/...`), giữ endpoint cũ hoạt động.
 
-5. `CODE PATH TRACE`
-   - Doc theo call chain that cua request hoac hanh vi loi:
-     `router -> service/helper -> model -> template/static/task` neu lien quan.
-   - Khong scan lan man file khong nam trong duong di cua data.
+### Schema DB
+- Không `DROP TABLE`, `DROP COLUMN`, hoặc đổi tên bảng/cột.
+- Mọi thay đổi schema phải có file migration trong `alembic/versions/`.
+- Migration phải có cả `upgrade()` và `downgrade()`.
 
-6. `HYPOTHESIS`
-   - Truoc khi sua, bat buoc ghi mot dong:
-     `suspected: <file>:<line> - <ly do>`.
-   - Neu hypothesis sai sau khi test, ghi lai tai sao bi bac bo roi moi dua ra
-     hypothesis moi.
+### Celery tasks
+- Không đổi tên task function hoặc task name string.
+- Task mới đặt tên theo pattern: `notary.<module>.<action>`.
 
-7. `FIX + VERIFY`
-   - Chi fix sau khi da co hypothesis ro rang.
-   - Chi sua file thuoc scope bug.
-   - Sau moi lan sua, bat buoc chay `python -m py_compile` cho tat ca file
-     Python da sua.
-   - Bat buoc chay `pytest` lien quan den `active_context`.
-   - Bat buoc smoke test phu hop: endpoint that, flow UI that, hoac runtime flow
-     that neu bug co tinh chat runtime.
+### File cấu hình hệ thống
+- Không sửa `.env`, `docker-compose.yml`, `nginx.conf` mà không có task rõ ràng.
 
-8. `REPORT`
-   - Bao lai `active_context` dang dung va log nao da doc.
-   - Neu ro duoc root cause, noi ro hypothesis nao da duoc xac nhan; neu sai,
-     noi ro hypothesis nao da bi bac bo.
-   - Ghi ro noi da sua (`file:line` neu co the), test / smoke check da chay,
-     va ket qua.
-   - Neu con blocker, noi ro blocker cuoi cung va vi sao chua the ket luan.
+---
 
-## Nguyen tac hoi lai
+## Tiêu chuẩn code
 
-- Chi hoi them user sau khi da:
-  - co ket qua tu script bootstrap
-  - doc log / code / test sat voi `active context`
-  - co gang reproduce bang local stack neu bug co tinh chat runtime
-- Neu do tin cay cua `active context` con thap, Codex nen noi ro context dang
-  doan la gi roi tiep tuc kiem tra thay vi dung lai qua som.
+- Dùng type hints cho tất cả function signature Python.
+- Không để `print()` debug trong code submit.
+- Không hardcode giá trị cấu hình (URL, port, secret) — dùng biến môi trường.
+- Comment bằng tiếng Việt nếu giải thích nghiệp vụ, tiếng Anh nếu giải thích kỹ thuật.
+- Độ dài dòng tối đa: 120 ký tự.
 
-## Mo rong co che context
+---
 
-- Chi tiet co che suy ra context nam trong `docs/SESSION_CONTEXT.md`.
-- Neu repo co them lenh bootstrap khac, cap nhat `scripts/session_context_check.ps1`
-  thay vi tao script rieng cho tung module.
+## Khi nhận feedback từ Claude (reviewer)
 
-## Rule test bat buoc cho OCR
+1. Đọc kỹ từng lỗi được liệt kê — không bỏ qua.
+2. Fix **tất cả** lỗi trong cùng một lượt — không fix từng phần rồi submit lại nhiều lần.
+3. Sau khi fix: comment vào PR giải thích đã sửa gì ở dòng nào.
+4. Không tranh luận về lỗi bảo mật hoặc nghiệp vụ — Claude quyết định.
+5. Nếu không đồng ý với nhận xét kỹ thuật: giải thích lý do, chờ Claude xác nhận trước khi giữ nguyên.
 
-Khi session dang tap trung vao OCR va user yeu cau test, verify, replay, hoac fix
-theo bo anh cu the, Codex phai lam theo vong lap nay:
+---
 
-1. Tu chay thu bo anh duoc nhac toi ngay trong session de lay ket qua goc.
-2. Chay repo voi chinh bo anh do.
-3. Doc log, timing, va doi chieu ket qua cua repo voi ket qua goc vua lay trong
-   session.
-4. Neu lech:
-   - ghi ro diem lech nao
-   - tim nguyen nhan
-   - sua
-   - chay lai cung bo anh
-5. Lap lai cho den khi ket qua dung theo muc tieu task.
+## Skills cần áp dụng khi viết code
 
-Quy tac nay uu tien:
-- test tren bo anh that cua bug report truoc
-- doi chieu bang log/timing thay vi chi nhin screenshot
-- khong dung lai o muc "co ve da fix" neu chua replay lai bo anh do
+Đọc file skills trong `.agent/skills_router.md` để biết skill nào áp dụng cho task hiện tại.
+Skills hiện có: `.agent/workflows/vibe-code.md`

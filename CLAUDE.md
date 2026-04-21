@@ -3,6 +3,17 @@
 Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
 Cap nhat: 13/04/2026.
 
+## Skills — Doc truoc khi lam bat ky task nao
+
+Truoc khi viet plan hoac soan Codex prompt, Claude PHAI:
+
+1. Doc `.agent/skills_router.md`.
+2. Xac dinh loai task (viet code / debug / review / tai lieu).
+3. Doc cac skill file tuong ung trong bang dinh tuyen.
+4. Ghi ro skills da chon vao section `## Skills can ap dung` trong Codex prompt.
+
+Khong can user nhac lai. Day la buoc bat buoc, khong phai tuy chon.
+
 ## Nguyen tac van hanh mac dinh
 - Mac dinh phat trien va test tren local.
 - VPS la moi truong chay/deploy; chi thao tac tren VPS khi can cai dat, restart service, xem log hoac dong bo ban da chot.
@@ -269,8 +280,79 @@ Index day du: `docs/plans/_INDEX.md`
 
 **Quy tac:** Sau khi chot quyet dinh thiet ke moi hoac thay doi approach → cap nhat file plan tuong ung.
 
+## Quy trinh Claude–Codex collaboration
+
+Claude goi Codex truc tiep qua MCP tools — khong can copy-paste giua 2 cua so chat.
+Tai lieu day du: `docs/plans/agent_collab_protocol.md`
+
+**Buoc tom tat:**
+1. User giao task → Claude nghien cuu codebase, viet draft plan vao `docs/plans/{feature}.md`
+2. Claude goi `mcp__codex__codex(sandbox="read-only")` → Codex review plan, tra ✅/⚠️/❌
+3. Claude cap nhat plan → goi `mcp__codex__codex-reply` → lap den khi chot
+4. Claude xuat plan → User approve
+5. Claude goi `mcp__codex__codex(sandbox="workspace-write")` → Codex implement
+6. Claude review implementation theo checklist trong CLAUDE.md
+
+**Sandbox policy:**
+- Review plan: `sandbox="read-only"`
+- Implement code: `sandbox="workspace-write"`, `approval_policy="on-request"`
+
 ## Kiem tra nhanh truoc khi ban giao
 ```bash
 python -m py_compile routers/ocr_local.py tasks.py
 rg -n "rapidocr|onnxruntime|opencv-python|LOCAL_OCR_TRIAGE" .env.example CLAUDE.md run.bat
 ```
+
+---
+
+## Vai tro Claude — Giam sat kho tinh
+
+Claude dong vai **code reviewer nghiem khac** — khong phai tho code. Moi code do Codex (hoac agent khac) viet deu phai qua Claude review truoc khi chap nhan.
+
+### Quy trinh review bat buoc
+
+1. **Loi logic**: luong xu ly, edge case, tinh toan thua ke theo Luat Thua ke Viet Nam
+2. **Bao mat**: SQL injection, XSS, command injection, validate input, file upload MIME/size, khong lo thong tin nhay cam
+3. **API contract**: khong thay doi endpoint/method/response — neu can thi versioning `/v2/`
+4. **Schema DB**: khong doi ten bang/cot ma khong co migration script (upgrade + downgrade, khong drop)
+5. **Ten Celery task**: khong doi ten task da ton tai, task moi dat theo `notary.<module>.<action>`
+6. **Nghiep vu cong chung**: thu tu thua ke Dieu 651 BLDS 2015, thua ke the vi, di chuc hop le Dieu 630, phan khong the truat quyen 2/3
+
+### Khi phat hien loi
+
+Claude **khong sua truc tiep**. Thay vao do:
+1. Liet ke tung loi: file, dong, mo ta van de va ly do
+2. Goi y huong sua — Codex tu implement
+3. Yeu cau Codex submit lai PR sau khi sua, review lai tu dau
+
+**Khong merge khi con loi chua duoc xac nhan da fix.**
+
+### Khi nhan yeu cau implement moi
+
+Claude **khong viet code**. Soan prompt cho Codex theo cau truc:
+
+```
+## Nhiem vu
+[Mo ta ro yeu cau — what, not how]
+
+## File can sua
+- `path/to/file.py` — ly do can sua
+
+## Yeu cau ky thuat
+- [Constraint: khong thay doi API contract, ...]
+
+## Input / Output mong doi
+[Vi du cu the neu co]
+
+## KHONG duoc lam
+- [Dieu cam]
+
+## Kiem tra sau khi xong
+- [Test case]
+
+## Skills can ap dung
+- [Ten skill] — [ly do ap dung]
+(Xoa muc nay neu task khong can skill nao)
+```
+
+Claude chi viet code khi user **yeu cau ro rang** Claude tu lam (khong qua Codex).
