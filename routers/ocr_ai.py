@@ -110,6 +110,12 @@ def _fold_text(value: str) -> str:
     return normalized
 
 
+def _ascii_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return normalized.lower().replace("đ", "d")
+
+
 def _norm_label_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", _fold_text(value))
 
@@ -733,6 +739,7 @@ _PROPERTY_FORM_FIELDS = [
     "so_thua_dat",
     "so_to_ban_do",
     "dia_chi",
+    "chu_su_dung",
     "loai_so",
     "hinh_thuc_su_dung",
     "nguon_goc",
@@ -757,6 +764,29 @@ _PROPERTY_LAND_TYPE_CODES = {
     "DHT",
 }
 
+_LAND_NAME_TO_CODE: dict[str, str] = {
+    "dat o tai nong thon": "ONT",
+    "dat o tai do thi": "ODT",
+    "dat o do thi": "ODT",
+    "dat trong cay lau nam": "CLN",
+    "dat nuoi trong thuy san": "NTS",
+    "dat trong lua nuoc": "LUC",
+    "dat trong lua": "LUC",
+    "dat bang trong cay hang nam khac": "BHK",
+    "dat san xuat kinh doanh": "SKC",
+    "dat thuong mai dich vu": "TMD",
+    "dat dich vu": "DV",
+    "dat giao thong": "DGT",
+}
+
+
+def _land_name_to_code(text: str) -> str:
+    key = _fold_text(text)
+    for name, code in _LAND_NAME_TO_CODE.items():
+        if name in key:
+            return code
+    return ""
+
 
 def _property_has_value(value: Any) -> bool:
     if isinstance(value, list):
@@ -765,22 +795,32 @@ def _property_has_value(value: Any) -> bool:
 
 
 def _looks_like_property_doc(lines: list[str]) -> bool:
-    score = 0
+    signals: set[str] = set()
     for line in lines:
-        key = _fold_text(line)
+        key = _ascii_text(line)
         if "giay chung nhan" in key:
-            score += 2
+            signals.add("title")
         if "quyen su dung dat" in key:
-            score += 2
-        if "so vao so" in key:
-            score += 2
-        if "thua dat" in key or "to ban do" in key:
-            score += 1
+            signals.add("land_right")
+        if _looks_like_property_registry_label(line):
+            signals.add("registry")
+        if re.search(r"\bthua\s*(?:dat|so)?\b", key):
+            signals.add("plot")
+        if re.search(r"\bto\s*(?:ban\s*do|so)\b", key):
+            signals.add("map")
         if "dien tich" in key:
-            score += 1
-        if "van phong dang ky" in key or "uy ban nhan dan" in key:
-            score += 1
-    return score >= 3
+            signals.add("area")
+        if "dia chi" in key:
+            signals.add("address")
+        if "loai dat" in key or "muc dich su dung" in key:
+            signals.add("land_type")
+        if "nguoi su dung dat" in key or "chu su dung" in key or "chu so huu nha o" in key:
+            signals.add("owner")
+        if "van phong dang ky" in key or "uy ban nhan dan" in key or "so tai nguyen" in key:
+            signals.add("authority")
+        if _extract_property_serial_candidates(line):
+            signals.add("serial")
+    return len(signals) >= 3 or {"title", "serial"}.issubset(signals) or {"registry", "plot"}.issubset(signals)
 
 
 def _classify_property_book_type(lines: list[str]) -> str:
@@ -817,43 +857,186 @@ def _extract_code_like(value: str) -> str:
     return ""
 
 
-def _extract_property_serial(lines: list[str]) -> str:
-    for line in lines:
-        key = _fold_text(line)
-        if "so vao so" in key:
-            continue
-        if "so" not in key:
-            continue
-        code = _extract_code_like(line)
-        if code:
-            return code
-    for line in lines:
-        code = _extract_code_like(line)
-        key = _fold_text(line)
-        if "so vao so" in key:
-            continue
-        if code and any(ch.isalpha() for ch in code):
-            return code
+def _looks_like_property_registry_label(line: str) -> bool:
+    key = _norm_label_key(line)
+    if not key:
+        return False
+    direct_labels = [
+        "sovaoso",
+        "sovaosocapgcn",
+        "sovaosocapgiaychungnhan",
+        "vaosocapgiaychungnhan",
+        "vaosocapgcn",
+    ]
+    noisy_labels = [
+        "sovachsocapgcn",
+        "sovansocapgcn",
+        "sovochsocapgcn",
+        "sovachsocapgiaychungnhan",
+        "sovansocapgiaychungnhan",
+    ]
+    if any(label in key for label in direct_labels):
+        return True
+    if any(label in key for label in noisy_labels):
+        return True
+    return "capgcn" in key and ("vaoso" in key or "vachso" in key or "vanso" in key or "vochso" in key)
+
+
+def _extract_registry_code_like(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    upper = text.upper()
+    patterns = [
+        r"\b([A-Z]{1,4}\s*\d{3,12}(?:\s*/\s*\d{1,8})?)\b",
+        r"\b([A-Z]{1,4}\s*\d{3,12}\s+\d{1,8})\b",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, upper)
+        if m:
+            return _clean_property_code(m.group(1).replace(" / ", "/").replace("/ ", "/").replace(" /", "/"))
     return ""
+
+
+def _extract_property_serial_candidates(value: str, *, allow_single_letter: bool = False) -> list[str]:
+    text = _clean_text(value).upper()
+    if not text:
+        return []
+    patterns = [
+        r"\b([A-Z]{2}\s*\d{6,8})\b",
+        r"\b([A-Z]{2}\d{6,8})\b",
+    ]
+    if allow_single_letter:
+        patterns.append(r"\b([A-Z]\s*\d{6,8})\b")
+    out: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            candidate = _clean_property_code(match.group(1))
+            compact = re.sub(r"\s+", "", candidate)
+            if compact in seen:
+                continue
+            seen.add(compact)
+            out.append(candidate)
+    return out
+
+
+def _looks_like_property_serial_label(line: str) -> bool:
+    return _looks_like_label(line, ["so phat hanh", "so serial", "serial", "so seri", "ma phoi"])
+
+
+def _is_property_serial_context(line: str) -> bool:
+    key = _ascii_text(line)
+    if _looks_like_property_registry_label(line):
+        return False
+    if _looks_like_property_serial_label(line):
+        return True
+    if re.match(r"^\s*so\b", key):
+        reject_tokens = [
+            "so vao so",
+            "so thua",
+            "so to",
+            "so ban do",
+            "so nha",
+            "so tai",
+            "so dien thoai",
+        ]
+        return not any(token in key for token in reject_tokens)
+    return False
+
+
+def _property_serial_candidate_score(candidate: str, line: str) -> int:
+    compact = re.sub(r"\s+", "", _clean_property_code(candidate).upper())
+    line_text = _clean_text(line)
+    line_ascii = _ascii_text(line_text)
+    has_serial_context = _looks_like_property_serial_label(line) or _is_property_serial_context(line)
+    score = 0
+    if re.fullmatch(r"[A-Z]{2}\d{6,8}", compact):
+        score += 10
+    elif re.fullmatch(r"[A-Z]\d{6,8}", compact):
+        score += 7
+    elif re.fullmatch(r"[A-Z]{1,4}\d{4,12}(?:/\d{1,8})?", compact):
+        score += 3
+    if _looks_like_property_serial_label(line):
+        score += 6
+    elif _is_property_serial_context(line):
+        score += 4
+    if _clean_property_code(line_text.upper()) == _clean_property_code(candidate):
+        score += 5
+    elif line_text.upper().startswith(compact) or line_text.upper().endswith(compact):
+        score += 2
+    if not has_serial_context and compact.startswith(("VP", "QD", "UB")):
+        score -= 8
+    if _looks_like_label(line, ["thua dat", "to ban do", "dia chi", "dien tich", "loai dat", "thoi han", "nguon goc"]):
+        score -= 5
+    if any(token in line_ascii for token in ["van phong dang ky", "uy ban nhan dan", "ngay ", "thang ", "nam "]):
+        score -= 3
+    if "/" in compact:
+        score -= 2
+    return score
+
+
+def _property_registry_candidate_score(candidate: str, line: str, offset: int) -> int:
+    compact = re.sub(r"\s+", "", _clean_property_code(candidate).upper())
+    score = 0
+    if re.fullmatch(r"[A-Z]{1,4}\d{3,12}(?:/\d{1,8})?", compact):
+        score += 8
+    elif re.fullmatch(r"[A-Z]{1,4}\d{3,12}", compact):
+        score += 7
+    if "/" in compact:
+        score += 1
+    if re.fullmatch(r"[A-Z]{2}\d{6,8}", compact):
+        score -= 1
+    if _looks_like_property_registry_label(line):
+        score += 5
+    score -= offset
+    return score
+
+
+def _extract_property_serial(lines: list[str]) -> str:
+    registry_no = _extract_property_registry_no(lines)
+    registry_compact = re.sub(r"\s+", "", _clean_property_code(registry_no).upper())
+    best_value = ""
+    best_score = -999
+    for idx, line in enumerate(lines):
+        candidate_lines = [line]
+        if _is_property_serial_context(line) and idx + 1 < len(lines):
+            candidate_lines.append(lines[idx + 1])
+        for candidate_line in candidate_lines:
+            allow_single_letter = _is_property_serial_context(line)
+            for candidate in _extract_property_serial_candidates(candidate_line, allow_single_letter=allow_single_letter):
+                score = _property_serial_candidate_score(candidate, line)
+                if registry_compact and re.sub(r"\s+", "", _clean_property_code(candidate).upper()) == registry_compact:
+                    score -= 20
+                if candidate_line != line:
+                    score -= 1
+                if score > best_score or (score == best_score and _clean_property_code(candidate) < _clean_property_code(best_value)):
+                    best_value = candidate
+                    best_score = score
+    return best_value if best_score > 0 else ""
 
 
 def _extract_property_registry_no(lines: list[str]) -> str:
-    labels = ["so vao so", "so vao so cap giay chung nhan", "so vao so cap gcn"]
+    best_value = ""
+    best_score = -999
     for idx, line in enumerate(lines):
-        if not _looks_like_label(line, labels):
+        if not _looks_like_property_registry_label(line):
             continue
+        candidates: list[tuple[str, int]] = []
         if ":" in line:
-            after = _clean_property_code(line.split(":", 1)[1])
-            if after:
-                return after
-        code = _extract_code_like(line)
-        if code:
-            return code
-        if idx + 1 < len(lines):
-            next_line = _clean_property_code(lines[idx + 1])
-            if next_line and not _looks_like_label(next_line, labels):
-                return next_line
-    return ""
+            candidates.append((line.split(":", 1)[1], 0))
+        candidates.append((line, 0))
+        for offset in range(1, 3):
+            if idx + offset < len(lines):
+                candidates.append((lines[idx + offset], offset))
+        for candidate, offset in candidates:
+            code = _extract_registry_code_like(candidate)
+            if code:
+                score = _property_registry_candidate_score(code, line, offset)
+                if score > best_score or (score == best_score and _clean_property_code(code) < _clean_property_code(best_value)):
+                    best_value = code
+                    best_score = score
+    return best_value if best_score > 0 else ""
 
 
 def _extract_first_number(line: str) -> str:
@@ -861,25 +1044,88 @@ def _extract_first_number(line: str) -> str:
     return m.group(1) if m else ""
 
 
-def _extract_property_plot_no(lines: list[str]) -> str:
-    for line in lines:
-        if _looks_like_label(line, ["thua dat", "thua so"]):
-            number = _extract_first_number(line)
-            if number:
-                return number
+def _extract_number_after_property_label(line: str, label_patterns: list[str]) -> str:
+    ascii_line = _ascii_text(line)
+    for pattern in label_patterns:
+        match = re.search(pattern, ascii_line)
+        if match:
+            return match.group(1)
     return ""
+
+
+def _extract_property_number_field(lines: list[str], label_patterns: list[str], labels: list[str]) -> str:
+    for idx, line in enumerate(lines):
+        number = _extract_number_after_property_label(line, label_patterns)
+        if number:
+            return number
+        if not _looks_like_label(line, labels):
+            continue
+        if idx + 1 >= len(lines):
+            continue
+        next_line = lines[idx + 1]
+        if _looks_like_label(next_line, labels):
+            continue
+        number = _extract_first_number(next_line)
+        if number:
+            return number
+    return ""
+
+
+def _extract_property_plot_no(lines: list[str]) -> str:
+    return _extract_property_number_field(
+        lines,
+        [r"\bthua\s*(?:dat|so)?\b[^0-9]{0,24}(\d{1,6})"],
+        ["thua dat", "thua so"],
+    )
 
 
 def _extract_property_map_sheet(lines: list[str]) -> str:
+    return _extract_property_number_field(
+        lines,
+        [r"\bto\s*(?:ban\s*do|so)\b[^0-9]{0,24}(\d{1,6})"],
+        ["to ban do", "to so"],
+    )
     for line in lines:
-        if _looks_like_label(line, ["to ban do", "to so"]):
-            number = _extract_first_number(line)
-            if number:
-                return number
+        if not _looks_like_label(line, ["to ban do", "to so"]):
+            continue
+        # Split by ";" to handle combined lines like "Thửa đất số: 342; tờ bản đồ số: 22."
+        for seg in re.split(r"[;,]", line):
+            if _looks_like_label(seg, ["to ban do", "to so"]):
+                number = _extract_first_number(seg)
+                if number:
+                    return number
+        # Fallback
+        number = _extract_first_number(line)
+        if number:
+            return number
     return ""
 
 
+def _normalize_property_area_number(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    if "." in text and "," in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    else:
+        text = text.replace(",", ".")
+    return text
+
+
 def _extract_property_area(lines: list[str]) -> str:
+    for line in lines:
+        if not _looks_like_label(line, ["dien tich"]):
+            continue
+        m = re.search(
+            r"(?<!\d)(\d+(?:[.,]\d+)?)(?:\s*(?:m2|m²|m\^2|met vuong))?",
+            _clean_text(line),
+            flags=re.IGNORECASE,
+        )
+        if m:
+            return _normalize_property_area_number(m.group(1))
     for line in lines:
         if not _looks_like_label(line, ["dien tich"]):
             continue
@@ -890,14 +1136,51 @@ def _extract_property_area(lines: list[str]) -> str:
 
 
 _PROPERTY_ADDRESS_STOP_LABELS = [
+    "so thua",
+    "to ban do",
     "dien tich",
     "loai dat",
     "thoi han",
     "nguon goc",
+    "hinh thuc su dung",
+    "nguoi su dung dat",
+    "chu su dung",
     "ngay cap",
     "co quan cap",
     "so vao so",
 ]
+
+
+def _property_address_score(value: str) -> int:
+    text = _clean_text(value)
+    if not text:
+        return 0
+    key = _ascii_text(text)
+    score = text.count(",") + (2 if len(text.split()) >= 4 else 0)
+    hints = [
+        "thon",
+        "to dan pho",
+        "ap",
+        "xa",
+        "phuong",
+        "thi tran",
+        "huyen",
+        "quan",
+        "tinh",
+        "thanh pho",
+        "duong",
+    ]
+    score += sum(1 for hint in hints if hint in key)
+    reject_tokens = [
+        "van phong dang ky",
+        "uy ban nhan dan",
+        "so tai nguyen",
+        "ngay ",
+        "thang ",
+    ]
+    if any(token in key for token in reject_tokens):
+        score -= 8
+    return score
 
 
 def _strip_property_address_noise(value: str) -> str:
@@ -913,28 +1196,56 @@ def _strip_property_address_noise(value: str) -> str:
     return merged.strip(" ,.;:-")
 
 
+def _looks_like_property_footer_date_line(value: str) -> bool:
+    text = _clean_text(value)
+    if not text:
+        return False
+    ascii_text = _ascii_text(text)
+    has_date = bool(_extract_dates_from_line(text)) or bool(
+        re.search(r"\bngay\s+\d{1,2}\s+thang\s+\d{1,2}\s+nam\s+\d{4}\b", ascii_text)
+    )
+    if not has_date:
+        return False
+    return bool(re.match(r"^\s*(?:[a-z0-9 .'\-]+,\s*)?ngay\b", ascii_text))
+
+
 def _extract_property_address(lines: list[str]) -> str:
     labels = ["dia chi", "dia chi thua dat"]
+    best_value = ""
+    best_score = -999
     for idx, line in enumerate(lines):
         if not _looks_like_label(line, labels):
             continue
         parts: list[str] = []
         if ":" in line:
             parts.append(line.split(":", 1)[1])
-        elif idx + 1 < len(lines):
-            parts.append(lines[idx + 1])
-        if idx + 2 < len(lines) and not _looks_like_label(lines[idx + 2], _PROPERTY_ADDRESS_STOP_LABELS):
-            if any(token in _fold_text(lines[idx + 2]) for token in ["xa", "huyen", "quan", "tinh", "thanh pho", "thon"]):
-                parts.append(lines[idx + 2])
+        for offset in range(1, 4):
+            if idx + offset >= len(lines):
+                break
+            next_line = lines[idx + offset]
+            next_key = _ascii_text(next_line)
+            if _looks_like_label(next_line, _PROPERTY_ADDRESS_STOP_LABELS):
+                break
+            if _looks_like_property_footer_date_line(next_line):
+                break
+            if any(token in next_key for token in ["van phong dang ky", "uy ban nhan dan", "so tai nguyen"]):
+                break
+            if offset == 1 or _property_address_score(next_line) > 0:
+                parts.append(next_line)
+            else:
+                break
         address = _strip_property_address_noise(", ".join(_clean_text(p) for p in parts if _clean_text(p)))
-        if address:
-            return address
+        score = _property_address_score(address)
+        if score > best_score or (score == best_score and address and address < best_value):
+            best_value = address
+            best_score = score
     for line in lines:
-        key = _fold_text(line)
-        if any(token in key for token in ["thon", "to dan pho", "xa ", "phuong", "huyen", "quan", "tinh", "thanh pho"]):
-            if "," in line and len(line) >= 10:
-                return _strip_property_address_noise(line)
-    return ""
+        address = _strip_property_address_noise(line)
+        score = _property_address_score(address)
+        if score > best_score and "," in address:
+            best_value = address
+            best_score = score
+    return best_value if best_score > 0 else ""
 
 
 def _extract_property_field_by_label(lines: list[str], labels: list[str]) -> str:
@@ -952,12 +1263,141 @@ def _extract_property_field_by_label(lines: list[str], labels: list[str]) -> str
     return ""
 
 
+def _extract_property_block_after_label(lines: list[str], labels: list[str], stop_labels: list[str], max_follow_lines: int = 3) -> str:
+    for idx, line in enumerate(lines):
+        if not _looks_like_label(line, labels):
+            continue
+        parts: list[str] = []
+        if ":" in line:
+            after = _clean_text(line.split(":", 1)[1])
+            if after:
+                parts.append(after)
+        for offset in range(1, max_follow_lines + 1):
+            if idx + offset >= len(lines):
+                break
+            next_line = _clean_text(lines[idx + offset])
+            if not next_line:
+                continue
+            if _looks_like_label(next_line, stop_labels):
+                break
+            parts.append(next_line)
+        value = _clean_text(", ".join(parts))
+        if value:
+            return value
+    return ""
+
+
 def _extract_property_land_use_form(lines: list[str]) -> str:
     return _extract_property_field_by_label(lines, ["hinh thuc su dung"])
 
 
-def _extract_property_land_rows(lines: list[str]) -> list[dict[str, str]]:
+def _property_owner_score(value: str) -> int:
+    text = _clean_text(value)
+    if not text:
+        return 0
+    key = _ascii_text(text)
+    score = 0
+    if len(text.split()) >= 2:
+        score += 2
+    if "," in text:
+        score += 1
+    reject_tokens = [
+        "van phong dang ky",
+        "uy ban nhan dan",
+        "so tai nguyen",
+        "ngay ",
+        "thang ",
+        "thua dat",
+        "dien tich",
+        "loai dat",
+        "nguon goc",
+    ]
+    if any(token in key for token in reject_tokens):
+        score -= 5
+    return score
+
+
+def _extract_property_owner(lines: list[str]) -> str:
+    labels = [
+        "nguoi su dung dat",
+        "chu su dung",
+        "chu so huu nha o",
+    ]
+    stop_labels = _PROPERTY_ADDRESS_STOP_LABELS + [
+        "giay chung nhan",
+        "thua dat",
+        "dia chi",
+        "trang",
+    ]
+    value = _extract_property_block_after_label(lines, labels, stop_labels, max_follow_lines=3)
+    return value if _property_owner_score(value) > 0 else ""
+
+
+def _extract_land_rows_from_named_lines(lines: list[str]) -> list[dict[str, str]]:
+    """Parse land rows từ GCN format dùng tên đầy đủ:
+    'c. Loại đất: Đất ở tại nông thôn 200,0m²; Đất trồng cây lâu năm 247,0m²,'
+    'd. Thời hạn sử dụng: Đất ở tại nông thôn: Lâu dài; Đất trồng cây lâu năm: 12/2043,'
+    """
+    land_line = ""
+    term_line = ""
+    for line in lines:
+        if not land_line and _looks_like_label(line, ["loai dat", "muc dich su dung"]):
+            land_line = line
+        elif not term_line and _looks_like_label(line, ["thoi han su dung", "thoi han"]):
+            term_line = line
+
+    if not land_line:
+        return []
+
+    land_content = land_line.split(":", 1)[1] if ":" in land_line else land_line
     rows: list[dict[str, str]] = []
+    for seg in re.split(r";", land_content):
+        seg = seg.strip(" ,.")
+        if not seg:
+            continue
+        area_m = re.search(r"(\d+(?:[.,]\d+)?)\s*m[²2]", seg, re.IGNORECASE)
+        if not area_m:
+            continue
+        area = area_m.group(1).replace(",", ".")
+        name_part = seg[: area_m.start()].strip()
+        code = _land_name_to_code(name_part)
+        if not code:
+            continue
+        rows.append({"loai_dat": code, "dien_tich": area, "thoi_han": "", "_name_key": _fold_text(name_part)})
+
+    if not rows:
+        return []
+
+    if term_line:
+        term_content = term_line.split(":", 1)[1] if ":" in term_line else term_line
+        for seg in re.split(r";", term_content):
+            seg = seg.strip(" ,.")
+            if ":" not in seg:
+                continue
+            name_part, term_raw = seg.split(":", 1)
+            matched_code = _land_name_to_code(name_part.strip())
+            term_val = _clean_text(term_raw.strip(" ,."))
+            if not term_val or not matched_code:
+                continue
+            if "lau dai" in _fold_text(term_val):
+                term_val = "Lâu dài"
+            for row in rows:
+                if row.get("loai_dat") == matched_code:
+                    row["thoi_han"] = term_val
+                    break
+
+    for row in rows:
+        row.pop("_name_key", None)
+    return rows
+
+
+def _extract_property_land_rows(lines: list[str]) -> list[dict[str, str]]:
+    # Pass 1: parse GCN structured format dùng tên đầy đủ tiếng Việt
+    named_rows = _extract_land_rows_from_named_lines(lines)
+
+    # Pass 2: scan từng dòng tìm code rõ ràng (ONT, CLN, ...)
+    code_rows: list[dict[str, str]] = []
+    existing_codes = {r["loai_dat"] for r in named_rows}
     for line in lines:
         upper = _clean_text(line).upper()
         if not upper:
@@ -968,18 +1408,20 @@ def _extract_property_land_rows(lines: list[str]) -> list[dict[str, str]]:
         land_code = code_match.group(1)
         if land_code not in _PROPERTY_LAND_TYPE_CODES:
             continue
+        if land_code in existing_codes:
+            continue
         area_match = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)(?:\s*(?:M2|M²))?", upper)
         if not area_match:
             continue
         term = ""
         lower = _fold_text(line)
         if "lau dai" in lower:
-            term = "Lau dai"
+            term = "Lâu dài"
         else:
             term_match = re.search(r"(\d{1,3}\s*nam)", lower)
             if term_match:
                 term = _clean_text(term_match.group(1))
-        rows.append(
+        code_rows.append(
             {
                 "loai_dat": land_code,
                 "dien_tich": area_match.group(1).replace(",", "."),
@@ -987,6 +1429,7 @@ def _extract_property_land_rows(lines: list[str]) -> list[dict[str, str]]:
             }
         )
 
+    rows = named_rows + code_rows
     unique_rows: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
@@ -1030,6 +1473,27 @@ def _extract_property_issue_date(lines: list[str]) -> str:
         "pho giam doc",
     ]
     candidates: list[tuple[int, int, str]] = []
+
+    # Pass 1: định dạng tiếng Việt "ngày DD tháng MM năm YYYY"
+    # Dùng NFKD + strip combining (không thay digits như _fold_text làm)
+    for idx, line in enumerate(lines):
+        nfkd = unicodedata.normalize("NFKD", line)
+        stripped = "".join(ch for ch in nfkd if not unicodedata.combining(ch)).lower().replace("đ", "d")
+        m = re.search(r"ngay\s+(\d{1,2})\s+thang\s+(\d{1,2})\s+nam\s+(\d{4})", stripped)
+        if not m:
+            continue
+        date_str = f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
+        normalized = _normalize_date(date_str)
+        if not normalized:
+            continue
+        score = 4
+        for n in range(max(0, idx - 2), min(len(lines), idx + 3)):
+            if any(marker in _fold_text(lines[n]) for marker in authority_markers):
+                score += 1
+                break
+        candidates.append((score, idx, normalized))
+
+    # Pass 2: định dạng số DD/MM/YYYY hoặc DD-MM-YYYY
     for idx, line in enumerate(lines):
         dates = _extract_dates_from_line(line)
         if not dates:
@@ -1047,40 +1511,167 @@ def _extract_property_issue_date(lines: list[str]) -> str:
                 break
         for date_val in dates:
             candidates.append((score, idx, date_val))
+
     if not candidates:
         return ""
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return candidates[0][2]
 
 
+def _extract_year(value: str) -> int:
+    m = re.search(r"(\d{4})", _clean_text(value))
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
+
+def _extract_footer_context_year(lines: list[str]) -> int:
+    if not lines:
+        return 0
+    current_year = datetime.now().year + 1
+    years: list[int] = []
+    for line in lines[-10:]:
+        for raw_year in re.findall(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)", _clean_text(line)):
+            year = int(raw_year)
+            if 1900 <= year <= current_year:
+                years.append(year)
+    return max(years) if years else 0
+
+
+def _should_rescue_property_issue_date(doc: dict[str, Any]) -> bool:
+    if doc.get("doc_type") != "property":
+        return False
+    if _normalize_property_side(str(doc.get("side") or "")) == "front":
+        return False
+    data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    if not _clean_text(data.get("co_quan_cap")):
+        return False
+    current_date = _clean_text(data.get("ngay_cap"))
+    if not current_date:
+        return True
+    current_year = _extract_year(current_date)
+    footer_year = _extract_footer_context_year(doc.get("text_lines") if isinstance(doc.get("text_lines"), list) else [])
+    if not current_year or not footer_year:
+        return False
+    return footer_year - current_year >= 2
+
+
+def _property_authority_score(value: str) -> int:
+    key = _fold_text(value)
+    if not key:
+        return 0
+    score = 0
+    if "van phong dang ky dat dai" in key:
+        score += 10
+    if "van phong dang ky quyen su dung dat" in key:
+        score += 10
+    if "so tai nguyen va moi truong" in key:
+        score += 10
+    if "so tai nguyen moi truong" in key:
+        score += 9
+    if "uy ban nhan dan" in key:
+        score += 8
+    if "bo tai nguyen va moi truong" in key:
+        score += 8
+    if "chi nhanh van phong dang ky dat dai" in key:
+        score += 7
+    if "dang ky dat dai" in key:
+        score += 4
+    if "tai nguyen" in key and "moi truong" in key:
+        score += 4
+    if "ubnd" in key:
+        score += 4
+    if any(marker in key for marker in ["kt giam doc", "pho giam doc", "giam doc"]):
+        score -= 3
+    if "co quan cap" in key and score == 0:
+        score -= 5
+    if len(value) > 120:
+        score -= 3
+    return score
+
+
+def _clean_property_authority_value(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"\b\d{1,2}/\d{1,2}/\d{4}\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bngay\s+\d{1,2}\s+thang\s+\d{1,2}\s+nam\s+\d{4}\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bkt\.?\s*giam\s+doc\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bpho\s+giam\s+doc\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^(kt\.?\s*)?pho\s+giam\s+doc\b.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^kt\.?\s*giam\s+doc\b.*$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"^chu\s+tich\b.*$", "", text, flags=re.IGNORECASE)
+    return _clean_text(text).strip(" ,.;:-")
+
+
+def _prepare_property_footer_image_bytes(file_bytes: bytes, max_px: int = 1400) -> bytes:
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        if img.mode == "L":
+            img = img.convert("RGB")
+
+        width, height = img.size
+        top = int(height * 0.58)
+        crop = img.crop((0, top, width, height))
+
+        crop_width, crop_height = crop.size
+        max_side = max(crop_width, crop_height)
+        if max_side > max_px:
+            scale = max_px / float(max_side)
+            new_size = (max(1, int(crop_width * scale)), max(1, int(crop_height * scale)))
+            crop = crop.resize(new_size, Image.LANCZOS)
+
+        buf = io.BytesIO()
+        crop.save(buf, format="JPEG", quality=88, optimize=True)
+        return buf.getvalue()
+    except Exception:
+        return b""
+
+
 def _extract_property_authority(lines: list[str], issue_date: str) -> str:
-    markers = ["uy ban nhan dan", "van phong dang ky", "so tai nguyen", "co quan cap", "giam doc", "pho giam doc"]
     date_line_idx = -1
     if issue_date:
         for idx, line in enumerate(lines):
             if issue_date in _extract_dates_from_line(line):
                 date_line_idx = idx
                 break
-    scan_order: list[int] = []
-    if date_line_idx >= 0:
-        for radius in range(0, 4):
-            left = date_line_idx - radius
-            right = date_line_idx + radius
-            if left >= 0:
-                scan_order.append(left)
-            if right < len(lines):
-                scan_order.append(right)
-    scan_order.extend(range(len(lines)))
-    seen: set[int] = set()
-    for idx in scan_order:
-        if idx in seen:
+    candidates: list[tuple[int, int, str]] = []
+    for idx, raw_line in enumerate(lines):
+        line = _clean_property_authority_value(raw_line)
+        if not line:
             continue
-        seen.add(idx)
-        line = _clean_text(lines[idx])
-        key = _fold_text(line)
-        if any(marker in key for marker in markers):
-            return _clean_text(re.sub(r"\b\d{1,2}/\d{1,2}/\d{4}\b", "", line)).strip(" ,.;:-")
-    return ""
+        score = _property_authority_score(line)
+        if score <= 0:
+            continue
+        if date_line_idx >= 0:
+            distance = abs(idx - date_line_idx)
+            score += max(0, 4 - distance)
+        candidates.append((score, -idx, line))
+    if not candidates:
+        return ""
+    candidates.sort(reverse=True)
+    return candidates[0][2]
+
+
+def _normalize_property_land_type_value(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    upper = text.upper()
+    code_match = re.search(r"\b([A-Z]{2,4})\b", upper)
+    if code_match and code_match.group(1) in _PROPERTY_LAND_TYPE_CODES:
+        return code_match.group(1)
+    mapped = _land_name_to_code(text)
+    if mapped:
+        return mapped
+    text = re.sub(r"(?<!\d)\d+(?:[.,]\d+)?\s*(?:m2|m²|m\^2|met vuong)\b.*$", "", text, flags=re.IGNORECASE)
+    return _clean_text(text).strip(" ,.;:-")
 
 
 def _normalize_property_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -1091,7 +1682,7 @@ def _normalize_property_data(data: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(row, dict):
                 continue
             loai_dat = _clean_text(row.get("loai_dat")).upper()
-            dien_tich = _clean_text(row.get("dien_tich")).replace(",", ".")
+            dien_tich = _normalize_property_area_number(_clean_text(row.get("dien_tich")))
             thoi_han = _clean_text(row.get("thoi_han"))
             if not (loai_dat or dien_tich or thoi_han):
                 continue
@@ -1109,11 +1700,12 @@ def _normalize_property_data(data: dict[str, Any]) -> dict[str, Any]:
         "so_vao_so": _clean_property_code(str(data.get("so_vao_so") or "")),
         "so_thua_dat": _clean_text(data.get("so_thua_dat")),
         "so_to_ban_do": _clean_text(data.get("so_to_ban_do")),
-        "dien_tich": _clean_text(data.get("dien_tich")),
+        "dien_tich": _normalize_property_area_number(_clean_text(data.get("dien_tich"))),
         "dia_chi": _strip_property_address_noise(str(data.get("dia_chi") or "")),
+        "chu_su_dung": _clean_text(data.get("chu_su_dung")),
         "ngay_cap": _normalize_date(data.get("ngay_cap")),
         "co_quan_cap": _clean_text(data.get("co_quan_cap")),
-        "loai_dat": _clean_text(data.get("loai_dat")),
+        "loai_dat": _normalize_property_land_type_value(data.get("loai_dat")),
         "thoi_han": _clean_text(data.get("thoi_han")),
         "hinh_thuc_su_dung": _clean_text(data.get("hinh_thuc_su_dung")),
         "nguon_goc": _clean_text(data.get("nguon_goc")),
@@ -1158,8 +1750,7 @@ def _normalize_property_ocr_doc(lines: list[str], filename: str, side: str = "un
     cleaned_lines = [_clean_text(ln) for ln in lines if _clean_text(ln)]
     if not cleaned_lines:
         return {"doc_type": "unknown", "side": normalized_side, "data": {}, "filename": filename, "text_lines": []}
-    if not _looks_like_property_doc(cleaned_lines):
-        return {"doc_type": "unknown", "side": normalized_side, "data": {}, "filename": filename, "text_lines": cleaned_lines}
+    looks_like_property = _looks_like_property_doc(cleaned_lines)
 
     issue_date = _extract_property_issue_date(cleaned_lines)
     land_rows = _extract_property_land_rows(cleaned_lines)
@@ -1172,6 +1763,7 @@ def _normalize_property_ocr_doc(lines: list[str], filename: str, side: str = "un
             "so_to_ban_do": _extract_property_map_sheet(cleaned_lines),
             "dien_tich": _extract_property_area(cleaned_lines),
             "dia_chi": _extract_property_address(cleaned_lines),
+            "chu_su_dung": _extract_property_owner(cleaned_lines),
             "ngay_cap": issue_date,
             "co_quan_cap": _extract_property_authority(cleaned_lines, issue_date),
             "loai_dat": _extract_property_field_by_label(cleaned_lines, ["loai dat", "muc dich su dung"]),
@@ -1183,6 +1775,10 @@ def _normalize_property_ocr_doc(lines: list[str], filename: str, side: str = "un
     )
     _fill_property_from_land_rows(data)
     non_empty = sum(1 for v in data.values() if _property_has_value(v))
+    strong_fields = ["so_serial", "so_vao_so", "so_thua_dat", "so_to_ban_do", "dien_tich", "dia_chi", "loai_dat", "chu_su_dung"]
+    strong_hits = sum(1 for key in strong_fields if _property_has_value(data.get(key)))
+    if not looks_like_property and strong_hits < 2:
+        return {"doc_type": "unknown", "side": normalized_side, "data": {}, "filename": filename, "text_lines": cleaned_lines}
     missing_fields = _property_missing_fields(data)
     warnings = list(missing_fields)
     return {
@@ -1223,49 +1819,190 @@ def _count_alpha_num(text: str) -> int:
     return sum(1 for ch in text if ch.isalnum())
 
 
-def _property_value_clean_score(field: str, value: Any) -> tuple[int, int, int]:
+def _property_serial_value_score(value: str) -> int:
+    compact = re.sub(r"\s+", "", _clean_property_code(value).upper())
+    if not compact:
+        return 0
+    if re.fullmatch(r"[A-Z]{2}\d{6,8}", compact):
+        return 10
+    if re.fullmatch(r"[A-Z]\d{6,8}", compact):
+        return 7
+    if re.fullmatch(r"[A-Z]{1,4}\d{4,12}(?:/\d{1,8})?", compact):
+        return 4
+    return 1
+
+
+def _property_registry_value_score(value: str) -> int:
+    compact = re.sub(r"\s+", "", _clean_property_code(value).upper())
+    if not compact:
+        return 0
+    if re.fullmatch(r"[A-Z]{1,4}\d{3,12}(?:/\d{1,8})?", compact):
+        return 8 + (1 if "/" in compact else 0)
+    if re.fullmatch(r"[A-Z]{1,4}\d{3,12}", compact):
+        return 7
+    return 1
+
+
+def _property_area_value_score(value: str) -> int:
+    text = _normalize_property_area_number(value)
+    if not text:
+        return 0
+    try:
+        area = float(text)
+    except Exception:
+        return 0
+    if area <= 0 or area > 1000000:
+        return 1
+    return 7 + (1 if "." in text else 0)
+
+
+def _merge_property_land_rows(front_rows: list[dict[str, str]], back_rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], str]:
+    merged_rows: dict[str, dict[str, str]] = {}
+    sources: set[str] = set()
+    for source, rows in (("front", front_rows), ("back", back_rows)):
+        for raw_row in rows:
+            if not isinstance(raw_row, dict):
+                continue
+            row = _normalize_property_data({"land_rows": [raw_row]}).get("land_rows", [])
+            if not row:
+                continue
+            item = row[0]
+            code = _clean_text(item.get("loai_dat")) or f"__{len(merged_rows)}"
+            current = merged_rows.get(code)
+            if current is None:
+                merged_rows[code] = item
+                sources.add(source)
+                continue
+            if _property_area_value_score(item.get("dien_tich", "")) > _property_area_value_score(current.get("dien_tich", "")):
+                current["dien_tich"] = item.get("dien_tich", "")
+            if _clean_text(item.get("thoi_han")) and not _clean_text(current.get("thoi_han")):
+                current["thoi_han"] = item.get("thoi_han", "")
+            sources.add(source)
+    if not merged_rows:
+        return [], "none"
+    source_tag = "merged" if len(sources) > 1 else next(iter(sources))
+    return list(merged_rows.values()), source_tag
+
+
+def _property_value_clean_score(field: str, value: Any) -> tuple[int, int, int, str]:
     if isinstance(value, list):
-        return (1 if len(value) > 0 else 0, len(value), 0)
+        return (1 if len(value) > 0 else 0, len(value), 0, json.dumps(value, ensure_ascii=False, default=str))
     text = _clean_text(value)
     if not text:
-        return (0, 0, 0)
+        return (0, 0, 0, "")
     quality = 1
-    if field == "dia_chi":
-        quality += 2 if "," in text else 0
-        quality += 1 if len(text.split()) >= 4 else 0
+    if field == "so_serial":
+        quality = _property_serial_value_score(text)
+    elif field == "so_vao_so":
+        quality = _property_registry_value_score(text)
+    elif field == "dia_chi":
+        quality = _property_address_score(text)
+    elif field == "chu_su_dung":
+        quality = _property_owner_score(text)
+    elif field == "dien_tich":
+        quality = _property_area_value_score(text)
+    elif field == "co_quan_cap":
+        quality = _property_authority_score(_clean_property_authority_value(text))
     elif field in {"so_thua_dat", "so_to_ban_do", "dien_tich"}:
         quality += 1 if re.search(r"\d", text) else 0
     elif field in {"loai_dat"}:
-        quality += 2 if _clean_text(text).upper() in _PROPERTY_LAND_TYPE_CODES else 0
-    return (quality, len(text), _count_alpha_num(text))
+        quality = 6 if _normalize_property_land_type_value(text) else 1
+    stable_text = _clean_text(text)
+    return (quality, len(text), _count_alpha_num(text), stable_text)
+
+
+def _parse_property_issue_date_candidate(value: Any) -> tuple[bool, bool, int, str]:
+    text = _clean_text(value)
+    normalized = _normalize_date(text)
+    if not normalized:
+        return (False, False, 0, "")
+    try:
+        parsed = datetime.strptime(normalized, "%d/%m/%Y")
+    except ValueError:
+        return (True, False, 0, normalized)
+    today = datetime.now()
+    in_range = datetime(1900, 1, 1) <= parsed <= today
+    return (True, in_range, parsed.toordinal() if in_range else 0, normalized)
+
+
+def _property_authority_marker_score(value: Any) -> int:
+    key = _fold_text(_clean_property_authority_value(_clean_text(value)))
+    if not key:
+        return 0
+    score = 0
+    if "chi nhanh van phong dang ky" in key:
+        score += 4
+    if "van phong dang ky" in key:
+        score += 3
+    if "so tai nguyen" in key:
+        score += 3
+    if "ubnd" in key or "uy ban nhan dan" in key:
+        score += 3
+    return score
+
+
+def _pick_property_issue_date_value(front_value: Any, back_value: Any) -> tuple[Any, str] | None:
+    front_meta = _parse_property_issue_date_candidate(front_value)
+    back_meta = _parse_property_issue_date_candidate(back_value)
+    if back_meta[:3] > front_meta[:3]:
+        return back_meta[3], "back"
+    if front_meta[:3] > back_meta[:3]:
+        return front_meta[3], "front"
+    return None
+
+
+def _pick_property_authority_value(front_value: Any, back_value: Any) -> tuple[Any, str] | None:
+    front_clean = _clean_property_authority_value(_clean_text(front_value))
+    back_clean = _clean_property_authority_value(_clean_text(back_value))
+    if front_clean and back_clean and front_clean == back_clean:
+        if len(_clean_text(back_value)) < len(_clean_text(front_value)):
+            return back_clean, "back"
+        return front_clean, "front"
+    front_key = (
+        _property_authority_marker_score(front_clean),
+        _property_authority_score(front_clean),
+        -len(front_clean),
+        front_clean,
+    )
+    back_key = (
+        _property_authority_marker_score(back_clean),
+        _property_authority_score(back_clean),
+        -len(back_clean),
+        back_clean,
+    )
+    if back_key > front_key:
+        return back_clean, "back"
+    if front_key > back_key:
+        return front_clean, "front"
+    return None
 
 
 def _pick_property_field_value(field: str, front_value: Any, back_value: Any) -> tuple[Any, str]:
     front_has = _property_has_value(front_value)
     back_has = _property_has_value(back_value)
-    if field in _PROPERTY_FRONT_PRIORITY_FIELDS:
-        if front_has:
-            return front_value, "front"
-        if back_has:
-            return back_value, "back"
-        return "", "none"
-    if field in _PROPERTY_BACK_PRIORITY_FIELDS:
-        if back_has:
-            return back_value, "back"
-        if front_has:
-            return front_value, "front"
-        return "", "none"
     if front_has and not back_has:
         return front_value, "front"
     if back_has and not front_has:
         return back_value, "back"
     if not front_has and not back_has:
         return "", "none"
+    if field == "ngay_cap":
+        chosen = _pick_property_issue_date_value(front_value, back_value)
+        if chosen is not None:
+            return chosen
+    if field == "co_quan_cap":
+        chosen = _pick_property_authority_value(front_value, back_value)
+        if chosen is not None:
+            return chosen
     if isinstance(front_value, list) and isinstance(back_value, list):
-        if len(back_value) > len(front_value):
+        if _property_value_clean_score(field, back_value) > _property_value_clean_score(field, front_value):
             return back_value, "back"
         return front_value, "front"
     if _property_value_clean_score(field, back_value) > _property_value_clean_score(field, front_value):
+        return back_value, "back"
+    if _property_value_clean_score(field, front_value) > _property_value_clean_score(field, back_value):
+        return front_value, "front"
+    if _clean_text(str(back_value)) < _clean_text(str(front_value)):
         return back_value, "back"
     return front_value, "front"
 
@@ -1284,9 +2021,9 @@ def _merge_property_pair(front_doc: dict[str, Any], back_doc: dict[str, Any]) ->
 
     front_rows = front_data.get("land_rows") if isinstance(front_data.get("land_rows"), list) else []
     back_rows = back_data.get("land_rows") if isinstance(back_data.get("land_rows"), list) else []
-    merged_rows, rows_source = _pick_property_field_value("land_rows", front_rows, back_rows)
-    merged_seed["land_rows"] = merged_rows if isinstance(merged_rows, list) else []
-    if rows_source in {"front", "back"}:
+    merged_rows, rows_source = _merge_property_land_rows(front_rows, back_rows)
+    merged_seed["land_rows"] = merged_rows
+    if rows_source in {"front", "back", "merged"}:
         field_sources["land_rows"] = rows_source
 
     merged = _normalize_property_data(merged_seed)
@@ -1701,6 +2438,7 @@ async def _process_single_property_image(
     ai_semaphore: asyncio.Semaphore,
     client: httpx.AsyncClient,
     side: str = "unknown",
+    enable_footer_date_rescue: bool = True,
 ) -> dict[str, Any]:
     filename = upload.filename or "unknown"
     file_bytes = await upload.read()
@@ -1745,11 +2483,57 @@ async def _process_single_property_image(
                 error=str(exc)[:240],
             )
 
+    used_footer_date_rescue = False
+    if enable_footer_date_rescue and _should_rescue_property_issue_date(doc):
+        footer_bytes = _prepare_property_footer_image_bytes(file_bytes)
+        if footer_bytes:
+            try:
+                footer_b64 = base64.b64encode(footer_bytes).decode()
+                async with ai_semaphore:
+                    footer_lines = await _call_qwen_native_ocr_single(
+                        client,
+                        api_key=api_key,
+                        model=model,
+                        image_b64=footer_b64,
+                        filename=f"{filename}#footer",
+                        enable_rotate=False,
+                    )
+                footer_date = _extract_property_issue_date(footer_lines)
+                if footer_date:
+                    footer_authority = _extract_property_authority(footer_lines, footer_date)
+                    current_date = _clean_text((doc.get("data") if isinstance(doc.get("data"), dict) else {}).get("ngay_cap"))
+                    current_year = _extract_year(current_date)
+                    footer_year = _extract_year(footer_date)
+                    footer_context_year = _extract_footer_context_year(
+                        doc.get("text_lines") if isinstance(doc.get("text_lines"), list) else []
+                    )
+                    should_replace_date = (
+                        not current_date
+                        or (footer_context_year and footer_year == footer_context_year and footer_year > current_year)
+                    )
+                    if should_replace_date and isinstance(doc.get("data"), dict):
+                        doc["data"]["ngay_cap"] = footer_date
+                        current_authority = _clean_text(doc["data"].get("co_quan_cap"))
+                        if footer_authority and _property_authority_score(footer_authority) > _property_authority_score(current_authority):
+                            doc["data"]["co_quan_cap"] = footer_authority
+                        doc["missing_fields"] = _property_missing_fields(doc["data"])
+                        doc["warnings"] = list(doc["missing_fields"])
+                        doc["text_lines"] = list(doc.get("text_lines") or []) + ["[footer_rescue]"] + footer_lines
+                    used_footer_date_rescue = True
+            except Exception as exc:
+                _log_ocr_ai(
+                    "property_footer_date_rescue_error",
+                    level="warning",
+                    filename=filename,
+                    error=str(exc)[:240],
+                )
+
     return {
         "filename": filename,
         "side": _normalize_property_side(side),
         "doc": doc,
         "used_rotate_retry": used_rotate_retry,
+        "used_footer_date_rescue": used_footer_date_rescue,
     }
 
 
@@ -1915,11 +2699,13 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
                 results.append(item)
 
     used_rotate_retry = 0
+    used_footer_date_rescue = 0
     unknowns = 0
     for item in results:
         filename = str(item.get("filename") or "unknown")
         doc = item.get("doc") if isinstance(item.get("doc"), dict) else {}
         used_rotate_retry += 1 if item.get("used_rotate_retry") else 0
+        used_footer_date_rescue += 1 if item.get("used_footer_date_rescue") else 0
         if not doc:
             errors.append({"filename": filename, "error": "No OCR result"})
             continue
@@ -1964,6 +2750,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
         unknowns=unknowns,
         errors=len(errors),
         rotate_retry=used_rotate_retry,
+        footer_date_rescue=used_footer_date_rescue,
         total_ms=_ms(total_ms),
     )
     return {
@@ -1980,6 +2767,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
             "marriages": 0,
             "unknowns": unknowns,
             "rotate_retry": used_rotate_retry,
+            "footer_date_rescue": used_footer_date_rescue,
             "total_ms": _ms(total_ms),
         },
     }
@@ -2008,6 +2796,7 @@ async def analyze_property_pair(
                 ai_semaphore=ai_semaphore,
                 client=client,
                 side="front",
+                enable_footer_date_rescue=False,
             ),
             _process_single_property_image(
                 back_file,
@@ -2016,6 +2805,7 @@ async def analyze_property_pair(
                 ai_semaphore=ai_semaphore,
                 client=client,
                 side="back",
+                enable_footer_date_rescue=False,
             ),
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -2066,6 +2856,7 @@ async def analyze_property_pair(
             "warnings": front_doc.get("warnings") if isinstance(front_doc.get("warnings"), list) else [],
             "missing_fields": front_doc.get("missing_fields") if isinstance(front_doc.get("missing_fields"), list) else [],
             "status": "ok" if str(front_doc.get("doc_type") or "") == "property" else "skipped",
+            "text_lines": front_doc.get("text_lines") if isinstance(front_doc.get("text_lines"), list) else [],
         },
         "back": {
             "file": str(back_doc.get("filename") or back_file.filename or "back.jpg"),
@@ -2074,6 +2865,7 @@ async def analyze_property_pair(
             "warnings": back_doc.get("warnings") if isinstance(back_doc.get("warnings"), list) else [],
             "missing_fields": back_doc.get("missing_fields") if isinstance(back_doc.get("missing_fields"), list) else [],
             "status": "ok" if str(back_doc.get("doc_type") or "") == "property" else "skipped",
+            "text_lines": back_doc.get("text_lines") if isinstance(back_doc.get("text_lines"), list) else [],
         },
     }
 

@@ -32,6 +32,149 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(doc["data"]["so_to_ban_do"], "29")
         self.assertEqual(doc["data"]["ngay_cap"], "10/07/2023")
 
+    def test_normalize_property_doc_handles_noisy_registry_and_plot_lines(self):
+        lines = [
+            "II. Thửa đất, nhà ở và tài sản khác gắn liền với đất",
+            "1. Thửa đất:",
+            "a) Thửa đất: 66",
+            "b) Địa chỉ: Tỉnh Lộ 485, xã Yên Bình, huyện Yên Yên, tỉnh Nam Định",
+            "Nam Định, ngày 10 tháng 3 năm 2018",
+            "VĂN PHÒNG ĐĂNG KÝ ĐẤT ĐAI",
+            "Số vạch số cấp GCN: VP00166 10423",
+        ]
+        doc = ocr_ai._normalize_property_ocr_doc(lines, "property-back.jpg", side="back")
+        self.assertEqual(doc["doc_type"], "property")
+        self.assertEqual(doc["data"]["so_vao_so"], "VP00166")
+        self.assertEqual(doc["data"]["so_thua_dat"], "66")
+
+    def test_extract_property_registry_no_rejects_non_code_followup(self):
+        lines = [
+            "Vào sổ cấp giấy chứng nhận",
+            "Quyền sử dụng đất",
+            "Số ...........QSDD/...........",
+        ]
+        self.assertEqual(ocr_ai._extract_property_registry_no(lines), "")
+
+    def test_extract_property_authority_prefers_real_issuing_agency(self):
+        lines = [
+            "Ninh Binh, ngay 07 thang 04 nam 2026",
+            "VAN PHONG DANG KY DAT DAI NAM DINH",
+            "KT. GIAM DOC",
+            "PHO GIAM DOC",
+        ]
+        self.assertEqual(
+            ocr_ai._extract_property_authority(lines, "07/04/2026"),
+            "VAN PHONG DANG KY DAT DAI NAM DINH",
+        )
+
+    def test_extract_property_authority_rejects_warning_sentence(self):
+        lines = [
+            "Nguoi duoc cap Giay chung nhan khong duoc sua chua, tay xoa hoac bo sung bat ky noi dung nao trong Giay chung nhan; khi bi mat hoac hu hong Giay chung nhan phai khai bao ngay voi co quan cap Giay.",
+            "So vao so cap Giay chung nhan: VP56315",
+        ]
+        self.assertEqual(ocr_ai._extract_property_authority(lines, ""), "")
+
+    def test_should_rescue_property_issue_date_when_footer_year_is_newer(self):
+        doc = {
+            "doc_type": "property",
+            "side": "back",
+            "data": {
+                "ngay_cap": "10/03/2018",
+                "co_quan_cap": "VAN PHONG DANG KY DAT DAI",
+            },
+            "text_lines": [
+                "Nam Dinh, ngay 10 thang 3 nam 2018",
+                "VAN PHONG DANG KY DAT DAI",
+                "SO DO DUOC BIEN TAP THEO BAN DO DIA CHINH XA YEN BINH LAP NAM 2004 CHINH LY NAM 2023",
+            ],
+        }
+        self.assertTrue(ocr_ai._should_rescue_property_issue_date(doc))
+
+    def test_should_not_rescue_property_issue_date_without_footer_signal(self):
+        doc = {
+            "doc_type": "property",
+            "side": "back",
+            "data": {
+                "ngay_cap": "15/04/1991",
+                "co_quan_cap": "UY BAN NHAN DAN",
+            },
+            "text_lines": [
+                "Ngay 15 thang 4 nam 1991",
+                "UY BAN NHAN DAN",
+            ],
+        }
+        self.assertFalse(ocr_ai._should_rescue_property_issue_date(doc))
+
+    def test_extract_property_address_keeps_nam_dinh_continuation(self):
+        lines = [
+            "Dia chi:",
+            "Thon Phuong Nhi",
+            "Xa Tan Minh, huyen Kim Son, tinh Nam Dinh",
+        ]
+        self.assertEqual(
+            ocr_ai._extract_property_address(lines),
+            "Thon Phuong Nhi, Xa Tan Minh, huyen Kim Son, tinh Nam Dinh",
+        )
+
+    def test_extract_property_address_stops_before_footer_date_line(self):
+        lines = [
+            "Dia chi:",
+            "Thon Phuong Nhi",
+            "Xa Tan Minh, huyen Kim Son, tinh Nam Dinh",
+            "Nam Dinh, ngay 10/07/2023",
+            "VAN PHONG DANG KY DAT DAI",
+        ]
+        self.assertEqual(
+            ocr_ai._extract_property_address(lines),
+            "Thon Phuong Nhi, Xa Tan Minh, huyen Kim Son, tinh Nam Dinh",
+        )
+
+    def test_normalize_property_doc_accepts_standalone_serial_and_owner(self):
+        lines = [
+            "GIAY CHUNG NHAN",
+            "QUYEN SU DUNG DAT, QUYEN SO HUU NHA O VA TAI SAN KHAC GAN LIEN VOI DAT",
+            "BM 1451111",
+            "Nguoi su dung dat: NGUYEN VAN A",
+            "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+        ]
+        doc = ocr_ai._normalize_property_ocr_doc(lines, "property-owner.jpg")
+        self.assertEqual(doc["doc_type"], "property")
+        self.assertEqual(doc["data"]["so_serial"], "BM 1451111")
+        self.assertEqual(doc["data"]["chu_su_dung"], "NGUYEN VAN A")
+
+    def test_extract_property_serial_rejects_registry_like_standalone_code(self):
+        lines = [
+            "GIAY CHUNG NHAN",
+            "QUYEN SU DUNG DAT",
+            "VP123456",
+            "So vao so cap GCN: VP123456",
+            "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+        ]
+        self.assertEqual(ocr_ai._extract_property_serial(lines), "")
+
+    def test_normalize_property_doc_extracts_plot_and_map_from_combined_line(self):
+        lines = [
+            "GIAY CHUNG NHAN",
+            "QUYEN SU DUNG DAT",
+            "AA 12467547",
+            "Thua dat so: 342; To ban do so: 22",
+            "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+        ]
+        doc = ocr_ai._normalize_property_ocr_doc(lines, "property-combined.jpg")
+        self.assertEqual(doc["data"]["so_thua_dat"], "342")
+        self.assertEqual(doc["data"]["so_to_ban_do"], "22")
+
+    def test_normalize_property_doc_accepts_sparse_back_page(self):
+        lines = [
+            "a) Thua dat: 66",
+            "b) Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+            "So vao so cap GCN: VP00166",
+        ]
+        doc = ocr_ai._normalize_property_ocr_doc(lines, "property-sparse.jpg")
+        self.assertEqual(doc["doc_type"], "property")
+        self.assertEqual(doc["data"]["so_thua_dat"], "66")
+        self.assertEqual(doc["data"]["so_vao_so"], "VP00166")
+
     def test_normalize_property_doc_unknown_for_non_property(self):
         doc = ocr_ai._normalize_property_ocr_doc(["Hoa don dien tu", "Tong tien: 123000"], "bill.jpg")
         self.assertEqual(doc["doc_type"], "unknown")
@@ -219,7 +362,7 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["summary"]["properties"], 1)
         self.assertEqual(result["summary"]["unknowns"], 1)
 
-    async def test_analyze_property_pair_merges_front_back_with_precedence(self):
+    async def test_analyze_property_pair_merges_by_field_and_returns_owner(self):
         front = make_upload("front.jpg")
         back = make_upload("back.jpg")
         outputs = [
@@ -227,6 +370,7 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
                 "GIAY CHUNG NHAN",
                 "QUYEN SU DUNG DAT",
                 "So A 692942",
+                "Nguoi su dung dat: NGUYEN VAN A",
                 "Thua dat: 66",
                 "To ban do so: 29",
                 "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
@@ -255,8 +399,118 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prop["ngay_cap"], "10/07/2023")
         self.assertEqual(prop["so_thua_dat"], "66")
         self.assertEqual(prop["so_to_ban_do"], "29")
+        self.assertEqual(prop["chu_su_dung"], "NGUYEN VAN A")
         self.assertEqual(result["per_side"]["front"]["doc_type"], "property")
         self.assertEqual(result["per_side"]["back"]["doc_type"], "property")
+
+    async def test_analyze_property_pair_is_order_independent_without_footer_rescue(self):
+        pair_a = (make_upload("doc-front.jpg"), make_upload("doc-back.jpg"))
+        pair_b = (make_upload("doc-back.jpg"), make_upload("doc-front.jpg"))
+        call_filenames: list[str] = []
+
+        async def fake_call(*args, **kwargs):
+            filename = kwargs["filename"]
+            call_filenames.append(filename)
+            if filename.endswith("#footer"):
+                return [
+                    "Nam Dinh, ngay 10/07/2023",
+                    "VAN PHONG DANG KY DAT DAI",
+                ]
+            if filename == "doc-front.jpg":
+                return [
+                    "GIAY CHUNG NHAN",
+                    "QUYEN SU DUNG DAT",
+                    "AA07488103",
+                    "Dia chi: Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+                ]
+            if filename == "doc-back.jpg":
+                return [
+                    "GIAY CHUNG NHAN",
+                    "So vao so cap GCN: VP00166",
+                    "Nam Dinh, ngay 10 thang 3 nam 2018",
+                    "VAN PHONG DANG KY DAT DAI",
+                    "SO DO DUOC BIEN TAP THEO BAN DO DIA CHINH XA YEN BINH LAP NAM 2004 CHINH LY NAM 2023",
+                ]
+            raise AssertionError(f"unexpected filename: {filename}")
+
+        with (
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+            mock.patch.object(ocr_ai, "_should_retry_property_rotate", return_value=False),
+        ):
+            result_a = await ocr_ai.analyze_property_pair(*pair_a)
+            result_b = await ocr_ai.analyze_property_pair(*pair_b)
+
+        keys = tuple(ocr_ai._PROPERTY_FORM_FIELDS) + ("land_rows",)
+        self.assertEqual(
+            {key: result_a["property"].get(key) for key in keys},
+            {key: result_b["property"].get(key) for key in keys},
+        )
+        self.assertEqual(result_a["property"]["ngay_cap"], "10/03/2018")
+        self.assertEqual(len(call_filenames), 4)
+        self.assertFalse(any(name.endswith("#footer") for name in call_filenames))
+
+    def test_merge_property_pair_is_order_independent(self):
+        doc_a = {
+            "doc_type": "property",
+            "data": {
+                "so_serial": "AA 12467547",
+                "dia_chi": "Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+                "chu_su_dung": "NGUYEN VAN A",
+                "land_rows": [],
+            },
+        }
+        doc_b = {
+            "doc_type": "property",
+            "data": {
+                "so_vao_so": "VP00166",
+                "ngay_cap": "10/07/2023",
+                "so_thua_dat": "66",
+                "so_to_ban_do": "29",
+                "land_rows": [],
+            },
+        }
+
+        left_first = ocr_ai._merge_property_pair(doc_a, doc_b)
+        right_first = ocr_ai._merge_property_pair(doc_b, doc_a)
+
+        for key in ("so_serial", "so_vao_so", "ngay_cap", "so_thua_dat", "so_to_ban_do", "dia_chi", "chu_su_dung"):
+            self.assertEqual(left_first.get(key), right_first.get(key))
+
+    def test_merge_property_pair_prefers_cleaner_address_and_area(self):
+        noisy_doc = {
+            "doc_type": "property",
+            "data": {
+                "dia_chi": "Xa Yen Binh, huyen Y Yen, tinh Nam Dinh, VAN PHONG DANG KY DAT DAI",
+                "dien_tich": "447,0",
+                "land_rows": [],
+            },
+        }
+        clean_doc = {
+            "doc_type": "property",
+            "data": {
+                "dia_chi": "Xa Yen Binh, huyen Y Yen, tinh Nam Dinh",
+                "dien_tich": "447.00",
+                "land_rows": [],
+            },
+        }
+
+        merged = ocr_ai._merge_property_pair(noisy_doc, clean_doc)
+
+        self.assertEqual(merged["dia_chi"], "Xa Yen Binh, huyen Y Yen, tinh Nam Dinh")
+        self.assertEqual(merged["dien_tich"], "447.00")
+
+    def test_pick_property_field_value_prefers_recent_issue_date(self):
+        chosen, source = ocr_ai._pick_property_field_value("ngay_cap", "31/12/1999", "10/07/2023")
+        self.assertEqual(chosen, "10/07/2023")
+        self.assertEqual(source, "back")
+
+    def test_pick_property_field_value_prefers_clean_authority(self):
+        noisy = "VAN PHONG DANG KY DAT DAI NAM DINH KT GIAM DOC PHO GIAM DOC"
+        clean = "VAN PHONG DANG KY DAT DAI NAM DINH"
+        chosen, source = ocr_ai._pick_property_field_value("co_quan_cap", noisy, clean)
+        self.assertEqual(chosen, clean)
+        self.assertEqual(source, "back")
 
     def test_pair_persons_allows_fuzzy_id_when_name_matches(self):
         front = {

@@ -5,6 +5,9 @@ VĂN BẢN THỎA THUẬN
 PHÂN CHIA DI SẢN THỪA KẾ
 
 Hôm nay, tại UBND xã [Niêm Yết], tỉnh Ninh Bình. Hàng thừa kế của ông [Tên 1] và bà [Tên 2] gồm những người có tên sau đây: 
+# ông [Tên 1] và bà [Tên 2] nếu cả hai cùng chết thì ghi cả hai, nếu chỉ có 1 người chết thì ghi người đó.
+# ở danh sách phía dưới từ 1-10, Nếu Tên 1 đã chết thì bỏ qua, nếu Tên 2 đã chết thì bỏ qua.
+# ở danh sách phía dưới, nếu trống thông tin thì xóa block thông tin người đó đi.
 Ông/bà: [Tên 1];	Sinh ngày: [Năm sinh 1];
 [Loại CC 1] số: [CCCD 1] do [Nơi cấp CC 1] cấp ngày [Ngày cấp 1];
 [Thường trú 1]: [Địa chỉ 1].
@@ -45,8 +48,9 @@ Là con đẻ ông [Tên 1] và bà [Tên 2].
 [Loại CC 10] số: [CCCD 10] do [Nơi cấp CC 10] cấp ngày [Ngày cấp 10];
 [Thường trú 10]: [Địa chỉ 10].
 Là con đẻ ông [Tên 1] và bà [Tên 2].
-Ông [Tên 1]; Sinh năm: [Năm sinh 1]; chết ngày [Năm chết] theo Trích lục khai tử (Bản sao) số [CCCD 1] do Ủy ban nhân dân xã [Niêm Yết], tỉnh Ninh Bình ký ngày [Ngày cấp 1]. Nơi thường trú cuối cùng trước khi chết: [Địa chỉ 1]. 
+Ông [Tên 1]; Sinh năm: [Năm sinh 1]; chết ngày [Năm chết] theo Trích lục khai tử (Bản sao) số [CCCD 1] do Ủy ban nhân dân xã [Niêm Yết], tỉnh Ninh Bình ký ngày [Ngày cấp 1]. Nơi thường trú cuối cùng trước khi chết: [Địa chỉ 1].
 Bà [Tên 2]; Sinh năm: [Năm sinh 2]; chết ngày [Năm chết 2] theo Trích lục khai tử (Bản sao) số [CCCD 2] do Ủy ban nhân dân xã [Niêm Yết], tỉnh Ninh Bình ký ngày [Ngày cấp 2]. Nơi thường trú cuối cùng trước khi chết: [Địa chỉ 2].
+# Dòng 51, 52 là dòng liệt kê thông tin chi tiết của người đã chết, nếu Tên 1 đã chết thì ghi chi tiết, 
 Trước khi chết ông [Tên 1] và bà [Tên 2] không để lại di chúc, không để lại bất kì nghĩa vụ tài sản nào mà người thừa kế phải thực hiện theo quy định của pháp luật. 
 Bố đẻ của ông [Tên 1] và bà [Tên 2] đã chết từ lâu, chết trước khi ông [Tên 1] và bà [Tên 2] chết.
 Mẹ đẻ của ông [Tên 1] và bà [Tên 2] đã chết từ lâu, chết trước khi ông [Tên 1] và bà [Tên 2] chết.

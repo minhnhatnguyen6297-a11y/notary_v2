@@ -5,14 +5,6 @@ Cap nhat: 13/04/2026.
 
 ## Nguyen tac van hanh mac dinh
 - Mac dinh phat trien va test tren local.
-- VPS la moi truong chay/deploy; chi thao tac tren VPS khi can cai dat, restart service, xem log hoac dong bo ban da chot.
-- Truoc khi day len VPS, local phai ro trang thai git va commit/push day du.
-- Tai lieu workflow VPS: `docs/VPS_WORKFLOW.md`.
-- Sau khi sua/cai dat tren VPS, phai uu tien restart va kiem tra lai:
-  - `bash install_vps.sh --skip-system-packages` neu co doi dependency
-  - `bash deploy/vps/manage_services.sh restart`
-  - `bash deploy/vps/manage_services.sh logs`
-- Neu commit local va VPS bi lech nhau, phai xac minh ro ben nao la ban moi nhat truoc khi tiep tuc, khong duoc mac dinh local la nguon dung.
 - OCR toc do cao mac dinh `no fallback`:
   - Khong them fallback theo thoi quen.
   - Chi them fallback khi co benchmark moi chung minh recall tang dang ke va latency van chap nhan duoc.
@@ -128,17 +120,38 @@ Cap nhat: 13/04/2026.
 - Khong import helper QR/parser giua AI va Local. Neu can giong nhau thi duplicate co chu dich de giu kha nang debug doc lap.
 
 ## Vong lap kiem thu OCR bat buoc
-- Khi debug OCR, khong duoc chay UI/project truoc roi moi doan nguyen nhan.
+- Skill `test-ocr` trong `.claude/skills/test-ocr/SKILL.md` la wrapper auto-trigger cho muc nay.
+- Muc nay chi kich hoat khi user dang yeu cau thuc thi `test OCR`, `debug OCR`, `kiem thu OCR`, `doi chieu OCR`, `OCR sai`, hoac sua OCR tren case/batch anh cu the.
+- Khong kich hoat muc nay cho cau hoi giai thich, review kien truc, brainstorming, hay phan tich ly thuyet khong chay test that.
+- Dieu kien bat dau:
+  - Claude phai chot ro `batch anh` dang debug.
+  - Claude phai chot ro `expected`/ket qua ky vong cho tung anh, tung cap, hoac tung JSON cuoi cung.
+  - Neu thieu `batch anh` hoac `expected`, Claude phai hoi lai va dung tai do; chua duoc goi Codex, chua duoc chay UI/project.
 - Thu tu bat buoc:
-  1. Chot bo anh cua phien dang debug va ket qua dung ky vong tren tung anh.
-  2. Test truc tiep tren bo anh nay o tang ham/router truoc de lay output that.
-  3. Chi sau khi co output dung/gan dung o tang ham/router moi chay project/UI de doi chieu.
-  4. Doi chieu `expected -> router output -> project/UI output`.
-  5. Khoanh ro sai o dau: QR, preprocess, AI/local OCR, normalize, pairing, hay UI mapping.
+  1. Lay `direct output` truc tiep o tang ham/router tren chinh bo anh dang debug.
+  2. Neu `direct output` chua khop `expected`, phai fix/tinh lai o tang ham/router truoc; chua duoc nhay sang UI/project.
+  3. Chi khi da co `direct output` du can cu moi chay `project/UI test` tren cung batch anh.
+  4. Lap bao cao doi chieu theo thu tu `expected -> direct output -> project/UI output`.
+  5. Khoanh ro tang nghi ngo sai: QR, preprocess, AI/local OCR, normalize, pairing, router adapter, hay UI mapping.
   6. Neu sai lien quan nghiep vu hoac rule mapping, phai ghi ro case sai va hoi lai user neu chua du can cu.
-  7. Fix dung tang gay sai.
-  8. Lap lai vong `doi chieu -> tim nguyen nhan sai -> fix` den khi ket qua trung muc tieu tren bo anh cua phien do.
-  9. Cuoi cung moi chay regression rong hon.
+  7. Moi vong chi duoc fix 1 tang nghi ngo da co bang chung; khong sua dong thoi nhieu tang lam mat kha nang truy nguyen nguyen nhan.
+  8. Sau moi lan fix, bat buoc lay lai `direct output`, chay lai `project/UI test`, va cap nhat bao cao doi chieu.
+  9. Chi duoc ket thuc thanh cong khi `direct output` khop `expected` va `project/UI output` khop `direct output`.
+  10. Cuoi cung moi chay regression rong hon.
+- Format bao cao bat buoc cho moi vong:
+  - `batch anh`:
+  - `expected`:
+  - `direct output`:
+  - `project/UI output`:
+  - `tang nghi ngo sai`:
+  - `hanh dong ke tiep`:
+  - `trang thai`: `match` | `mismatch` | `blocked`
+- Phai bao `blocked` thay vi loop vo han neu:
+  - Khong lay duoc `direct output`.
+  - Khong chay duoc `project/UI test`.
+  - Du lieu dau vao flake/khong on dinh giua cac lan chay.
+  - `expected` mo ho, mau thuan, hoac user chua chot.
+  - Gap rule nghiep vu mo ho can user xac nhan.
 - Neu bo anh dang debug la anh local cua phien hien tai, uu tien dung bo anh do truoc bo regression cu.
 - Muc tieu dung la ket qua JSON/cu phap nghiep vu cuoi cung, khong chi la text OCR tho.
 
@@ -154,75 +167,11 @@ python -m uvicorn main:app --port 8000
 
 URL mac dinh: `http://127.0.0.1:8000`
 
-## VPS one-click
-```bash
-bash install_vps.sh
-```
-
-Sau khi cai dat:
-- Quan ly service: `bash deploy/vps/manage_services.sh status|restart|logs`
-- Tai lieu chi tiet: `docs/VPS_ONE_CLICK_SETUP.md`
-- Workflow van hanh/mac dinh: `docs/VPS_WORKFLOW.md`
-- Windows wrappers:
-  - `launch_vps_app.bat`
-  - `connect_vps.bat`
-  - `view_vps_logs.bat`
-- Log file tren VPS: `logs/web.log`, `logs/worker.log`
-
 ## Local OCR - RapidOCR Only
 
-### Muc tieu
-- On dinh tren may Windows local.
-- Giam phu thuoc nang.
-- Uu tien toc do va kha nang debug.
-
-### Pipeline xu ly hien tai
-1. Nhan anh tu client.
-2. Tien xu ly nhe:
-   - sharpen kernel `[[0,-1,0],[-1,5,-1],[0,-1,0]]`.
-   - Khong dung bilateral filter.
-3. Cat tai lieu:
-   - Smart Crop OpenCV (Canny + contour) voi soft fallback ve full image.
-   - Chuan hoa anh OCR voi `max_side_len=1200`.
-4. Triage V2 (feature flag):
-   - Tao proxy image, thu 4 huong `0/90/180/270`.
-   - Detect nhanh Face + QR + MRZ-score.
-   - Gan state: `front_old`, `front_new`, `back_new`, `back_old` (hoac `unknown`).
-   - Xoay anh goc high-res theo huong da chon.
-5. Targeted extraction:
-   - RapidOCR chi dung cho text detection, khong dung recognition.
-   - VietOCR `vgg_transformer` doc batch cac dong chu da cat tu bounding boxes.
-   - ROI loc theo `triage_state` (`front_old`, `front_new`, `back_new`, `back_old`, `unknown`) thay vi crop cung.
-   - Regex MRZ: `IDVNM\\d{10}(\\d{12})`.
-6. Deterministic merge:
-   - Ghep cap tuyet doi theo CCCD 12 so.
-   - Anh khong co ID dua vao `unpaired` + warning.
-   - Delta merge bo sung field thieu theo side/profile.
-7. Wide fallback:
-   - Neu triage `unknown`, he thong thu `id_front` -> `id_back` -> `detail` ROI rong.
-   - Khong con legacy fallback va khong con score rollback.
-8. Tra ket qua + warnings cho frontend de human-in-the-loop.
-9. Co log timing/telemetry chi tiet theo stage.
-
-### Engine / nhan dang
-- `summary.local_engine`: `RapidOCR det + VietOCR rec (CPU)`
-- `summary.rec_model_mode`: `vgg_transformer`
-- Bien moi truong Local OCR chinh:
-  - `LOCAL_OCR_DET_MAX_SIDE_LEN`
-  - `LOCAL_OCR_VIETOCR_MODEL`
-  - `LOCAL_OCR_VIETOCR_BATCH_SIZE`
-  - `LOCAL_OCR_TORCH_THREADS`
-  - `LOCAL_OCR_DENOISE`
-  - `LOCAL_OCR_REC_PAD_RATIO`
-  - `LOCAL_OCR_REC_MIN_HEIGHT`
-  - `LOCAL_OCR_REC_MAX_SCALE`
-
-### Luat du lieu quan trong
-- Ten: uu tien QR > mat truoc > MRZ (MRZ chi fallback).
-- Dia chi:
-  - CCCD cu (truoc 01/07/2024): block `Noi thuong tru` o mat truoc.
-  - CCCD moi (sau 01/07/2024): block `Noi cu tru` o mat sau.
-- `ngay_het_han` khong dua vao du lieu participant nghiep vu.
+- Engine: `RapidOCR det + VietOCR rec (CPU)`, model `vgg_transformer`.
+- Pipeline: Smart Crop → Triage V2 (4 huong) → Targeted Extraction → Deterministic Merge → Wide Fallback.
+- Chi tiet buoc xu ly, env vars, ROI presets, luat du lieu: `docs/plans/ocr_local.md`.
 
 ## API Local OCR
 - `POST /api/ocr/local/submit`
@@ -237,13 +186,10 @@ Sau khi cai dat:
 - Task name giu nguyen:
   - `process_ocr_job`
   - `process_ocr_batch_job`
-- Worker startup chuan:
-  - Local Windows qua `run.bat`: `python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
-  - VPS Linux/systemd: `python -m celery -A celery_app.celery_app worker --pool=prefork --concurrency=3 --loglevel=INFO`
+- Worker startup: `python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
 
 ## Script setup/run
-- `run.bat`: script local duy nhat. Tu tao venv, tao `.env`, cai dependency app + PyTorch CPU + VietOCR/RapidOCR, khoi dong worker/server.
-- `install_vps.sh`: script VPS duy nhat cho one-click install/start service.
+- `run.bat`: tao venv, tao `.env`, cai dependency, khoi dong worker/server.
 - `requirements-gpu.txt`: optional cho may NVIDIA (onnxruntime-gpu).
 
 ## Bien moi truong lien quan Local OCR
@@ -301,3 +247,102 @@ Index day du: `docs/plans/_INDEX.md`
 python -m py_compile routers/ocr_local.py tasks.py
 rg -n "rapidocr|onnxruntime|opencv-python|LOCAL_OCR_TRIAGE" .env.example CLAUDE.md run.bat
 ```
+
+## Quy trinh Claudex — Lam viec voi Codex
+
+Claudex la quy trinh chuan khi giao task lon: Claude va Codex debate plan, user duyet, Codex implement.
+
+### Cach su dung
+Goi trong Claude Code:
+```
+/claudex "module/feature: mo ta task"
+```
+
+Vi du:
+```
+/claudex "cases/OCR AI: fix pairing bug khi batch lon hon 4 anh"
+/claudex "cases/Word: them field nguoi chung kien vao template"
+```
+
+### Cau truc ben duoi (tools/codex_relay.py)
+- `draft`: Planner → Critic → PlannerFinalizer chay tuan tu, luu artifact vao `runtime/codex_relay/<timestamp>/`
+- `approve`: Danh dau run da duoc user duyet
+- `execute`: Executor implement + Reviewer kiem tra sau
+- `status`: Xem trang thai bat ky run
+
+Chay thu cong (neu khong dung slash command):
+```powershell
+# Tao plan tu file task
+python tools/codex_relay.py draft --task runtime/codex_relay_task_tmp.md
+
+# Duyet plan (sau khi doc final_plan.md)
+python tools/codex_relay.py approve --run-dir "runtime\codex_relay\<ten-thu-muc>"
+
+# Implement
+python tools/codex_relay.py execute --run-dir "runtime\codex_relay\<ten-thu-muc>" --with-review
+```
+
+### State machine cua moi run
+```
+awaiting_approval → approved → completed
+                            ↘ (loi) giu nguyen approved, chay lai execute
+```
+Khong co state failed — khi loi giu nguyen state cu, chay lai tu buoc bi hong.
+
+### Luu y van hanh
+- Runtime data tai `runtime/codex_relay/` — da gitignore, khong commit.
+- Codex CLI phai da login: kiem tra bang `cmd /c codex.cmd --version`
+- Tuyet doi khong implement truoc khi co lenh `approve` — day la invariant cung cua workflow.
+- Sau moi task, slash command tu dong cap nhat CLAUDE.md section "Lich su chuc nang".
+
+### Relay OCR giua Claude va Codex
+- Khi task la `test OCR`/`debug OCR`/`kiem thu OCR`, Claude la ben tu chay vong doi chieu. Claude khong duoc goi Codex de "doan bug" truoc khi da doi chieu xong theo muc `Vong lap kiem thu OCR bat buoc`.
+- Claude chi duoc relay sang Codex khi da co du:
+  - `batch anh`
+  - `expected`
+  - `direct output`
+  - `project/UI output`
+  - `tang nghi ngo sai`
+  - `muc tieu fix cua vong hien tai`
+- Neu thieu bat ky muc nao o tren, Claude phai tiep tuc tu chay test, hoi user, hoac bao `blocked`; khong duoc mo Claudex run.
+- Khi relay OCR sang Codex, request/to-do bat buoc phai ghi toi thieu:
+```text
+Lam gi: <fix OCR o tang dang nghi ngo cho vong hien tai>
+Sua phan nao: <tang nghi ngo sai>
+Pham vi: <chi tang dang nghi ngo cua vong hien tai>
+Muc tieu: <direct output khop expected, project/UI output khop direct output>
+Batch anh: <liet ke bo anh dang debug>
+Expected: <ket qua ky vong da chot>
+Direct output: <ket qua lay truc tiep o tang ham/router>
+Project/UI output: <ket qua khi chay project/UI>
+Tang nghi ngo sai: <mot tang cu the>
+Muc tieu fix vong nay: <ly do goi Codex trong vong nay>
+```
+- Codex chi sua dung tang da duoc Claude khoanh bang bang chung doi chieu; khong tu mo rong sang tang khac neu chua co bang chung moi.
+- Sau khi Codex implement xong, Claude phai tu chay lai vong doi chieu va cap nhat bao cao `match/mismatch/blocked`; khong duoc xem task da xong chi vi "da sua code".
+
+## Lich su chuc nang
+
+<!-- claudex-history-start -->
+### cases > OCR tai san
+**[Mo ta]:** Nang cap OCR so do/so hong: doc serial dang `BM 1451111`/`AA 12467547` du dung mot minh khong co label, merge front/back khong con phu thuoc thu tu upload, bo sung field `chu_su_dung` trong response. Da fix 4 bug reviewer phat hien (run 2).
+**[Tech]:**
+- Endpoint: `POST /api/ocr/analyze-property`, `POST /api/ocr/analyze-property-pair` -> `routers/ocr_ai.py`
+- Tests: `tests/test_ocr_ai.py` (32/32 OK sau run 2), +5 regression test moi cho bug #2-#4
+- Quyet dinh: parse tung anh doc lap, merge theo field; `chu_su_dung` additive trong response OCR, khong persist DB; footer date rescue tat trong pair flow (flag noi bo)
+- Regex moi: `[A-Z]{2}\s*\d{6,8}` standalone cho `so_serial`; stop condition `"nam "` da duoc thu hep, giu duoc `"tinh Nam Dinh"`; merge `ngay_cap` uu tien date day du + hop le + moi hon
+- **Bug con lai (reviewer run 2 flag, can fix):**
+  - `High`: `per_side.*.text_lines` bi them vao `/analyze-property-pair` response -> contract violation + ro ri raw OCR PII
+  - `High`: `summary.footer_date_rescue` bi them vao `/analyze-property` response -> contract violation ngoai scope
+  - `Medium`: `chu_su_dung` bi push vao merged payload va classifier bi noi rong ("co 2 strong fields") -> scope violation, khong co negative test
+- Run dir (fix 4 bug): `runtime/codex_relay/20260422-135359-fix-4-bug-ma-reviewer-phat-hien-o-run-oc/`
+- Cap nhat: 22/04/2026
+### cases > OCR test skill
+**[Mo ta]:** Them skill `test-ocr` de ép Claude chay dung vong lap kiem thu OCR bat buoc moi khi gap tu khoa "test OCR", "debug OCR", "OCR sai". Skill chi la trigger/wrapper, source of truth la muc `Vong lap kiem thu OCR bat buoc` trong CLAUDE.md.
+**[Tech]:**
+- File tao moi: `.claude/skills/test-ocr/SKILL.md` (trigger + dan chieu CLAUDE.md)
+- File cap nhat: `CLAUDE.md` (them rule intent, dieu kien bat dau, decision gate truoc khi goi Codex, guardrail `blocked state`, format bao cao doi chieu), `.claude/commands/claudex.md` (them gate: OCR task phai co du `batch anh`, `expected`, `direct output`, `project/UI output`, `tang nghi ngo sai` truoc khi draft relay sang Codex)
+- Quyet dinh: `SKILL.md` = trigger, `CLAUDE.md` = source of truth, `claudex.md` = relay gate; khong lam lui logic OCR engine
+- Bug con lai: chua co smoke test runtime positive/negative trigger; `claudex.md` co bat nhat menu `[d]` can sua; scope hoi bi keo rong sang `Phase 4 KNOWLEDGE CAPTURE` can tach rieng neu can
+- Cap nhat: 22/04/2026
+<!-- claudex-history-end -->

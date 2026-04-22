@@ -37,3 +37,4 @@ runtime/
 
 # Legacy accidental path after upload tool move
 tools/UPLOAD/
+.claude/worktrees/
