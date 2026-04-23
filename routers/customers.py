@@ -456,7 +456,8 @@ def quick_update(
     except IntegrityError:
         db.rollback()
         return JSONResponse({"ok": False, "error": "so_giay_to trùng"}, status_code=400)
-    return JSONResponse({"ok": True})
+    db.refresh(c)
+    return JSONResponse({"ok": True, "customer": to_customer_json(c)})
 
 
 @router.post("/create")

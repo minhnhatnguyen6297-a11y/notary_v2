@@ -2300,7 +2300,23 @@ endif %}
     } {% if not loop.last %}, {% endif %}
     {% endfor %}
   ];
-    window.__INITIAL_PARTICIPANTS__ = existingParticipants;
+    const caseWorkspaceKey = (() => {
+      const rawCaseId = String(document.getElementById('case-id-hidden')?.value || '').trim();
+      return `case_workspace_${rawCaseId || 'new'}`;
+    })();
+    function readCaseWorkspaceSnapshot() {
+      try {
+        const raw = localStorage.getItem(caseWorkspaceKey);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    const restoredCaseWorkspace = readCaseWorkspaceSnapshot();
+    window.__RESTORED_CASE_WORKSPACE__ = restoredCaseWorkspace;
+    window.__INITIAL_PARTICIPANTS__ = Array.isArray(restoredCaseWorkspace?.treeState?.participants) && restoredCaseWorkspace.treeState.participants.length
+      ? restoredCaseWorkspace.treeState.participants
+      : existingParticipants;
 
     const allCustomersData = [
       {% for c in all_customers %}
@@ -2347,6 +2363,66 @@ endif %}
       inDiagram: false,
       deleted: false
     });
+
+    function restoreCaseWorkspaceSnapshot() {
+      const snapshot = window.__RESTORED_CASE_WORKSPACE__;
+      if (!snapshot || typeof snapshot !== 'object') return;
+      if (Array.isArray(snapshot.registry)) {
+        snapshot.registry.forEach((item) => upsertCustomerRecord(item));
+      }
+      if (snapshot.workflow && typeof snapshot.workflow === 'object') {
+        Object.entries(snapshot.workflow).forEach(([id, state]) => {
+          const cid = String(id || '').trim();
+          if (!cid) return;
+          window.__CUSTOMER_WORKFLOW__[cid] = {
+            ...CUSTOMER_WORKFLOW_DEFAULTS,
+            ...(state || {})
+          };
+        });
+      }
+      if (snapshot.treeState && typeof snapshot.treeState === 'object') {
+        window.__FAMILY_TREE_STATE__ = {
+          participants: Array.isArray(snapshot.treeState.participants) ? snapshot.treeState.participants : [],
+          warnings: Array.isArray(snapshot.treeState.warnings) ? snapshot.treeState.warnings : [],
+          shareMode: snapshot.treeState.shareMode || 'auto',
+          updatedAt: snapshot.treeState.updatedAt || ''
+        };
+      }
+    }
+
+    function saveCaseWorkspaceSnapshot() {
+      try {
+        const treeState = window.__FAMILY_TREE_STATE__ || {};
+        const stagingKey = typeof _stagingKey === 'function' ? _stagingKey() : '';
+        if (stagingKey) {
+          const stagingEntries = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'))
+            .map((row) => {
+              const id = String(row.dataset.cid || '').trim();
+              if (!id) return null;
+              const snapshot = { id };
+              row.querySelectorAll('[data-key]').forEach((el) => {
+                snapshot[el.dataset.key] = el.value || '';
+              });
+              return { id, snapshot };
+            })
+            .filter(Boolean);
+          localStorage.setItem(stagingKey, JSON.stringify(stagingEntries));
+        }
+        const snapshot = {
+          workflow: window.__CUSTOMER_WORKFLOW__ || {},
+          registry: Object.values(window.__CUSTOMER_REGISTRY__ || {})
+            .map((item) => toLegacyCustomerShape(item))
+            .filter(Boolean),
+          treeState: {
+            participants: Array.isArray(treeState.participants) ? treeState.participants : [],
+            warnings: Array.isArray(treeState.warnings) ? treeState.warnings : [],
+            shareMode: treeState.shareMode || 'auto',
+            updatedAt: treeState.updatedAt || ''
+          }
+        };
+        localStorage.setItem(caseWorkspaceKey, JSON.stringify(snapshot));
+      } catch (e) { }
+    }
 
     function normalizeCustomerId(value) {
       if (value === undefined || value === null) return '';
@@ -2752,6 +2828,7 @@ endif %}
     });
 
     allCustomersData.forEach((item) => upsertCustomerRecord(item));
+    restoreCaseWorkspaceSnapshot();
 
     function getFamilyTreeState() {
       const state = window.__FAMILY_TREE_STATE__ || {};
@@ -3649,7 +3726,8 @@ endif %}
       const delayedSpouses = [];
       const delayedGrand = [];
 
-      existingParticipants.forEach(p => {
+      const seededParticipants = Array.isArray(window.__INITIAL_PARTICIPANTS__) ? window.__INITIAL_PARTICIPANTS__ : existingParticipants;
+      seededParticipants.forEach(p => {
         const data = toReactPersonShape(upsertCustomerRecord(p), { role: p.role, share: p.share, receive: p.receive, parent_id: p.parent_id });
         setCustomerWorkflowState(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false });
         // Người đã chết: mặc định checkbox=checked (họ nhận nếu còn sống khi owner mất)
@@ -4113,6 +4191,7 @@ endif %}
         );
       });
 
+      saveCaseWorkspaceSnapshot();
       ev.target.submit();
       return;
 
@@ -5701,13 +5780,7 @@ endif %}
       // Phần này chỉ giữ _stagingKey để các helper dưới dùng chung.
       const _persistedCaseId = String(document.getElementById('case-id-hidden')?.value || '').trim();
       const _isDraftCase = !_persistedCaseId;
-      const _stagingKey = () => _persistedCaseId ? `ocr_staging_${_persistedCaseId}` : '';
-
-      if (_isDraftCase) {
-        try {
-          localStorage.removeItem('ocr_staging_new');
-        } catch (e) { }
-      }
+      const _stagingKey = () => _persistedCaseId ? `ocr_staging_${_persistedCaseId}` : 'ocr_staging_new';
 
       // ── Thêm người thủ công vào pool (từ inline-create button) ─────────────
       // Giữ lại để tương thích với flow thêm người thủ công (nút Thêm trong card)
@@ -5976,9 +6049,7 @@ endif %}
         loadPool();
       };
       window.loadStagingFromStorage = loadStagingFromStorage;
-      if (!_isDraftCase) {
-        window.loadStagingFromStorage();
-      }
+      window.loadStagingFromStorage();
 
       addPersonRowToPool = function (c) {
         return commitCustomerToPool(c);
@@ -6302,6 +6373,9 @@ endif %}
               ..._collectDraftSnapshot(row)
             });
           }
+          if (row.dataset.cid) {
+            removeStagingFromStorage(row.dataset.cid);
+          }
           row.remove();
           _updateStagingCount();
         });
@@ -6393,7 +6467,10 @@ endif %}
               failedCount += 1;
               continue;
             }
-            const customer = _applyCustomerToDraftRow(row, json.customer || snapshot);
+            const customer = _applyCustomerToDraftRow(row, json.customer || {
+              id: cid || row.dataset.cid || '',
+              ...snapshot
+            });
             if (!customer?.id) {
               row.style.borderColor = '#f87171';
               _setDraftRowStatus(row, '!');
@@ -6402,7 +6479,7 @@ endif %}
             }
             if (customer?.id) {
               const synced = _syncCustomerAfterSave(customer) || customer;
-              removeStagingFromStorage(synced.id);
+              saveStagingToStorage(synced);
               row.style.borderColor = '#86efac';
               _setDraftRowStatus(row, '✓');
               setTimeout(() => {
