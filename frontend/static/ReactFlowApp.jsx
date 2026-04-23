@@ -732,12 +732,12 @@ function resolveSubRelations(nodes, shareMode) {
 
 // ─── Brick-Wall Render Components ────────────────────────────────────────────
 
-const CARD_WIDTH = 168;
+const CARD_WIDTH = 140;
 
 const S = {
   card: (isDragOver, isOccupied, isDead, isGhost) => ({
     width: CARD_WIDTH,
-    minHeight: isGhost ? 52 : isOccupied ? 128 : 88,
+    minHeight: isGhost ? 52 : isOccupied ? 90 : 60,
     border: isGhost
       ? "2px dashed #c084fc"
       : isDragOver
@@ -758,7 +758,7 @@ const S = {
     boxShadow: isDragOver
       ? "0 0 0 3px rgba(37,99,235,.2), 0 4px 12px rgba(15,23,42,.08)"
       : "0 2px 8px rgba(15,23,42,.07)",
-    padding: "8px 10px",
+    padding: "6px 8px",
     position: "relative",
     cursor: isGhost ? "pointer" : "default",
     transition: "border .12s, background .12s, box-shadow .12s",
@@ -768,15 +768,14 @@ const S = {
     boxSizing: "border-box",
   }),
   label: {
-    fontSize: 10, fontWeight: 800, textTransform: "uppercase",
-    letterSpacing: ".07em", color: "#64748b", marginBottom: 4,
+    fontSize: 8, fontWeight: 700, color: "#94a3b8", marginBottom: 4,
     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
   },
-  name: { fontSize: 13, fontWeight: 800, color: "#0f172a", lineHeight: 1.3, wordBreak: "break-word" },
+  name: { fontSize: 12, fontWeight: 800, color: "#0f172a", lineHeight: 1.25, wordBreak: "break-word" },
   meta: { fontSize: 11, color: "#64748b", marginTop: 2 },
-  placeholder: { fontSize: 11, color: "#9ca3af", textAlign: "center", padding: "8px 0" },
+  placeholder: { fontSize: 10, color: "#9ca3af", textAlign: "center", padding: "4px 0" },
   insightChip: (color) => ({
-    fontSize: 10, color, background: color + "18",
+    fontSize: 9, color, background: color + "18",
     borderRadius: 6, padding: "2px 6px", marginTop: 4, lineHeight: 1.4,
   }),
   landBadge: (active) => ({
@@ -794,12 +793,12 @@ const S = {
   },
   receiveRow: {
     display: "flex", alignItems: "center", justifyContent: "space-between",
-    marginTop: 8, paddingTop: 6, borderTop: "1px solid rgba(148,163,184,.2)",
+    marginTop: 6, paddingTop: 5, borderTop: "1px solid rgba(148,163,184,.2)",
   },
-  shareLabel: { fontSize: 11, display: "flex", alignItems: "center", gap: 4, color: "#374151", cursor: "pointer" },
+  shareLabel: { fontSize: 10, display: "flex", alignItems: "center", gap: 4, color: "#475569", cursor: "pointer" },
   sharePct: {
-    fontSize: 11, fontWeight: 800, color: "#c2410c",
-    background: "#fff7ed", borderRadius: 999, padding: "1px 6px",
+    fontSize: 10, fontWeight: 700, color: "#64748b",
+    background: "#f8fafc", borderRadius: 999, padding: "1px 6px",
   },
   manualInput: {
     width: "100%", marginTop: 6, fontSize: 11, padding: "3px 6px",
@@ -807,7 +806,81 @@ const S = {
   },
 };
 
-function BrickCard({ node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onShareInputChange, onGhostExpand, onValidateAssign, shareMode }) {
+function getRelativeBox(element, rootElement) {
+  if (!element || !rootElement) return null;
+  const rect = element.getBoundingClientRect();
+  const rootRect = rootElement.getBoundingClientRect();
+  if (!rect.width && !rect.height) return null;
+  return {
+    left: rect.left - rootRect.left,
+    top: rect.top - rootRect.top,
+    width: rect.width,
+    height: rect.height,
+    right: rect.right - rootRect.left,
+    bottom: rect.bottom - rootRect.top,
+  };
+}
+
+function mergeBoxes(boxes) {
+  const validBoxes = boxes.filter(Boolean);
+  if (!validBoxes.length) return null;
+  const left = Math.min(...validBoxes.map((box) => box.left));
+  const top = Math.min(...validBoxes.map((box) => box.top));
+  const right = Math.max(...validBoxes.map((box) => box.right));
+  const bottom = Math.max(...validBoxes.map((box) => box.bottom));
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
+
+function getBoxCenterX(box) {
+  return box.left + (box.width / 2);
+}
+
+function getBoxBottomY(box) {
+  return box.top + box.height;
+}
+
+function buildArrowPoints(centerX, tipY) {
+  return `${centerX},${tipY} ${centerX - 6},${tipY - 5} ${centerX + 6},${tipY - 5}`;
+}
+
+function appendBracketConnector(lines, arrows, parentBox, childBoxes, options = {}) {
+  const validChildren = childBoxes.filter(Boolean);
+  if (!parentBox || !validChildren.length) return;
+  const parentX = getBoxCenterX(parentBox);
+  const parentY = getBoxBottomY(parentBox) + (options.parentGap ?? 6);
+  const childStops = validChildren.map((box) => ({
+    centerX: getBoxCenterX(box),
+    lineEndY: Math.max(box.top - (options.childGap ?? 10), parentY + 14),
+    arrowTipY: Math.max(box.top - 3, parentY + 18),
+  }));
+  const minChildTop = Math.min(...childStops.map((item) => item.lineEndY));
+  if (minChildTop <= parentY) return;
+  const barY = Math.max(parentY + 12, parentY + Math.round((minChildTop - parentY) * 0.45));
+  const leftX = Math.min(...childStops.map((item) => item.centerX));
+  const rightX = Math.max(...childStops.map((item) => item.centerX));
+  const keyPrefix = options.key || "connector";
+
+  lines.push({ x1: parentX, y1: parentY, x2: parentX, y2: barY, key: `${keyPrefix}:stem` });
+  lines.push({ x1: leftX, y1: barY, x2: rightX, y2: barY, key: `${keyPrefix}:bar` });
+  childStops.forEach((item, index) => {
+    lines.push({
+      x1: item.centerX,
+      y1: barY,
+      x2: item.centerX,
+      y2: item.lineEndY,
+      key: `${keyPrefix}:drop:${index}`,
+    });
+    arrows.push({
+      points: buildArrowPoints(item.centerX, item.arrowTipY),
+      key: `${keyPrefix}:arrow:${index}`,
+    });
+  });
+}
+
+const BrickCard = React.forwardRef(function BrickCard(
+  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onShareInputChange, onGhostExpand, onValidateAssign, shareMode },
+  ref
+) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isOccupied = !!node.person;
   const isDead = !!node.person?.death;
@@ -817,6 +890,7 @@ function BrickCard({ node, onAssign, onRemove, onToggleReceive, onToggleLandOwne
   if (isGhost) {
     return (
       <div
+        ref={ref}
         style={S.card(false, false, false, true)}
         onClick={() => node.ghostAction && onGhostExpand ? onGhostExpand(node.id) : null}
       >
@@ -873,6 +947,7 @@ function BrickCard({ node, onAssign, onRemove, onToggleReceive, onToggleLandOwne
 
   return (
     <div
+      ref={ref}
       style={S.card(isDragOver, isOccupied, isDead, false)}
       draggable={isOccupied}
       onDragStart={handleDragStart}
@@ -938,7 +1013,7 @@ function BrickCard({ node, onAssign, onRemove, onToggleReceive, onToggleLandOwne
       )}
     </div>
   );
-}
+});
 
 // Connector symbol between paired nodes
 function PairConnector({ show }) {
@@ -951,13 +1026,26 @@ function PairConnector({ show }) {
   );
 }
 
+function SvgPairConnector({ show }) {
+  if (!show) return <div style={{ width: 20, flexShrink: 0 }} />;
+  return (
+    <div style={{ width: 28, height: 24, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width="28" height="16" viewBox="0 0 28 16" aria-hidden="true">
+        <line x1="5" y1="8" x2="23" y2="8" stroke="#d97706" strokeWidth="1.75" strokeDasharray="4 3" strokeLinecap="round" />
+        <polyline points="7,5 3,8 7,11" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points="21,5 25,8 21,11" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
 // A pair of nodes (primary + optional spouse/partner node)
 function PairUnit({ primaryNode, spouseNode, handlers, shareMode }) {
   const showConnector = !!spouseNode;
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
       <BrickCard node={primaryNode} {...handlers} shareMode={shareMode} />
-      <PairConnector show={showConnector} />
+      <SvgPairConnector show={showConnector} />
       {spouseNode && <BrickCard node={spouseNode} {...handlers} shareMode={shareMode} />}
     </div>
   );
@@ -1023,7 +1111,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
         {(father || mother) && (
           <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
             {father && <BrickCard node={father} {...handlers} shareMode={shareMode} />}
-            <PairConnector show={!!(father && mother)} />
+            <SvgPairConnector show={!!(father && mother)} />
             {mother && <BrickCard node={mother} {...handlers} shareMode={shareMode} />}
           </div>
         )}
@@ -1032,7 +1120,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
             <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
             <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
               {spFather && <BrickCard node={spFather} {...handlers} shareMode={shareMode} />}
-              <PairConnector show={!!(spFather && spMother)} />
+              <SvgPairConnector show={!!(spFather && spMother)} />
               {spMother && <BrickCard node={spMother} {...handlers} shareMode={shareMode} />}
             </div>
           </>
@@ -1053,7 +1141,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
         {owner && (
           <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
             <BrickCard node={owner} {...handlers} shareMode={shareMode} />
-            <PairConnector show={!!spouse} />
+            <SvgPairConnector show={!!spouse} />
             {spouse && <BrickCard node={spouse} {...handlers} shareMode={shareMode} />}
           </div>
         )}
@@ -1090,7 +1178,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
               <BrickCard node={child} {...handlers} shareMode={shareMode} />
               {hasBranchSpouseSlot && (
                 <>
-                  <PairConnector show />
+                  <SvgPairConnector show />
                   {branchSpouseNode.kind === "ghost"
                     ? <GhostButton node={branchSpouseNode} onGhostExpand={handlers.onGhostExpand} />
                     : <BrickCard node={branchSpouseNode} {...handlers} shareMode={shareMode} />
@@ -1191,6 +1279,314 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
 }
 
 // ─── FamilyTreeApp (main component) ─────────────────────────────────────────
+
+function TieredDiagramV2({ resolvedNodes, handlers, shareMode, warnings }) {
+  const containerRef = useRef(null);
+  const contentRef = useRef(null);
+  const nodeRefs = useRef({});
+  const groupRefs = useRef({});
+  const drawFrameRef = useRef(0);
+  const [connectorModel, setConnectorModel] = useState({ width: 0, height: 0, lines: [], arrows: [] });
+
+  const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
+  const handleDrop = (e) => e.preventDefault();
+
+  const setNodeRef = useCallback((nodeId) => (element) => {
+    if (element) nodeRefs.current[nodeId] = element;
+    else delete nodeRefs.current[nodeId];
+  }, []);
+
+  const setGroupRef = useCallback((groupId) => (element) => {
+    if (element) groupRefs.current[groupId] = element;
+    else delete groupRefs.current[groupId];
+  }, []);
+
+  const personNodes = resolvedNodes.filter((n) => n.kind === "person");
+  const ghostNodes = resolvedNodes.filter((n) => n.kind === "ghost");
+  const father = personNodes.find((n) => n.id === "father");
+  const mother = personNodes.find((n) => n.id === "mother");
+  const spFather = personNodes.find((n) => n.id === "spouse_father");
+  const spMother = personNodes.find((n) => n.id === "spouse_mother");
+  const owner = personNodes.find((n) => n.id === "owner");
+  const spouse = personNodes.find((n) => n.id === "spouse");
+  const siblings = personNodes.filter((n) => n.relationType === "sibling");
+  const ghostSiblings = ghostNodes.filter((n) => n.relationType === "ghostSibling");
+  const children = personNodes.filter((n) => n.relationType === "child");
+  const ghostChildren = ghostNodes.filter((n) => n.ghostAction === "addChild");
+  const grandchildren = personNodes.filter((n) => n.relationType === "grandchild");
+  const ghostGrandchildren = ghostNodes.filter((n) => n.relationType === "ghostGrandchild");
+  const allGrandchildParentIds = Array.from(new Set([
+    ...grandchildren.map((n) => n.parentSlotId),
+    ...ghostGrandchildren.map((n) => n.parentSlotId),
+  ]));
+
+  const drawConnectors = useCallback(() => {
+    const contentElement = contentRef.current;
+    if (!contentElement) return;
+
+    const getNodeBox = (nodeId) => getRelativeBox(nodeRefs.current[nodeId], contentElement);
+    const getGroupBox = (groupId) => getRelativeBox(groupRefs.current[groupId], contentElement);
+    const lines = [];
+    const arrows = [];
+
+    const ownerSiblingTargets = [
+      owner?.person ? getNodeBox("owner") : null,
+      ...siblings.filter((node) => !!node.person).map((node) => getNodeBox(node.id)),
+    ].filter(Boolean);
+
+    if ((father?.person || mother?.person) && ownerSiblingTargets.length) {
+      appendBracketConnector(lines, arrows, getGroupBox("birthParentsPair"), ownerSiblingTargets, { key: "birth-family" });
+    }
+
+    if ((spFather?.person || spMother?.person) && spouse?.person) {
+      appendBracketConnector(lines, arrows, getGroupBox("spouseParentsPair"), [getNodeBox("spouse")], { key: "spouse-family" });
+    }
+
+    const occupiedChildBoxes = children
+      .filter((node) => !!node.person)
+      .map((node) => getGroupBox(`childPair:${node.id}`) || getNodeBox(node.id))
+      .filter(Boolean);
+
+    if (owner?.person && occupiedChildBoxes.length) {
+      appendBracketConnector(lines, arrows, getNodeBox("owner"), occupiedChildBoxes, { key: "owner-children" });
+    }
+
+    children.forEach((child) => {
+      if (!child.person) return;
+      const branchBox = getGroupBox(`grandchildBranch:${child.id}`);
+      if (!branchBox) return;
+      appendBracketConnector(
+        lines,
+        arrows,
+        getGroupBox(`childPair:${child.id}`) || getNodeBox(child.id),
+        [branchBox],
+        { key: `child-branch:${child.id}`, childGap: 12 }
+      );
+    });
+
+    setConnectorModel({
+      width: Math.max(contentElement.scrollWidth, contentElement.clientWidth),
+      height: Math.max(contentElement.scrollHeight, contentElement.clientHeight),
+      lines,
+      arrows,
+    });
+  }, [children, father, mother, owner, siblings, spFather, spMother, spouse]);
+
+  const scheduleConnectorDraw = useCallback(() => {
+    if (drawFrameRef.current) window.cancelAnimationFrame(drawFrameRef.current);
+    drawFrameRef.current = window.requestAnimationFrame(() => {
+      drawFrameRef.current = 0;
+      drawConnectors();
+    });
+  }, [drawConnectors]);
+
+  useEffect(() => {
+    scheduleConnectorDraw();
+    return () => {
+      if (drawFrameRef.current) {
+        window.cancelAnimationFrame(drawFrameRef.current);
+        drawFrameRef.current = 0;
+      }
+    };
+  }, [scheduleConnectorDraw, resolvedNodes]);
+
+  useEffect(() => {
+    const contentElement = contentRef.current;
+    const containerElement = containerRef.current;
+    const handleResize = () => scheduleConnectorDraw();
+    window.addEventListener("resize", handleResize);
+    let observer = null;
+    if (typeof ResizeObserver !== "undefined" && (contentElement || containerElement)) {
+      observer = new ResizeObserver(() => scheduleConnectorDraw());
+      if (contentElement) observer.observe(contentElement);
+      if (containerElement) observer.observe(containerElement);
+    }
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (observer) observer.disconnect();
+    };
+  }, [scheduleConnectorDraw]);
+
+  function renderTier0() {
+    if (!father && !mother && !spFather && !spMother) return null;
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+        {(father || mother) && (
+          <div ref={setGroupRef("birthParentsPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+            {father && <BrickCard ref={setNodeRef(father.id)} node={father} {...handlers} shareMode={shareMode} />}
+            <SvgPairConnector show={!!(father && mother)} />
+            {mother && <BrickCard ref={setNodeRef(mother.id)} node={mother} {...handlers} shareMode={shareMode} />}
+          </div>
+        )}
+        {(spFather || spMother) && (
+          <>
+            <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
+            <div ref={setGroupRef("spouseParentsPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+              {spFather && <BrickCard ref={setNodeRef(spFather.id)} node={spFather} {...handlers} shareMode={shareMode} />}
+              <SvgPairConnector show={!!(spFather && spMother)} />
+              {spMother && <BrickCard ref={setNodeRef(spMother.id)} node={spMother} {...handlers} shareMode={shareMode} />}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderTier1() {
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+        {owner && (
+          <div ref={setGroupRef("ownerPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+            <BrickCard ref={setNodeRef(owner.id)} node={owner} {...handlers} shareMode={shareMode} />
+            <SvgPairConnector show={!!spouse} />
+            {spouse && <BrickCard ref={setNodeRef(spouse.id)} node={spouse} {...handlers} shareMode={shareMode} />}
+          </div>
+        )}
+        {(siblings.length > 0 || ghostSiblings.length > 0) && (
+          <>
+            <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
+            <div ref={setGroupRef("siblingsGroup")} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+              {siblings.map((sib) => (
+                <BrickCard key={sib.id} ref={setNodeRef(sib.id)} node={sib} {...handlers} shareMode={shareMode} />
+              ))}
+              {ghostSiblings.map((g) => (
+                <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderTier2() {
+    return (
+      <div ref={setGroupRef("childrenRow")} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start" }}>
+        {children.map((child) => {
+          const branchSpouseNode =
+            personNodes.find((n) => n.relationType === "branchSpouse" && n.parentSlotId === child.id) ||
+            ghostNodes.find((n) => n.relationType === "ghostBranchSpouse" && n.parentSlotId === child.id);
+          const hasBranchSpouseSlot = !!branchSpouseNode;
+          return (
+            <div key={child.id} ref={setGroupRef(`childPair:${child.id}`)} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
+              <BrickCard ref={setNodeRef(child.id)} node={child} {...handlers} shareMode={shareMode} />
+              {hasBranchSpouseSlot && (
+                <>
+                  <SvgPairConnector show />
+                  {branchSpouseNode.kind === "ghost"
+                    ? <GhostButton node={branchSpouseNode} onGhostExpand={handlers.onGhostExpand} />
+                    : <BrickCard ref={setNodeRef(branchSpouseNode.id)} node={branchSpouseNode} {...handlers} shareMode={shareMode} />
+                  }
+                </>
+              )}
+            </div>
+          );
+        })}
+        {ghostChildren.map((g) => (
+          <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+        ))}
+      </div>
+    );
+  }
+
+  function renderTier3() {
+    if (!allGrandchildParentIds.length) return null;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {allGrandchildParentIds.map((parentId) => {
+          const parentNode = personNodes.find((n) => n.id === parentId);
+          const branchLabel = parentNode?.person?.name || parentId;
+          const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
+          const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
+          return (
+            <div key={parentId} ref={setGroupRef(`grandchildBranch:${parentId}`)}>
+              <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, marginBottom: 6, letterSpacing: ".04em" }}>
+                NhÃ¡nh cá»§a {branchLabel}:
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+                {branchGrandchildren.map((gc) => (
+                  <BrickCard key={gc.id} ref={setNodeRef(gc.id)} node={gc} {...handlers} shareMode={shareMode} />
+                ))}
+                {branchGhosts.map((g) => (
+                  <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const tier0Content = renderTier0();
+  const tier1Content = renderTier1();
+  const tier2Content = renderTier2();
+  const tier3Content = renderTier3();
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: "100%", height: "100%", overflowY: "auto", boxSizing: "border-box" }}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      <div ref={contentRef} style={{ position: "relative", minHeight: "100%" }}>
+        <svg
+          width={connectorModel.width}
+          height={connectorModel.height}
+          style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "visible", zIndex: 0 }}
+          aria-hidden="true"
+        >
+          {connectorModel.lines.map((line) => (
+            <line
+              key={line.key}
+              x1={line.x1}
+              y1={line.y1}
+              x2={line.x2}
+              y2={line.y2}
+              stroke="#94a3b8"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          ))}
+          {connectorModel.arrows.map((arrow) => (
+            <polygon key={arrow.key} points={arrow.points} fill="#64748b" />
+          ))}
+        </svg>
+
+        <div style={{ position: "relative", zIndex: 1 }}>
+          {tier0Content && (
+            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
+              <TierHeader def={TIER_DEFS[0]} />
+              {tier0Content}
+            </div>
+          )}
+
+          {tier1Content && (
+            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
+              <TierHeader def={TIER_DEFS[1]} />
+              {tier1Content}
+            </div>
+          )}
+
+          {tier2Content && (
+            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
+              <TierHeader def={TIER_DEFS[2]} />
+              {tier2Content}
+            </div>
+          )}
+
+          {tier3Content && (
+            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
+              <TierHeader def={TIER_DEFS[3]} />
+              {tier3Content}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function FamilyTreeApp() {
   const counterRef = useRef(Date.now());
@@ -1501,7 +1897,7 @@ function FamilyTreeApp() {
 
       {/* Diagram */}
       <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-        <TieredDiagram
+        <TieredDiagramV2
           resolvedNodes={resolvedNodes}
           handlers={handlers}
           shareMode={shareMode}
