@@ -36,7 +36,7 @@ _logger = logging.getLogger("ocr_ai")
 
 _ENV_PATH = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
-DEFAULT_MODEL = "qwen-vl-ocr-latest"
+DEFAULT_MODEL = "qwen-vl-ocr-2025-11-20"
 QWEN_OCR_BASE_URL = os.getenv("QWEN_OCR_BASE_URL", "https://dashscope-intl.aliyuncs.com").rstrip("/")
 QWEN_OCR_MIN_PIXELS = int(os.getenv("QWEN_OCR_MIN_PIXELS", "3072"))
 QWEN_OCR_MAX_PIXELS = int(os.getenv("QWEN_OCR_MAX_PIXELS", "8388608"))
