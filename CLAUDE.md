@@ -345,4 +345,15 @@ Muc tieu fix vong nay: <ly do goi Codex trong vong nay>
 - Quyet dinh: `SKILL.md` = trigger, `CLAUDE.md` = source of truth, `claudex.md` = relay gate; khong lam lui logic OCR engine
 - Bug con lai: chua co smoke test runtime positive/negative trigger; `claudex.md` co bat nhat menu `[d]` can sua; scope hoi bi keo rong sang `Phase 4 KNOWLEDGE CAPTURE` can tach rieng neu can
 - Cap nhat: 22/04/2026
+### cases > diagram data flow
+**[Mô tả]:** Fix luồng dữ liệu OCR → staging → pool → diagram: dữ liệu không còn bị mất khi user bấm nút xóa, xóa cascade, kéo thả thất bại, hoặc lưu hồ sơ bị lỗi server. Pool luôn biết ai đang ở đâu.
+**[Tech]:**
+- File: `frontend/templates/cases/form.html`, `frontend/static/ReactFlowApp.jsx`
+- Kiến trúc mới: `window.__CUSTOMER_REGISTRY__` (canonical data) + `window.__CUSTOMER_WORKFLOW__` (state flags: inStaging/inPool/inTree/inDiagram/deleted) thay thế cho DOM-as-source-of-truth
+- Adapter hai chiều: `normalizeCustomerRecord`, `mergeCustomerRecord`, `toReactPersonShape`, `toPoolRowShape` — tất cả entry points (OCR, import, search, inline-create) đều upsert qua registry
+- React bridge: `removeWithWorkflow` phát event trả người về pool khi xóa node, `validateAssignment` là rule duy nhất cho cả preflight và commit
+- localStorage staging lưu `{id, snapshot}` thay vì chỉ ID — restore được khi server không có data
+- `localStorage.removeItem(stagingKey)` đã bỏ khỏi native submit path
+- Bug còn lại (reviewer flag): import Excel chưa auto-refresh pool ngay (chỉ hiện nút Làm mới), `commitAssign()` có thể có half-state nhỏ nếu setLogicalNodes updater race
+- Cập nhật: 23/04/2026
 <!-- claudex-history-end -->

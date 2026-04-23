@@ -270,6 +270,7 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         return row_vals[idx]
 
     results = []
+    added_customers = []
     added = skipped = errors = 0
 
     for row_num, row in enumerate(rows[1:], start=2):
@@ -308,6 +309,8 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
             c = Customer(**cleaned)
             db.add(c)
             db.commit()
+            db.refresh(c)
+            added_customers.append(to_customer_json(c))
             results.append({"row": row_num, "name": cleaned["ho_ten"], "status": "ok", "message": "Them thanh cong"})
             added += 1
         except Exception as e:
@@ -326,6 +329,7 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         "request": request,
         "error_global": None,
         "results": results,
+        "added_customers": added_customers,
         "added": added,
         "skipped": skipped,
         "errors": errors,
@@ -427,7 +431,7 @@ def inline_create(
 def quick_update(
     cid: int,
     ho_ten: Optional[str] = Form(None), gioi_tinh: Optional[str] = Form(None),
-    ngay_sinh: Optional[str] = Form(None), so_giay_to: Optional[str] = Form(None),
+    ngay_sinh: Optional[str] = Form(None), ngay_chet: Optional[str] = Form(None), so_giay_to: Optional[str] = Form(None),
     ngay_cap: Optional[str] = Form(None), dia_chi: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -439,6 +443,8 @@ def quick_update(
     if gt:                           c.gioi_tinh = gt
     ns = parse_date(ngay_sinh or "", allow_year_only=True)
     if ns:                           c.ngay_sinh = ns
+    nd = parse_date(ngay_chet or "", allow_year_only=True)
+    if nd:                           c.ngay_chet = nd
     so = (so_giay_to or "").strip()
     if so:                           c.so_giay_to = so
     nc = parse_date(ngay_cap or "", allow_year_only=True)

@@ -755,7 +755,7 @@
       }
     }
 
-    /* â”€â”€ SORTABLE DRAG â”€â”€ */
+    /* ── SORTABLE DRAG ── */
     .drag-ghost {
       opacity: .35;
       background: #dbeafe !important;
@@ -775,12 +775,12 @@
       background: #dbeafe !important;
     }
 
-    /* â”€â”€ TIER 4 TRANSITION â”€â”€ */
+    /* ── TIER 4 TRANSITION ── */
     #tier4-section {
       transition: opacity .3s ease;
     }
 
-    /* â”€â”€ TOAST â”€â”€ */
+    /* ── TOAST ── */
     .dnd-toast {
       position: fixed;
       bottom: 28px;
