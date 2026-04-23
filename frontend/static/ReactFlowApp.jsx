@@ -821,16 +821,6 @@ function getRelativeBox(element, rootElement) {
   };
 }
 
-function mergeBoxes(boxes) {
-  const validBoxes = boxes.filter(Boolean);
-  if (!validBoxes.length) return null;
-  const left = Math.min(...validBoxes.map((box) => box.left));
-  const top = Math.min(...validBoxes.map((box) => box.top));
-  const right = Math.max(...validBoxes.map((box) => box.right));
-  const bottom = Math.max(...validBoxes.map((box) => box.bottom));
-  return { left, top, right, bottom, width: right - left, height: bottom - top };
-}
-
 function getBoxCenterX(box) {
   return box.left + (box.width / 2);
 }
@@ -1092,7 +1082,7 @@ function TierHeader({ def }) {
 
 // ─── TieredDiagram ────────────────────────────────────────────────────────────
 
-function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
+function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
   const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
   const handleDrop = (e) => e.preventDefault();
 
@@ -1280,7 +1270,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
 
 // ─── FamilyTreeApp (main component) ─────────────────────────────────────────
 
-function TieredDiagramV2({ resolvedNodes, handlers, shareMode, warnings }) {
+function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
   const nodeRefs = useRef({});
@@ -1344,7 +1334,7 @@ function TieredDiagramV2({ resolvedNodes, handlers, shareMode, warnings }) {
 
     const occupiedChildBoxes = children
       .filter((node) => !!node.person)
-      .map((node) => getGroupBox(`childPair:${node.id}`) || getNodeBox(node.id))
+      .map((node) => getNodeBox(node.id))
       .filter(Boolean);
 
     if (owner?.person && occupiedChildBoxes.length) {
@@ -1501,7 +1491,7 @@ function TieredDiagramV2({ resolvedNodes, handlers, shareMode, warnings }) {
           return (
             <div key={parentId} ref={setGroupRef(`grandchildBranch:${parentId}`)}>
               <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, marginBottom: 6, letterSpacing: ".04em" }}>
-                NhÃ¡nh cá»§a {branchLabel}:
+                {"Nh\u00E1nh c\u1EE7a "}{branchLabel}:
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
                 {branchGrandchildren.map((gc) => (
@@ -1897,7 +1887,7 @@ function FamilyTreeApp() {
 
       {/* Diagram */}
       <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-        <TieredDiagramV2
+        <TieredDiagram
           resolvedNodes={resolvedNodes}
           handlers={handlers}
           shareMode={shareMode}
