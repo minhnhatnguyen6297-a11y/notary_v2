@@ -2066,6 +2066,12 @@ def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]
         }
     )
 
+    # Front-side CCCD does not carry the real issue date. When Qwen hallucinates a
+    # date on a front image, keep it out of the deterministic payload and require
+    # a matching back side instead.
+    if side == "front":
+        ai_data["ngay_cap"] = ""
+
     if side == "back":
         if mrz_data.get("so_giay_to"):
             ai_data["so_giay_to"] = mrz_data["so_giay_to"]
@@ -2100,15 +2106,15 @@ def _append_qr_person(
         **normalized,
         "_source": "QR",
         "source_type": "QR",
-        "side": "unknown",
+        "side": "front",
         "_files": [filename],
         "_qr": True,
         "field_sources": _field_sources(normalized, "qr"),
-        "warnings": [],
+        "warnings": ["missing_back"],
         "_qr_text": qr_text,
     }
     persons.append(person)
-    raw_results.append({"doc_type": "person", "side": "unknown", "data": normalized, "filename": filename, "source_type": "QR"})
+    raw_results.append({"doc_type": "person", "side": "front", "data": normalized, "filename": filename, "source_type": "QR"})
 
 
 def _append_ai_doc(
@@ -2130,7 +2136,8 @@ def _append_ai_doc(
             "_files": [doc.get("filename") or "unknown"],
             "_qr": False,
             "field_sources": _field_sources(data, "ai"),
-            "warnings": [],
+            "warnings": list(doc.get("warnings") or []),
+            "_raw_text": "\n".join(doc.get("text_lines") or []),
         }
     )
 
@@ -2252,6 +2259,11 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
                 seen_files.add(f)
                 merged["_files"].append(f)
 
+        for warning in item.get("warnings") or []:
+            clean_warning = _clean_text(warning)
+            if clean_warning and clean_warning not in merged["warnings"]:
+                merged["warnings"].append(clean_warning)
+
         for key in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap", "ngay_het_han"):
             current = _clean_text(merged.get(key))
             incoming = _clean_text(item.get(key))
@@ -2303,6 +2315,17 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         merged["side"] = "front"
     elif "back" in side_seen:
         merged["side"] = "back"
+    if merged["warnings"]:
+        merged["warnings"] = [
+            warning
+            for warning in merged["warnings"]
+            if not ((warning == "missing_front" and "front" in side_seen) or (warning == "missing_back" and "back" in side_seen))
+        ]
+    if not qr_found:
+        if merged["side"] == "back" and "missing_front" not in merged["warnings"]:
+            merged["warnings"].append("missing_front")
+        elif merged["side"] == "front" and not _clean_text(merged.get("ngay_cap")) and "missing_back" not in merged["warnings"]:
+            merged["warnings"].append("missing_back")
     return merged
 
 

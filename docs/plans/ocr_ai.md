@@ -131,6 +131,32 @@ Luu y:
 
 ---
 
+## Decision Notes 2026-04-24
+
+- Da fix bug `OCR AI ghep cap sai` voi case `front nguoi A + back nguoi B`:
+  - front-only phai ra `missing_back`
+  - back-only phai ra `missing_front`
+  - khong duoc auto-stage vao pool neu con warning thieu mat
+- QR hit hien duoc coi la `front`, khong phai ban ghi day du mac dinh:
+  - neu co QR ma chua co mat sau ghep vao thi van phai giu `missing_back`
+  - chi khi ghep duoc back that moi xoa `missing_back`
+- Da fix bug frontend modal AI khong hien model Qwen / khong upload duoc:
+  - nguyen nhan la helper JS fold tieng Viet trong `frontend/templates/cases/form.html`
+    bi vo cu phap (`replace(//g, 'D')`)
+  - khi script nay chet, ca upload handler va `GET /api/ocr/config` badge deu khong chay
+- Da doi preview `Xem anh` de ho tro xem du ca cap anh cua 1 person card, khong chi 1 anh dau tien
+
+### Dang do / can verify tiep
+
+- Chua chay browser E2E sau refresh trang de xac nhan:
+  - modal AI hien badge `qwen-vl-ocr`
+  - upload AI modal hoat dong lai binh thuong
+  - overlay `Xem anh` chuyen duoc giua nhieu anh cua cung card
+- Neu modal AI lai co hien tuong trong/trang chet JS, uu tien kiem tra lai cac helper fold
+  trong `frontend/templates/cases/form.html` truoc khi nghi backend OCR bi hong.
+
+---
+
 ## Khi debug
 
 Bug AI OCR mo theo thu tu:

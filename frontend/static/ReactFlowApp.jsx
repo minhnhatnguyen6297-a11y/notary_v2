@@ -236,6 +236,56 @@ function deriveParentPersonId(nodes, node) {
 
 function buildAssignedNode(node, nodes, person) {
   const candidate = normalizePersonPayload(person);
+  if (node.kind === "ghost") {
+    if (node.ghostAction === "addSibling") {
+      return {
+        ...node,
+        kind: "person",
+        label: "Anh/Chi/Em",
+        role: "Anh/Chi/Em",
+        relationType: "sibling",
+        allowsShare: true,
+        removable: true,
+        person: candidate,
+        parentPersonId: deriveParentPersonId(nodes, node),
+        willReceive: !candidate?.death,
+        manualShare: "",
+        sharePercent: "0.00",
+      };
+    }
+    if (node.ghostAction === "addGrandchild") {
+      return {
+        ...node,
+        kind: "person",
+        label: "Con the vi",
+        role: "Chau",
+        relationType: "grandchild",
+        allowsShare: true,
+        removable: true,
+        person: candidate,
+        parentPersonId: deriveParentPersonId(nodes, node),
+        willReceive: !candidate?.death,
+        manualShare: "",
+        sharePercent: "0.00",
+      };
+    }
+    if (node.ghostAction === "addBranchSpouse") {
+      return {
+        ...node,
+        kind: "person",
+        label: "Vo/Chong cua nhanh",
+        role: "Con_dau_re",
+        relationType: "branchSpouse",
+        allowsShare: true,
+        removable: true,
+        person: candidate,
+        parentPersonId: deriveParentPersonId(nodes, node),
+        willReceive: !candidate?.death,
+        manualShare: "",
+        sharePercent: "0.00",
+      };
+    }
+  }
   return {
     ...node,
     person: candidate,
@@ -876,20 +926,15 @@ const BrickCard = React.forwardRef(function BrickCard(
   const isDead = !!node.person?.death;
   const isGhost = node.kind === "ghost";
   const canToggleReceive = isOccupied && node.allowsShare && !node.disabledReason && !isDead && node.role !== "Owner";
-
-  if (isGhost) {
-    return (
-      <div
-        ref={ref}
-        style={S.card(false, false, false, true)}
-        onClick={() => node.ghostAction && onGhostExpand ? onGhostExpand(node.id) : null}
-      >
-        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, textAlign: "center", padding: "4px 0" }}>
-          {node.ghostLabel}
-        </div>
-      </div>
-    );
-  }
+  const displayLabel = isGhost
+    ? (node.ghostAction === "addGrandchild"
+      ? "Con the vi"
+      : node.ghostAction === "addBranchSpouse"
+      ? "Vo/Chong cua nhanh"
+      : node.ghostAction === "addSibling"
+      ? "Anh/Chi/Em"
+      : node.label)
+    : node.label;
 
   const handleDragOver = (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -938,7 +983,7 @@ const BrickCard = React.forwardRef(function BrickCard(
   return (
     <div
       ref={ref}
-      style={S.card(isDragOver, isOccupied, isDead, false)}
+      style={S.card(isDragOver, isOccupied, isDead, isGhost)}
       draggable={isOccupied}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
@@ -946,7 +991,7 @@ const BrickCard = React.forwardRef(function BrickCard(
       onDrop={handleDrop}
     >
       {/* Label row */}
-      <div style={S.label}>{node.label}</div>
+      <div style={S.label}>{displayLabel}</div>
 
       {/* Land owner badge */}
       <span
@@ -1143,7 +1188,7 @@ function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
               <BrickCard key={sib.id} node={sib} {...handlers} shareMode={shareMode} />
             ))}
             {ghostSiblings.map((g) => (
-              <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+              <BrickCard key={g.id} node={g} {...handlers} shareMode={shareMode} />
             ))}
           </>
         )}
@@ -1170,7 +1215,7 @@ function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
                 <>
                   <SvgPairConnector show />
                   {branchSpouseNode.kind === "ghost"
-                    ? <GhostButton node={branchSpouseNode} onGhostExpand={handlers.onGhostExpand} />
+                    ? <BrickCard node={branchSpouseNode} {...handlers} shareMode={shareMode} />
                     : <BrickCard node={branchSpouseNode} {...handlers} shareMode={shareMode} />
                   }
                 </>
@@ -1179,7 +1224,7 @@ function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
           );
         })}
         {ghostChildren.map((g) => (
-          <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+          <BrickCard key={g.id} node={g} {...handlers} shareMode={shareMode} />
         ))}
       </div>
     );
@@ -1212,7 +1257,7 @@ function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
                   <BrickCard key={gc.id} node={gc} {...handlers} shareMode={shareMode} />
                 ))}
                 {branchGhosts.map((g) => (
-                  <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+                  <BrickCard key={g.id} node={g} {...handlers} shareMode={shareMode} />
                 ))}
               </div>
             </div>
@@ -1440,7 +1485,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
                 <BrickCard key={sib.id} ref={setNodeRef(sib.id)} node={sib} {...handlers} shareMode={shareMode} />
               ))}
               {ghostSiblings.map((g) => (
-                <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+                <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
               ))}
             </div>
           </>
@@ -1464,7 +1509,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
                 <>
                   <SvgPairConnector show />
                   {branchSpouseNode.kind === "ghost"
-                    ? <GhostButton node={branchSpouseNode} onGhostExpand={handlers.onGhostExpand} />
+                    ? <BrickCard ref={setNodeRef(branchSpouseNode.id)} node={branchSpouseNode} {...handlers} shareMode={shareMode} />
                     : <BrickCard ref={setNodeRef(branchSpouseNode.id)} node={branchSpouseNode} {...handlers} shareMode={shareMode} />
                   }
                 </>
@@ -1473,7 +1518,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
           );
         })}
         {ghostChildren.map((g) => (
-          <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+          <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
         ))}
       </div>
     );
@@ -1498,7 +1543,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
                   <BrickCard key={gc.id} ref={setNodeRef(gc.id)} node={gc} {...handlers} shareMode={shareMode} />
                 ))}
                 {branchGhosts.map((g) => (
-                  <GhostButton key={g.id} node={g} onGhostExpand={handlers.onGhostExpand} />
+                  <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
                 ))}
               </div>
             </div>
@@ -1596,6 +1641,47 @@ function FamilyTreeApp() {
     return nodes.filter((node) => !toRemove.has(node.id));
   }, []);
 
+  const materializeGhostNode = useCallback((node, prevNodes, person) => {
+    if (!node) return node;
+    const parentPersonId =
+      node.parentSlotId && node.parentSlotId !== "owner"
+        ? prevNodes.find((candidate) => candidate.id === node.parentSlotId)?.person?.id || node.parentPersonId || ""
+        : node.role === "Con" ? prevNodes.find((candidate) => candidate.id === "owner")?.person?.id || "" : node.parentPersonId || "";
+    if (node.kind !== "ghost") {
+      return {
+        ...node,
+        person,
+        parentPersonId,
+        willReceive: node.allowsShare && !person.death && node.role !== "Owner" ? true : false,
+        manualShare: "",
+        sharePercent: "0.00",
+      };
+    }
+
+    const sharedProps = {
+      ...node,
+      kind: "person",
+      person,
+      parentPersonId,
+      allowsShare: true,
+      removable: true,
+      willReceive: !person.death,
+      manualShare: "",
+      sharePercent: "0.00",
+    };
+
+    if (node.ghostAction === "addSibling") {
+      return { ...sharedProps, label: "Anh/Chá»‹/Em", role: "Anh/Chá»‹/Em", relationType: "sibling" };
+    }
+    if (node.ghostAction === "addGrandchild") {
+      return { ...sharedProps, label: "Con tháº¿ vá»‹", role: "ChÃ¡u", relationType: "grandchild" };
+    }
+    if (node.ghostAction === "addBranchSpouse") {
+      return { ...sharedProps, label: "Vá»£/Chá»“ng cá»§a nhÃ¡nh", role: "Con_dau_re", relationType: "branchSpouse" };
+    }
+    return sharedProps;
+  }, []);
+
   const onAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
     if (!person || !person.id) return;
@@ -1606,15 +1692,11 @@ function FamilyTreeApp() {
       if (duplicate) { window.alert(`${person.name || "Người này"} đã có mặt trong sơ đồ.`); return prevNodes; }
       const nextNodes = prevNodes.map((node) => {
         if (node.id !== nodeId) return node;
-        const parentPersonId =
-          node.parentSlotId && node.parentSlotId !== "owner"
-            ? prevNodes.find((c) => c.id === node.parentSlotId)?.person?.id || node.parentPersonId || ""
-            : node.role === "Con" ? prevNodes.find((c) => c.id === "owner")?.person?.id || "" : node.parentPersonId || "";
-        return { ...node, person, parentPersonId, willReceive: node.allowsShare && !person.death && node.role !== "Owner" ? true : false, manualShare: "", sharePercent: "0.00" };
+        return materializeGhostNode(node, prevNodes, person);
       });
       return ensureSpareChildNode(nextNodes);
     });
-  }, []);
+  }, [materializeGhostNode]);
 
   const onRemove = useCallback((nodeId) => {
     setLogicalNodes((prevNodes) => {
@@ -1637,12 +1719,12 @@ function FamilyTreeApp() {
       return ensureSpareChildNode(
         prev.map((n) => {
           if (n.id === sourceNodeId) return { ...n, person: null, willReceive: false, sharePercent: "0.00", manualShare: "" };
-          if (n.id === targetNodeId) return { ...n, person, willReceive: n.allowsShare && !person.death && n.role !== "Owner" };
+          if (n.id === targetNodeId) return materializeGhostNode(n, prev, person);
           return n;
         })
       );
     });
-  }, []);
+  }, [materializeGhostNode]);
 
   const preflightAssign = useCallback((nodeId, rawPerson) => {
     return validateAssignment(logicalNodes, nodeId, normalizePersonPayload(rawPerson));

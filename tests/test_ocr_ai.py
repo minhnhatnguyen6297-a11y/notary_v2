@@ -234,6 +234,19 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(doc["data"]["ho_ten"], "DUONG THI XUAN")
         self.assertEqual(doc["data"]["so_giay_to"], "036179009696")
 
+    def test_normalize_native_doc_front_drops_issue_date(self):
+        lines = [
+            "CAN CUOC CONG DAN",
+            "So/No: 036080012689",
+            "Ho va ten / Full name: NGUYEN VAN CHIEN",
+            "Ngay sinh / Date of birth: 20/03/1980",
+            "Ngay cap / Date of issue: 01/05/2021",
+        ]
+        doc = ocr_ai._normalize_native_ocr_doc(lines, "front.jpg")
+        self.assertEqual(doc["doc_type"], "person")
+        self.assertEqual(doc["side"], "front")
+        self.assertEqual(doc["data"]["ngay_cap"], "")
+
     async def test_analyze_images_prefers_qr_over_ai_result(self):
         upload = make_upload("qr-card.jpg")
         qr_data = {
@@ -257,6 +270,53 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["summary"]["ai_runs"], 0)
         self.assertEqual(len(result["persons"]), 1)
         self.assertEqual(result["persons"][0]["source_type"], "QR")
+        self.assertEqual(result["persons"][0]["side"], "front")
+        self.assertIn("missing_back", result["persons"][0]["warnings"])
+
+    async def test_analyze_images_qr_front_pairs_with_back_and_clears_missing_back(self):
+        front = make_upload("qr-front.jpg")
+        back = make_upload("back.jpg")
+        qr_data = {
+            "so_giay_to": "036179009696",
+            "ho_ten": "DUONG THI XUAN",
+            "ngay_sinh": "20/01/1979",
+            "gioi_tinh": "Nữ",
+            "dia_chi": "Quyet Phong, Yen Ninh, Y Yen, Nam Dinh",
+            "ngay_cap": "",
+            "ngay_het_han": "",
+        }
+        outputs = [
+            [
+                "CAN CUOC CONG DAN",
+                "So/No: 036179009696",
+                "Ho va ten / Full name: DUONG THI XUAN",
+                "Ngay sinh / Date of birth: 20/01/1979",
+            ],
+            [
+                "IDVNM1790096961036179009696<<6",
+                "7901209F3901201VNM<<<<<<<<<<<4",
+                "DUONG<<THI<XUAN<<<<<<<<<<<<<<<",
+                "Ngay, thang, nam / Date, month, year: 25/03/2021",
+            ],
+        ]
+
+        async def fake_call(*args, **kwargs):
+            return outputs.pop(0)
+
+        with (
+            mock.patch.object(ocr_ai, "try_decode_qr", side_effect=["qr-text", None]),
+            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+        ):
+            result = await ocr_ai.analyze_images([front, back])
+
+        self.assertEqual(result["summary"]["persons"], 1)
+        person = result["persons"][0]
+        self.assertEqual(person["side"], "front_back")
+        self.assertTrue(person["paired"])
+        self.assertNotIn("missing_back", person["warnings"])
+        self.assertEqual(person["ngay_cap"], "25/03/2021")
 
     async def test_analyze_images_runs_native_ocr_for_non_qr_images(self):
         upload = make_upload("front.jpg")
@@ -333,6 +393,47 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(person["so_giay_to"], "036179009696")
         self.assertTrue(person["paired"])
         self.assertEqual(len(person.get("_files", [])), 2)
+
+    async def test_analyze_images_marks_mismatched_front_and_back_as_incomplete(self):
+        front = make_upload("chien-front.jpg")
+        back = make_upload("tam-back.jpg")
+        outputs = [
+            [
+                "CAN CUOC CONG DAN",
+                "So/No: 036080012689",
+                "Ho va ten / Full name: NGUYEN VAN CHIEN",
+                "Ngay sinh / Date of birth: 20/03/1980",
+                "Gioi tinh / Sex: Nam",
+                "Noi thuong tru / Place of residence: Khu 7B To 91, Cam Phu, Cam Pha, Quang Ninh",
+                "Ngay cap / Date of issue: 01/05/2021",
+            ],
+            [
+                "IDVNM0830120655036083012065<<0",
+                "8305273M4305275VNM<<<<<<<<<<<2",
+                "NGUYEN<<DUC<TAM<<<<<<<<<<<<<<",
+                "Ngay, thang, nam / Date, month, year: 16/12/2021",
+            ],
+        ]
+
+        async def fake_call(*args, **kwargs):
+            return outputs.pop(0)
+
+        with (
+            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+        ):
+            result = await ocr_ai.analyze_images([front, back])
+
+        self.assertEqual(result["summary"]["persons"], 2)
+        by_id = {person["so_giay_to"]: person for person in result["persons"]}
+        self.assertIn("036080012689", by_id)
+        self.assertIn("036083012065", by_id)
+        self.assertIn("missing_back", by_id["036080012689"]["warnings"])
+        self.assertIn("missing_front", by_id["036083012065"]["warnings"])
+        self.assertEqual(by_id["036080012689"]["ngay_cap"], "")
+        self.assertFalse(by_id["036080012689"]["paired"])
+        self.assertFalse(by_id["036083012065"]["paired"])
 
     async def test_analyze_property_images_returns_properties_only(self):
         uploads = [make_upload("property-1.jpg"), make_upload("unknown-1.jpg")]
