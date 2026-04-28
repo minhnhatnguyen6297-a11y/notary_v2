@@ -164,6 +164,8 @@ def _read_task(path: str) -> dict:
                 task[norm_key] = m.group(1).strip()
     if not task:
         task["lam_gi"] = content.strip()
+    # Luu nguyen file de cac role co full context (tranh mat phan multi-line / plan dinh kem)
+    task["_raw_content"] = content.strip()
     return task
 
 
@@ -184,15 +186,22 @@ def _format_task(task: dict) -> str:
     for key, label in mapping:
         if task.get(key):
             lines.append(f"{label}: {task[key]}")
+    # Uu tien _raw_content de giu nguyen multi-line + plan dinh kem trong task file
+    raw = task.get("_raw_content")
+    if raw:
+        return raw
     return "\n".join(lines) if lines else str(task)
 
 
 def _run_codex(prompt: str, out_md: Path, jsonl_path: Path) -> bool:
-    cmd = CODEX_CMD + ["-o", str(out_md), prompt]
+    # Pass prompt qua stdin (`-`) thay vi positional arg de tranh
+    # "command line too long" tren Windows khi prompt > 8KB
+    cmd = CODEX_CMD + ["-o", str(out_md), "-"]
     print(f"  -> codex exec [{out_md.name}] ...", flush=True)
     try:
         result = subprocess.run(
             cmd,
+            input=prompt,
             capture_output=True,
             text=True,
             encoding="utf-8",
