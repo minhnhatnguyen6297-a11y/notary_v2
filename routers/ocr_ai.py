@@ -612,6 +612,11 @@ _ADDRESS_STOP_LABELS = [
     "que quan",
 ]
 
+# Standalone values from other fields that can be interleaved into the address area
+# due to 2-column CCCD layout (e.g. "Không thời hạn" from "Có giá trị đến" column).
+# These are skipped when the address is still incomplete, stopped at when complete.
+_ADDRESS_SKIP_TOKENS = frozenset(["khong thoi han", "khong co thoi han"])
+
 
 def _strip_address_noise(value: str) -> str:
     text = _clean_text(value)
@@ -656,15 +661,50 @@ def _sanitize_address(value: str) -> str:
 
 def _extract_address(lines: list[str]) -> str:
     for idx, line in enumerate(lines):
-        if _looks_like_label(line, ["noi thuong tru", "noi cu tru", "place of residence"]):
-            after = line.split(":", 1)[1].strip() if ":" in line else ""
-            parts = [after] if after else []
-            if idx + 1 < len(lines):
-                next_line = _clean_text(lines[idx + 1])
-                next_clean = _sanitize_address(next_line) if next_line else ""
-                if next_clean:
-                    parts.append(next_clean)
-            return _sanitize_address(", ".join([p for p in parts if p]))
+        if not _looks_like_label(line, ["noi thuong tru", "noi cu tru", "place of residence"]):
+            continue
+
+        after = _sanitize_address(line.split(":", 1)[1].strip()) if ":" in line else ""
+
+        # Label line already contains a full address (comma = multiple admin levels).
+        if after and "," in after:
+            return after
+
+        parts = [after] if after else []
+        collected = len(parts)
+
+        # Search up to 4 positions ahead to allow skipping interleaved noise lines.
+        for offset in range(1, 5):
+            ni = idx + offset
+            if ni >= len(lines):
+                break
+            next_line = _clean_text(lines[ni])
+            if not next_line:
+                continue
+
+            # Stop at any known field label.
+            if _looks_like_label(next_line, _ADDRESS_STOP_LABELS):
+                break
+
+            # "Không thời hạn" and similar values appear in the left column at the
+            # same Y-level as address lines due to CCCD 2-column layout.
+            # Skip them when the address is still incomplete; stop when complete.
+            if any(tok in _fold_text(next_line) for tok in _ADDRESS_SKIP_TOKENS):
+                current = ", ".join(p for p in parts if p)
+                if "," not in current:
+                    continue
+                break
+
+            next_clean = _sanitize_address(next_line)
+            if not next_clean:
+                continue
+
+            parts.append(next_clean)
+            collected += 1
+            if collected >= 2:
+                break
+
+        return _sanitize_address(", ".join(p for p in parts if p))
     return ""
 
 
