@@ -61,6 +61,7 @@ def migrate_inheritance_cases_schema():
     cur = con.cursor()
     _ensure_table_columns(cur, "inheritance_cases", {
         "noi_niem_yet": "VARCHAR(200)",
+        "engine_state_json": "TEXT",
     })
     _ensure_table_columns(cur, "inheritance_participants", {
         "parent_customer_id": "INTEGER",

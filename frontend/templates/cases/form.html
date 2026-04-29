@@ -31,6 +31,8 @@ endif %}
   <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
   <input type="hidden" name="noi_niem_yet" id="case-noi-niem-yet"
     value="{{ f.get('noi_niem_yet', obj.noi_niem_yet if obj and obj.noi_niem_yet else '') }}">
+  <input type="hidden" name="engine_state_json" id="case-engine-state"
+    value="{{ f.get('engine_state_json', obj.engine_state_json if obj and obj.engine_state_json else '') | e }}">
   <div id="case-property-ids-holder"></div>
   <input type="hidden" id="case-id-hidden" value="{{ obj.id if obj else '' }}">
   <style>
@@ -5037,7 +5039,19 @@ endif %}
 
       }
     }
-    const restoredCaseWorkspace = readCaseWorkspaceSnapshot();
+    function readPersistedEngineState() {
+      const raw = document.getElementById('case-engine-state')?.value || '';
+      if (!raw.trim()) return null;
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        console.warn('Cannot parse persisted engine state', e);
+        return null;
+      }
+    }
+    const persistedEngineState = readPersistedEngineState();
+    const restoredCaseWorkspace = persistedEngineState ? null : readCaseWorkspaceSnapshot();
+    window.__INITIAL_ENGINE_STATE__ = persistedEngineState;
     window.__RESTORED_CASE_WORKSPACE__ = restoredCaseWorkspace;
     window.__INITIAL_PARTICIPANTS__ = Array.isArray(restoredCaseWorkspace?.treeState?.participants) && restoredCaseWorkspace.treeState.participants.length
 
@@ -5091,12 +5105,15 @@ endif %}
     const warningBox = document.getElementById('tree-warnings');
     const warningList = document.getElementById('tree-warnings-list');
     const ownerInput = document.getElementById('case-nguoi-chet');
+    const engineStateInput = document.getElementById('case-engine-state');
 
     window.__FAMILY_TREE_STATE__ = window.__FAMILY_TREE_STATE__ || {
 
       participants: [],
 
       warnings: [],
+
+      engineState: persistedEngineState,
 
       shareMode: 'auto',
 
@@ -5161,6 +5178,8 @@ endif %}
           participants: Array.isArray(snapshot.treeState.participants) ? snapshot.treeState.participants : [],
 
           warnings: Array.isArray(snapshot.treeState.warnings) ? snapshot.treeState.warnings : [],
+
+          engineState: snapshot.treeState.engineState || null,
 
           shareMode: snapshot.treeState.shareMode || 'auto',
 
@@ -5238,6 +5257,9 @@ endif %}
 
 
       warnings: Array.isArray(treeState.warnings) ? treeState.warnings : [],
+
+
+      engineState: treeState.engineState || null,
 
 
       shareMode: treeState.shareMode || 'auto',
@@ -5989,6 +6011,8 @@ endif %}
 
         warnings: Array.isArray(state.warnings) ? state.warnings : [],
 
+        engineState: state.engineState || null,
+
         shareMode: state.shareMode || 'auto',
 
         updatedAt: state.updatedAt || ''
@@ -6074,6 +6098,8 @@ endif %}
 
         warnings: Array.isArray(detail.warnings) ? detail.warnings : [],
 
+        engineState: detail.engineState || null,
+
         shareMode: detail.shareMode || 'auto',
 
         updatedAt: detail.updatedAt || ''
@@ -6081,6 +6107,10 @@ endif %}
       };
 
       window.__CURRENT_TREE_PAYLOAD__ = participants;
+
+      if (engineStateInput) {
+        engineStateInput.value = detail.engineState ? JSON.stringify(detail.engineState) : '';
+      }
 
 
       const owner = participants.find(p => p.role === 'Owner');
@@ -8521,6 +8551,10 @@ endif %}
 
       });
 
+      if (engineStateInput) {
+        const latestEngineState = window.__FAMILY_TREE_STATE__?.engineState || treeState.engineState || null;
+        engineStateInput.value = latestEngineState ? JSON.stringify(latestEngineState) : '';
+      }
 
       saveCaseWorkspaceSnapshot();
 
@@ -8637,7 +8671,8 @@ endif %}
   <script src="/static/vendor/react.production.min.js"></script>
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260415c"></script>
+  <script src="/static/inheritance_engine.js?v=20260429a"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260429a"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
@@ -13832,10 +13867,3 @@ endif %}
     })(); // end OCR module
   </script>
   {% endblock %}
-
-
-
-
-
-
-

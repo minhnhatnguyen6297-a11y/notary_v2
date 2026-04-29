@@ -8,6 +8,8 @@ const rootElement = document.getElementById("react-flow-root");
 const initParticipants = window.__INITIAL_PARTICIPANTS__ || [];
 const allCustomers = window.__ALL_CUSTOMERS_DATA__ || [];
 const initialOwnerId = document.getElementById("case-nguoi-chet")?.value || "";
+const initialEngineState = window.__INITIAL_ENGINE_STATE__ || null;
+const inheritanceEngine = window.InheritanceEngine || null;
 
 let bootstrapSeed = 1;
 
@@ -38,7 +40,7 @@ const BASE_NODE_DEFS = [
     role: "Cha_vc",
     relationType: "spouseParent",
     bucket: 0,
-    allowsShare: false,
+    allowsShare: true,
     removable: false,
     sourceId: null,
   },
@@ -48,7 +50,7 @@ const BASE_NODE_DEFS = [
     role: "Me_vc",
     relationType: "spouseParent",
     bucket: 0,
-    allowsShare: false,
+    allowsShare: true,
     removable: false,
     sourceId: null,
   },
@@ -58,10 +60,10 @@ const BASE_NODE_DEFS = [
     role: "Owner",
     relationType: "owner",
     bucket: 1,
-    allowsShare: false,
+    allowsShare: true,
     removable: false,
     sourceId: null,
-    isLandOwner: true,
+    isLandOwner: false,
   },
   {
     id: "spouse",
@@ -161,7 +163,6 @@ function createLogicalNode(overrides) {
     removable: overrides.removable !== false,
     person: overrides.person || null,
     sharePercent: overrides.sharePercent || "0.00",
-    manualShare: overrides.manualShare || "",
     willReceive: overrides.willReceive ?? (overrides.allowsShare !== false),
     parentSlotId: overrides.parentSlotId || "",
     parentPersonId: overrides.parentPersonId || "",
@@ -172,6 +173,14 @@ function createLogicalNode(overrides) {
     ghostAction: overrides.ghostAction || "",
     ghostLabel: overrides.ghostLabel || "",
     isLandOwner: overrides.isLandOwner || false,
+    hasInflow: overrides.hasInflow || false,
+    showReceiveControl: overrides.showReceiveControl || false,
+    showShareSummary: overrides.showShareSummary || false,
+    baseShare: overrides.baseShare || "0",
+    inheritedShare: overrides.inheritedShare || "0",
+    distributedShare: overrides.distributedShare || "0",
+    finalShare: overrides.finalShare || "0",
+    traceLabel: overrides.traceLabel || "",
   };
 }
 
@@ -249,7 +258,6 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
-        manualShare: "",
         sharePercent: "0.00",
       };
     }
@@ -265,7 +273,6 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
-        manualShare: "",
         sharePercent: "0.00",
       };
     }
@@ -281,7 +288,6 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
-        manualShare: "",
         sharePercent: "0.00",
       };
     }
@@ -290,8 +296,7 @@ function buildAssignedNode(node, nodes, person) {
     ...node,
     person: candidate,
     parentPersonId: deriveParentPersonId(nodes, node),
-    willReceive: node.allowsShare && !candidate?.death && node.role !== "Owner" ? true : false,
-    manualShare: "",
+    willReceive: node.allowsShare && !candidate?.death ? true : false,
     sharePercent: "0.00",
   };
 }
@@ -381,12 +386,42 @@ function pickSiblingSource(nodes, participant) {
 
 // ─── Hydrate from saved participants ─────────────────────────────────────────
 
+function hydrateEngineStateNodes() {
+  if (!initialEngineState || !Array.isArray(initialEngineState.nodes) || !initialEngineState.nodes.length) {
+    return null;
+  }
+  const nodes = initialEngineState.nodes.map((saved) => {
+    const personId = String(saved.personId || saved.person?.id || "").trim();
+    const resolvedPerson = personId ? normalizePersonPayload(findCustomerById(personId) || saved.person || { id: personId }) : null;
+    return createLogicalNode({
+      id: saved.id,
+      kind: saved.kind || "person",
+      label: saved.label,
+      role: saved.role,
+      relationType: saved.relationType,
+      bucket: saved.bucket,
+      allowsShare: saved.allowsShare !== false,
+      removable: saved.removable !== false,
+      sourceId: saved.sourceId || null,
+      parentSlotId: saved.parentSlotId || "",
+      parentPersonId: saved.parentPersonId || saved.parentId || "",
+      person: resolvedPerson,
+      willReceive: saved.willReceive !== false,
+      isLandOwner: !!saved.isLandOwner || (Array.isArray(initialEngineState.assetOwnerIds) && initialEngineState.assetOwnerIds.map(String).includes(personId)),
+    });
+  });
+  return ensureSpareChildNode(nodes);
+}
+
 function hydrateInitialNodes() {
+  const engineNodes = hydrateEngineStateNodes();
+  if (engineNodes) return engineNodes;
+
   let nodes = createBaseNodes();
   const ownerPayload = buildOwnerPayload();
   if (ownerPayload) {
     nodes = nodes.map((node) =>
-      node.id === "owner" ? { ...node, person: ownerPayload, willReceive: false } : node
+      node.id === "owner" ? { ...node, person: ownerPayload, willReceive: !ownerPayload.death, isLandOwner: true } : node
     );
   }
 
@@ -398,7 +433,7 @@ function hydrateInitialNodes() {
 
     if (participant.role === "Owner") {
       nodes = nodes.map((node) =>
-        node.id === "owner" ? { ...node, person: participant, willReceive: false } : node
+        node.id === "owner" ? { ...node, person: participant, willReceive: !participant.death, isLandOwner: true } : node
       );
       return;
     }
@@ -420,13 +455,13 @@ function hydrateInitialNodes() {
     }
     if (participant.role === "Cha_vc") {
       nodes = nodes.map((node) =>
-        node.id === "spouse_father" ? { ...node, person: participant, willReceive: false } : node
+        node.id === "spouse_father" ? { ...node, person: participant, willReceive: defaultWillReceive } : node
       );
       return;
     }
     if (participant.role === "Me_vc") {
       nodes = nodes.map((node) =>
-        node.id === "spouse_mother" ? { ...node, person: participant, willReceive: false } : node
+        node.id === "spouse_mother" ? { ...node, person: participant, willReceive: defaultWillReceive } : node
       );
       return;
     }
@@ -531,7 +566,7 @@ function survivesAt(personDeathDate, eventDeathDate) {
 
 function getBaseInsight(node, deathComparison) {
   if (!node.person) return ["Thả người vào ô này để bổ sung quan hệ."];
-  if (node.role === "Owner") return ["Người để lại di sản, không tham gia chia suất."];
+  if (node.role === "Owner") return ["Ô trung tâm/legacy; quyền sở hữu được xác định bằng nút ★."];
   if (!node.person.death) return ["Đang còn sống, có thể tham gia chia suất nếu bật nhận."];
   if (deathComparison === "predeceased") return ["Chết trước chủ đất, ưu tiên mở nhánh thế vị."];
   if (deathComparison === "postdeceased") return ["Chết sau chủ đất, ưu tiên nhánh thừa kế chuyển tiếp."];
@@ -588,136 +623,95 @@ function buildModelWarnings(models, shareMode) {
     }
   });
 
-  if (shareMode === "manual") {
-    const manualParticipants = models.filter(
-      (node) => node.kind === "person" && node.person && node.allowsShare && !node.disabledReason && node.willReceive
-    );
-    const total = manualParticipants.reduce((sum, node) => sum + Number(node.sharePercent || 0), 0);
-    if (manualParticipants.length > 0 && Math.abs(total - 100) > 0.009) {
-      warnings.push(`Tổng tỷ lệ đang là ${total.toFixed(2)}%, cần đưa về 100%.`);
-    }
-  }
-
   return Array.from(new Set(warnings));
 }
 
-function buildBranchRecipients(models, ownerDeathDate, node) {
-  if (!node.person) return [];
-  if (!node.person.death) return node.willReceive && !node.disabledReason ? [node] : [];
-  const nodeDeathDate = parseFlexibleDate(node.person.death);
-  const descendants = models.filter(
-    (candidate) =>
-      candidate.kind === "person" && candidate.parentSlotId === node.id && candidate.relationType === "grandchild" &&
-      candidate.person && !candidate.disabledReason && candidate.willReceive &&
-      survivesAt(parseFlexibleDate(candidate.person.death), nodeDeathDate)
-  );
-  const branchSpouses = models.filter(
-    (candidate) =>
-      candidate.kind === "person" && candidate.parentSlotId === node.id && candidate.relationType === "branchSpouse" &&
-      candidate.person && !candidate.disabledReason && candidate.willReceive &&
-      survivesAt(parseFlexibleDate(candidate.person.death), nodeDeathDate)
-  );
-  if (node.deathComparison === "postdeceased") return [...branchSpouses, ...descendants];
-  return descendants;
+function buildEngineInput(models) {
+  const personNodes = models.filter((node) => node.kind === "person" && node.person);
+  const nodes = personNodes.map((node) => ({
+    id: node.id,
+    personId: String(node.person.id),
+    person: node.person,
+    label: node.label,
+    role: node.role,
+    relationType: node.relationType,
+    parentPersonId: node.parentPersonId || "",
+    parentSlotId: node.parentSlotId || "",
+    sourceId: node.sourceId || "",
+    isLandOwner: !!node.isLandOwner,
+    willReceive: node.willReceive !== false,
+  }));
+  const people = nodes.map((node) => node.person);
+  const willReceiveByPersonId = {};
+  nodes.forEach((node) => { willReceiveByPersonId[String(node.personId)] = node.willReceive !== false; });
+  return {
+    people,
+    nodes,
+    assetOwnerIds: nodes.filter((node) => node.isLandOwner).map((node) => String(node.personId)),
+    willReceiveByPersonId,
+  };
 }
 
-function roundAllocations(allocation) {
-  const entries = Array.from(allocation.entries()).filter(([, rawPercent]) => rawPercent > 0);
-  const rounded = new Map();
-  if (!entries.length) return rounded;
-  let usedBasisPoints = 0;
-  entries.forEach(([nodeId, rawPercent], index) => {
-    if (index === entries.length - 1) { rounded.set(nodeId, (10000 - usedBasisPoints) / 100); return; }
-    const basisPoints = Math.floor(rawPercent * 100);
-    usedBasisPoints += basisPoints;
-    rounded.set(nodeId, basisPoints / 100);
-  });
-  return rounded;
-}
-
-function calculateInheritance(models, shareMode) {
-  const owner = models.find((node) => node.role === "Owner" && node.person);
-  const ownerDeathDate = parseFlexibleDate(owner?.person?.death);
-
-  let nextModels = models.map((node) => {
-    const nextNode = { ...node };
-    nextNode.sharePercent = node.sharePercent || "0.00";
-    if (!node.person) { nextNode.disabledReason = ""; return nextNode; }
-    if (node.role === "Owner") {
-      nextNode.willReceive = false; nextNode.sharePercent = "0.00";
-      nextNode.disabledReason = "Người để lại di sản."; return nextNode;
+function applyEngineResult(models, engineResult) {
+  const allocations = engineResult?.allocations || {};
+  return models.map((node) => {
+    if (!node.person) return { ...node, sharePercent: "0.00", disabledReason: "" };
+    const personId = String(node.person.id);
+    const allocation = allocations[personId] || {};
+    const hasBaseShare = allocation.baseShare && allocation.baseShare !== "0";
+    const hasInflow = allocation.inflowShare && allocation.inflowShare !== "0";
+    const hasDistributed = allocation.distributedShare && allocation.distributedShare !== "0";
+    const finalPercent = allocation.displayPercent || "0.00";
+    const nextNode = {
+      ...node,
+      sharePercent: finalPercent,
+      baseShare: allocation.baseShare || "0",
+      inheritedShare: allocation.inheritedShare || "0",
+      distributedShare: allocation.distributedShare || "0",
+      finalShare: allocation.finalShare || "0",
+      hasInflow: !!hasInflow,
+      showShareSummary: !!(hasBaseShare || hasInflow || hasDistributed || Number(finalPercent) > 0 || (!node.person.death && node.willReceive === false)),
+      showReceiveControl: !node.person.death && (!!hasInflow || node.willReceive === false),
+      traceLabel: "",
+      disabledReason: "",
+    };
+    if (!node.person.death && hasBaseShare && !hasInflow) {
+      nextNode.showReceiveControl = false;
+      nextNode.traceLabel = "Đồng sở hữu gốc";
+    } else if (node.person.death && hasDistributed) {
+      nextNode.traceLabel = "Đã nhận/chảy qua";
     }
-    if (!node.allowsShare) {
-      nextNode.willReceive = false; nextNode.sharePercent = "0.00";
-      nextNode.disabledReason = "Nút quan hệ, không tham gia chia suất."; return nextNode;
-    }
-    if (node.person.death) {
-      nextNode.willReceive = false;
-      if (node.relationType === "child") {
-        if (node.deathComparison === "postdeceased") nextNode.disabledReason = "Đã mất sau chủ đất, cần phần xuống nhánh chuyển tiếp.";
-        else if (node.deathComparison === "predeceased") nextNode.disabledReason = "Đã mất trước chủ đất, cần mở nhánh thế vị.";
-        else if (node.deathComparison === "simultaneous") nextNode.disabledReason = "Mất cùng thời điểm, cần kiểm tra hồ sơ.";
-        else nextNode.disabledReason = "Đã mất, cần mở nhánh phát sinh.";
-      } else if (node.relationType === "parent") nextNode.disabledReason = "Đã mất, có thể cần nhánh anh/chị/em.";
-      else if (node.relationType === "sibling") nextNode.disabledReason = "Đã mất, cần kiểm tra nhánh tiếp theo.";
-      else nextNode.disabledReason = "Đã mất, không nhận trực tiếp.";
-      nextNode.sharePercent = "0.00"; return nextNode;
-    }
-    nextNode.disabledReason = "";
-    if (typeof nextNode.willReceive !== "boolean") nextNode.willReceive = true;
     return nextNode;
   });
+}
 
-  if (shareMode === "manual") {
-    return nextModels.map((node) => {
-      if (!node.person || !node.allowsShare || node.disabledReason || !node.willReceive) return { ...node, sharePercent: "0.00" };
-      const manualNumber = Number(node.manualShare || node.sharePercent || 0);
-      const safeValue = Number.isFinite(manualNumber) && manualNumber > 0 ? manualNumber : 0;
-      return { ...node, sharePercent: safeValue.toFixed(2) };
-    });
+function runDiagramEngine(models) {
+  if (!inheritanceEngine?.runInheritanceCase) {
+    return {
+      nodes: models.map((node) => ({ ...node, sharePercent: "0.00" })),
+      engineState: { schemaVersion: 1, warnings: [{ code: "engine_missing", message: "Chưa tải được inheritance_engine.js." }] },
+    };
   }
-
-  nextModels = nextModels.map((node) => ({ ...node, sharePercent: "0.00" }));
-
-  const parents = nextModels.filter(
-    (node) => node.person && (node.role === "Cha" || node.role === "Mẹ") && !node.disabledReason && node.willReceive &&
-      survivesAt(parseFlexibleDate(node.person.death), ownerDeathDate)
-  );
-  const spouse = nextModels.find(
-    (node) => node.person && node.role === "Vợ/Chồng" && !node.disabledReason && node.willReceive &&
-      survivesAt(parseFlexibleDate(node.person.death), ownerDeathDate)
-  );
-  const children = nextModels.filter((node) => node.person && node.relationType === "child");
-
-  const firstLineUnits = [
-    ...parents.map((node) => [node]),
-    ...(spouse ? [[spouse]] : []),
-    ...children.map((child) => buildBranchRecipients(nextModels, ownerDeathDate, child)).filter((unit) => unit.length > 0),
-  ];
-
-  let activeUnits = firstLineUnits;
-  if (!activeUnits.length) {
-    activeUnits = nextModels
-      .filter((node) => node.person && node.relationType === "sibling" && !node.disabledReason && node.willReceive &&
-        survivesAt(parseFlexibleDate(node.person.death), ownerDeathDate))
-      .map((node) => [node]);
-  }
-  if (!activeUnits.length) return nextModels;
-
-  const allocation = new Map();
-  const unitPercent = 100 / activeUnits.length;
-  activeUnits.forEach((unit) => {
-    const activeRecipients = unit.filter((node) => node.person && !node.disabledReason && node.willReceive);
-    if (!activeRecipients.length) return;
-    const split = unitPercent / activeRecipients.length;
-    activeRecipients.forEach((recipient) => { allocation.set(recipient.id, (allocation.get(recipient.id) || 0) + split); });
-  });
-
-  const rounded = roundAllocations(allocation);
-  return nextModels.map((node) => {
-    if (!rounded.has(node.id)) return { ...node, sharePercent: "0.00" };
-    return { ...node, sharePercent: Number(rounded.get(node.id)).toFixed(2) };
-  });
+  const engineInput = buildEngineInput(models);
+  const engineResult = inheritanceEngine.runInheritanceCase(engineInput);
+  return {
+    nodes: applyEngineResult(models, engineResult),
+    engineState: {
+      ...engineResult,
+      nodes: engineInput.nodes.map((node) => ({
+        id: node.id,
+        personId: node.personId,
+        label: node.label,
+        role: node.role,
+        relationType: node.relationType,
+        parentPersonId: node.parentPersonId,
+        parentSlotId: node.parentSlotId,
+        sourceId: node.sourceId,
+        isLandOwner: node.isLandOwner,
+        willReceive: node.willReceive,
+      })),
+    },
+  };
 }
 
 function resolveSubRelations(nodes, shareMode) {
@@ -732,7 +726,8 @@ function resolveSubRelations(nodes, shareMode) {
     return { ...node, person, deathComparison, insightLines: getBaseInsight(node, deathComparison) };
   });
 
-  resolvedNodes = calculateInheritance(resolvedNodes, shareMode);
+  const engineRun = runDiagramEngine(resolvedNodes);
+  resolvedNodes = engineRun.nodes;
 
   const ghostNodes = [];
   const hasDeadFather = resolvedNodes.some((candidate) => candidate.id === "father" && candidate.person && candidate.person.death);
@@ -776,8 +771,9 @@ function resolveSubRelations(nodes, shareMode) {
   });
 
   const mergedNodes = [...resolvedNodes.filter((node) => node.kind !== "ghost"), ...ghostNodes];
-  const warnings = buildModelWarnings(mergedNodes, shareMode);
-  return { nodes: mergedNodes, warnings };
+  const engineWarnings = (engineRun.engineState?.warnings || []).map((warning) => warning.message || warning.code || String(warning));
+  const warnings = [...buildModelWarnings(mergedNodes, shareMode), ...engineWarnings];
+  return { nodes: mergedNodes, warnings: Array.from(new Set(warnings)), engineState: engineRun.engineState };
 }
 
 // ─── Brick-Wall Render Components ────────────────────────────────────────────
@@ -832,7 +828,7 @@ const S = {
     position: "absolute", top: 6, right: 6,
     fontSize: 12, cursor: "pointer", color: active ? "#d97706" : "#cbd5e1",
     lineHeight: 1, userSelect: "none",
-    title: "Chủ sử dụng đất",
+    title: "Đồng chủ sở hữu",
   }),
   removeBtn: {
     position: "absolute", top: 4, right: 22,
@@ -849,10 +845,6 @@ const S = {
   sharePct: {
     fontSize: 10, fontWeight: 700, color: "#64748b",
     background: "#f8fafc", borderRadius: 999, padding: "1px 6px",
-  },
-  manualInput: {
-    width: "100%", marginTop: 6, fontSize: 11, padding: "3px 6px",
-    borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box",
   },
 };
 
@@ -918,14 +910,16 @@ function appendBracketConnector(lines, arrows, parentBox, childBoxes, options = 
 }
 
 const BrickCard = React.forwardRef(function BrickCard(
-  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onShareInputChange, onGhostExpand, onValidateAssign, shareMode },
+  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onGhostExpand, onValidateAssign, shareMode },
   ref
 ) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isOccupied = !!node.person;
   const isDead = !!node.person?.death;
   const isGhost = node.kind === "ghost";
-  const canToggleReceive = isOccupied && node.allowsShare && !node.disabledReason && !isDead && node.role !== "Owner";
+  const canToggleReceive = isOccupied && node.showReceiveControl && !node.disabledReason && !isDead;
+  const showShareSummary = isOccupied && node.showShareSummary;
+  const showReceiveCheckbox = canToggleReceive || (isOccupied && node.hasInflow && !isDead);
   const displayLabel = isGhost
     ? (node.ghostAction === "addGrandchild"
       ? "Con the vi"
@@ -996,7 +990,7 @@ const BrickCard = React.forwardRef(function BrickCard(
       {/* Land owner badge */}
       <span
         style={S.landBadge(!!node.isLandOwner)}
-        title="Chủ sử dụng đất"
+        title="Đồng chủ sở hữu"
         onClick={(e) => { e.stopPropagation(); if (isOccupied) onToggleLandOwner(node.id); }}
       >★</span>
 
@@ -1019,31 +1013,28 @@ const BrickCard = React.forwardRef(function BrickCard(
             <div style={S.insightChip("#92400e")}>{node.disabledReason}</div>
           ) : null}
 
-          {node.allowsShare && (
+          {showShareSummary && (
             <div style={S.receiveRow}>
-              <label style={S.shareLabel}>
-                <input
-                  type="checkbox"
-                  checked={!!node.willReceive}
-                  disabled={!canToggleReceive}
-                  onChange={() => onToggleReceive(node.id)}
-                />
-                Nhận
-              </label>
-              {node.willReceive && (
-                <span style={S.sharePct}>{Number(node.sharePercent || 0).toFixed(2)}%</span>
+              {showReceiveCheckbox ? (
+                <label style={S.shareLabel} title={node.isLandOwner ? "Nhận chỉ áp dụng phần di sản chảy vào, không áp dụng phần sở hữu gốc." : ""}>
+                  <input
+                    type="checkbox"
+                    checked={!!node.willReceive}
+                    disabled={!canToggleReceive}
+                    onChange={() => onToggleReceive(node.id)}
+                  />
+                  Nhận
+                </label>
+              ) : (
+                <span style={S.shareLabel}>{node.traceLabel || (node.isLandOwner ? "Sở hữu" : "Tỷ lệ")}</span>
               )}
+              <span style={S.sharePct}>{Number(node.sharePercent || 0).toFixed(2)}%</span>
             </div>
           )}
 
-          {shareMode === "manual" && node.allowsShare && node.willReceive && !node.disabledReason && (
-            <input
-              type="number" min="0" max="100" step="0.01"
-              style={S.manualInput}
-              value={node.manualShare || node.sharePercent || "0"}
-              onChange={(e) => onShareInputChange && onShareInputChange(node.id, e.target.value)}
-            />
-          )}
+          {node.traceLabel && isDead ? (
+            <div style={S.insightChip("#475569")}>{node.traceLabel}</div>
+          ) : null}
         </>
       )}
     </div>
@@ -1626,7 +1617,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
 function FamilyTreeApp() {
   const counterRef = useRef(Date.now());
   const [logicalNodes, setLogicalNodes] = useState(() => hydrateInitialNodes());
-  const [shareMode, setShareMode] = useState("auto");
+  const [shareMode] = useState("auto");
   const [resolvedNodes, setResolvedNodes] = useState([]);
   const [warnings, setWarnings] = useState([]);
 
@@ -1652,8 +1643,7 @@ function FamilyTreeApp() {
         ...node,
         person,
         parentPersonId,
-        willReceive: node.allowsShare && !person.death && node.role !== "Owner" ? true : false,
-        manualShare: "",
+        willReceive: node.allowsShare && !person.death ? true : false,
         sharePercent: "0.00",
       };
     }
@@ -1666,7 +1656,6 @@ function FamilyTreeApp() {
       allowsShare: true,
       removable: true,
       willReceive: !person.death,
-      manualShare: "",
       sharePercent: "0.00",
     };
 
@@ -1704,7 +1693,7 @@ function FamilyTreeApp() {
       if (!target) return prevNodes;
       if (!target.removable) {
         return prevNodes.map((node) =>
-          node.id === nodeId ? { ...node, person: null, willReceive: false, manualShare: "", sharePercent: "0.00" } : node
+          node.id === nodeId ? { ...node, person: null, willReceive: false, sharePercent: "0.00" } : node
         );
       }
       return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId));
@@ -1718,7 +1707,7 @@ function FamilyTreeApp() {
       const person = source.person;
       return ensureSpareChildNode(
         prev.map((n) => {
-          if (n.id === sourceNodeId) return { ...n, person: null, willReceive: false, sharePercent: "0.00", manualShare: "" };
+          if (n.id === sourceNodeId) return { ...n, person: null, willReceive: false, sharePercent: "0.00" };
           if (n.id === targetNodeId) return materializeGhostNode(n, prev, person);
           return n;
         })
@@ -1763,7 +1752,7 @@ function FamilyTreeApp() {
       return ensureSpareChildNode(
         prev.map((node) => {
           if (node.id === sourceNodeId) {
-            if (!targetPerson) return { ...node, person: null, willReceive: false, sharePercent: "0.00", manualShare: "" };
+            if (!targetPerson) return { ...node, person: null, willReceive: false, sharePercent: "0.00" };
             return buildAssignedNode(node, prev, targetPerson);
           }
           if (node.id === targetNodeId) return buildAssignedNode(node, prev, sourcePerson);
@@ -1777,36 +1766,14 @@ function FamilyTreeApp() {
     setLogicalNodes((prevNodes) =>
       prevNodes.map((node) =>
         node.id === nodeId
-          ? { ...node, willReceive: !node.willReceive, manualShare: shareMode === "manual" && node.willReceive ? "0" : node.manualShare }
+          ? { ...node, willReceive: !node.willReceive }
           : node
       )
     );
-  }, [shareMode]);
+  }, []);
 
   const onToggleLandOwner = useCallback((nodeId) => {
     setLogicalNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, isLandOwner: !n.isLandOwner } : n));
-  }, []);
-
-  const onEnableManualMode = useCallback((nodeId) => {
-    setShareMode("manual");
-    setLogicalNodes((prevNodes) =>
-      prevNodes.map((node) => {
-        if (node.id === nodeId) return { ...node, manualShare: node.sharePercent || "0.00" };
-        if (!node.person || !node.allowsShare || node.disabledReason || !node.willReceive) return node;
-        return { ...node, manualShare: node.sharePercent || "0.00" };
-      })
-    );
-  }, []);
-
-  const onResetAutoMode = useCallback(() => {
-    setShareMode("auto");
-    setLogicalNodes((prevNodes) => prevNodes.map((node) => ({ ...node, manualShare: "" })));
-  }, []);
-
-  const onShareInputChange = useCallback((nodeId, value) => {
-    setLogicalNodes((prevNodes) =>
-      prevNodes.map((node) => node.id === nodeId ? { ...node, manualShare: value } : node)
-    );
   }, []);
 
   useEffect(() => {
@@ -1907,7 +1874,13 @@ function FamilyTreeApp() {
       }));
 
     window.dispatchEvent(new CustomEvent("onFamilyTreeUpdate", {
-      detail: { participants, warnings: resolved.warnings, shareMode, updatedAt: new Date().toISOString() },
+      detail: {
+        participants,
+        warnings: resolved.warnings,
+        shareMode,
+        engineState: resolved.engineState || null,
+        updatedAt: new Date().toISOString(),
+      },
     }));
   }, [logicalNodes, shareMode]);
 
@@ -1918,9 +1891,6 @@ function FamilyTreeApp() {
     onValidateAssign: preflightAssign,
     onToggleReceive,
     onToggleLandOwner,
-    onEnableManualMode,
-    onResetAutoMode,
-    onShareInputChange,
     onGhostExpand,
   };
 
@@ -1945,26 +1915,12 @@ function FamilyTreeApp() {
 
         <span style={{
           borderRadius: 999,
-          background: shareMode === "manual" ? "#dbeafe" : "#fef3c7",
-          color: shareMode === "manual" ? "#1d4ed8" : "#92400e",
+          background: "#fef3c7",
+          color: "#92400e",
           padding: "5px 10px", fontSize: 11, fontWeight: 800,
         }}>
-          {shareMode === "manual" ? "Chia tay" : "Tự động"}
+          Engine tự động
         </span>
-
-        {shareMode === "manual" && (
-          <button
-            type="button"
-            onClick={onResetAutoMode}
-            style={{
-              border: "none", borderRadius: 999, background: "#fff", color: "#1d4ed8",
-              padding: "5px 10px", fontWeight: 700, fontSize: 11,
-              boxShadow: "0 1px 4px rgba(15,23,42,.06)", cursor: "pointer",
-            }}
-          >
-            Đặt lại auto
-          </button>
-        )}
       </div>
 
       {/* Diagram */}

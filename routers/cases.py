@@ -152,7 +152,7 @@ def create_form(request: Request, db: Session = Depends(get_db)):
     from datetime import date as _date
     form = {
         "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": _date.today().isoformat(),
-        "loai_van_ban": "khai_nhan", "ghi_chu": ""
+        "loai_van_ban": "khai_nhan", "ghi_chu": "", "engine_state_json": ""
     }
     return templates.TemplateResponse("cases/form.html", {
         "request": request, "obj": None,
@@ -173,12 +173,14 @@ def create(
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
+    engine_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     from datetime import date as _date
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
+        "engine_state_json": (engine_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
@@ -210,7 +212,8 @@ def create(
         c = InheritanceCase(
             nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
             ngay_lap_ho_so=_date.today(),
-            loai_van_ban="khai_nhan", ghi_chu=None
+            loai_van_ban="khai_nhan", ghi_chu=None,
+            engine_state_json=(engine_state_json or "").strip() or None,
         )
         db.add(c); db.commit(); db.refresh(c)
         if selected_property_ids:
@@ -297,6 +300,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "loai_van_ban": case.loai_van_ban or "khai_nhan",
         "noi_niem_yet": case.noi_niem_yet or "",
         "ghi_chu": case.ghi_chu or "",
+        "engine_state_json": case.engine_state_json or "",
     }
     return templates.TemplateResponse("cases/form.html", {
         "request": request, "obj": case,
@@ -318,6 +322,7 @@ def edit(
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
+    engine_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
@@ -326,6 +331,7 @@ def edit(
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
         "noi_niem_yet": (noi_niem_yet or "").strip(),
+        "engine_state_json": (engine_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
@@ -355,6 +361,7 @@ def edit(
     try:
         case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
         case.noi_niem_yet = form["noi_niem_yet"] or None
+        case.engine_state_json = (engine_state_json or "").strip() or None
         db.commit()
         if selected_property_ids:
             _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))

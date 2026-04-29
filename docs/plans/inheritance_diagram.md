@@ -6,6 +6,17 @@
 
 ---
 
+## Cập nhật thiết kế 29/04/2026 — engine state và tree tối giản
+
+- Nút `★` trên thẻ người là **đồng chủ sở hữu tài sản ban đầu**, không phải một "người chết" duy nhất. Nếu có `n` người được tích `★`, phase hiện tại chia đều phần sở hữu gốc `1/n`.
+- Nút `Nhận` chỉ áp dụng cho **phần di sản chảy vào** một người. Người đã là chủ sở hữu gốc không thể dùng `Nhận` để từ chối tài sản của chính họ.
+- `%` hiển thị trên thẻ là output của engine, không được tính rải rác ở card hoặc legacy DOM tree. Engine tính bằng phân số, UI chỉ format phần trăm cuối cùng.
+- Source of truth khi lưu hồ sơ là `InheritanceCase.engine_state_json`. `case-nguoi-chet` chỉ còn là field legacy để giữ tương thích form/router cũ.
+- Sơ đồ ưu tiên tree tối giản: user hiểu bằng vị trí node, label quan hệ, nút `★`, nút `Nhận`, và mũi tên. Không thiết kế panel "nhánh phụ/external branch" tách khỏi tree chính.
+- Thế vị phase này chỉ đi xuống con/cháu/chắt trong vòng thừa kế đang xét; không sinh bố mẹ/vợ chồng của người chết trước để xử lý thế vị.
+
+---
+
 ## I. Nguyên tắc nền tảng
 
 ### 1. Xác định chủ sử dụng tài sản

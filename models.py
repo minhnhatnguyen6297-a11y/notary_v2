@@ -92,6 +92,7 @@ class InheritanceCase(Base):
     trang_thai       = Column(String(20), default="draft")       # draft / locked
     noi_niem_yet     = Column(String(200), nullable=True)        # Tên xã/thị trấn nơi lập văn bản
     ghi_chu          = Column(Text,    nullable=True)
+    engine_state_json = Column(Text,   nullable=True)            # JSON state cua engine/sơ đồ thừa kế mới
     created_at       = Column(DateTime, server_default=func.now())
 
     # Quan hệ

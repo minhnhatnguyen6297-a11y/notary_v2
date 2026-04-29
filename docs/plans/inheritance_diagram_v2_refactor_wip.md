@@ -4,6 +4,8 @@
 > Cập nhật: 28/04/2026.
 > File này phục vụ resume cho agent/session kế tiếp.
 
+> **Superseded 29/04/2026:** Thiết kế "external branch render riêng dưới tree chính" đã bị hủy. Thiết kế hiện tại yêu cầu tree tối giản, không panel nhánh phụ, source of truth lưu bền vững trong `inheritance_cases.engine_state_json`. Xem `docs/plans/inheritance_diagram.md` mục cập nhật 29/04/2026.
+
 ### Bản ghi đầy đủ bài toán mẫu user chốt ngày 28/04/2026
 
 #### Đề bài
