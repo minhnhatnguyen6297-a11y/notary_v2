@@ -15,6 +15,19 @@
 - Sơ đồ ưu tiên tree tối giản: user hiểu bằng vị trí node, label quan hệ, nút `★`, nút `Nhận`, và mũi tên. Không thiết kế panel "nhánh phụ/external branch" tách khỏi tree chính.
 - Thế vị phase này chỉ đi xuống con/cháu/chắt trong vòng thừa kế đang xét; không sinh bố mẹ/vợ chồng của người chết trước để xử lý thế vị.
 
+### Pattern kỹ thuật 29/04/2026 — drop vào ghost node
+
+- Các ô tạm như `ghost_sibling_*`, `ghost_grandchild_*`, `ghost_branch_spouse_*` được sinh từ `resolveSubRelations(...).nodes`; chúng không tồn tại trong `logicalNodes`.
+- Handler validate/drop phải lookup target bằng resolved nodes của cùng snapshot. Nếu chỉ tìm trong `logicalNodes`, UI sẽ báo "Ô nhận không hợp lệ" dù ô đang hiển thị.
+- Khi drop vào ghost, phải append một logical node mới với id thật (`sibling_*`, `grandchild_*`, `branch_spouse_*`). Không mutate ghost id thành person id, vì lần render sau ghost cùng id sẽ được sinh lại và gây duplicate.
+- Sau khi sửa `ReactFlowApp.jsx`, bump query version script ở `frontend/templates/cases/form.html` để browser không dùng bundle cũ.
+- Pattern tiếp theo: ghost descendant không chỉ sinh cho `relationType === "child"`. Người chết thuộc nhánh `sibling` hoặc `grandchild` cũng có thể có con/cháu nhận tiếp theo dòng chảy, nên UI phải sinh `ghost_grandchild_*` cho `child | sibling | grandchild`, khớp với engine `childrenByParent`.
+
+### Pattern kỹ thuật 30/04/2026 — submit atomic và render nhánh sibling
+
+- Khi bấm "Lưu hồ sơ", không được refresh pool/staging giữa chừng sau khi save từng dòng draft. Flow đúng là save draft rows ở chế độ im lặng, đọc lại `getFamilyTreeState()`, rồi mới build `participants-hidden` và submit form một lần.
+- Node con của một `sibling` đã chết vẫn là descendant branch (`grandchildBranch:*`) về dữ liệu, nhưng về layout phải render ở hàng con ngay dưới hàng chủ đất/anh chị em. Chỉ các descendant branch sâu hơn mới xuống tầng cháu/chắt.
+
 ---
 
 ## I. Nguyên tắc nền tảng

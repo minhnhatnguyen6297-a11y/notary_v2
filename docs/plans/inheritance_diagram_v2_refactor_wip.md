@@ -101,6 +101,17 @@ Sơ đồ thừa kế trong `frontend/templates/cases/form.html` + `frontend/sta
 2. Cha/mẹ chết trước/chết sau chủ đất không được phân biệt — cả 2 đều hiển thị label "Nút quan hệ, không tham gia chia suất" (sai luật).
 3. Nút `★` gán chủ đất là dead handler — click không có hiệu ứng nghiệp vụ thật, chỉ toggle visual.
 
+**Pattern bug lặp lại 29/04/2026 — drop vào ghost node:**
+- Các ô tạm thời như `ghost_sibling_*`, `ghost_grandchild_*`, `ghost_branch_spouse_*` được sinh trong `resolveSubRelations(...).nodes`, không nằm trong `logicalNodes`.
+- Vì vậy `validateAssignment()` và handler drop không được chỉ lookup target trong `logicalNodes`; phải lookup bằng resolved nodes của cùng snapshot.
+- Khi drop vào ghost node, không được mutate ghost id thành person id vì lần render sau sẽ sinh lại ghost cùng id và gây duplicate. Phải materialize thành logical node mới với id thật (`sibling_*`, `grandchild_*`, `branch_spouse_*`) rồi append vào `logicalNodes`.
+- Sau khi sửa `ReactFlowApp.jsx`, phải bump query version script trong `frontend/templates/cases/form.html` để tránh browser dùng bundle cũ.
+- Pattern tiếp theo: ghost descendant không chỉ sinh cho `relationType === "child"`. Người chết thuộc nhánh `sibling` hoặc `grandchild` cũng có thể có con/cháu nhận tiếp theo dòng chảy, nên UI phải sinh `ghost_grandchild_*` cho `child | sibling | grandchild`, khớp với engine `childrenByParent`.
+
+**Pattern bug lặp lại 30/04/2026 — submit atomic và render nhánh sibling:**
+- Case submit phải là một commit logic: save draft rows ở chế độ không refresh pool, đọc lại `getFamilyTreeState()` sau save, rồi mới build hidden participants. Không build từ snapshot cây lấy trước khi customer id/draft rows được đồng bộ.
+- `grandchildBranch:*` là nhóm descendant theo dữ liệu, không đồng nghĩa luôn render xuống tầng 4. Nếu parent của branch là `relationType === "sibling"` thì branch đó render ngay ở hàng con; chỉ branch sâu hơn mới render ở tầng cháu/chắt.
+
 **Thiếu sót lớn:**
 - Tầng 1 (CHA MẸ) đang được code coi như "nút trang trí", không tham gia chia suất.
 - Theo Bộ luật Dân sự, cha/mẹ là hàng thừa kế thứ nhất ngang với vợ/chồng/con. Quyết định ai nhận = so sánh ngày mất.

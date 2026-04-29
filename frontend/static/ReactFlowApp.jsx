@@ -221,11 +221,15 @@ function resolveCustomerForDrop(rawPayload) {
   return normalizePersonPayload(resolved || rawPayload);
 }
 
-function validateAssignment(logicalNodes, nodeId, person) {
+function validateAssignment(logicalNodes, nodeId, person, targetNodes = logicalNodes) {
   const candidate = normalizePersonPayload(person);
   if (!candidate?.id) return { ok: false, reason: "Không xác định được khách hàng." };
-  const targetNode = logicalNodes.find((node) => node.id === nodeId);
-  if (!targetNode || targetNode.kind !== "person") return { ok: false, reason: "Ô nhận không hợp lệ." };
+  const targetNode = targetNodes.find((node) => node.id === nodeId);
+  const isValidTarget = targetNode && (
+    targetNode.kind === "person" ||
+    (targetNode.kind === "ghost" && !!targetNode.ghostAction)
+  );
+  if (!isValidTarget) return { ok: false, reason: "Ô nhận không hợp lệ." };
   const duplicate = logicalNodes.find(
     (node) => node.id !== nodeId && node.kind === "person" && node.person && String(node.person.id) === String(candidate.id)
   );
@@ -311,6 +315,13 @@ function assignPersonToNode(nodes, nodeId, person) {
     return buildAssignedNode(node, nodes, person);
   });
   return { nodes: ensureSpareChildNode(nextNodes), displacedPersons };
+}
+
+function ghostMaterializedIdPrefix(node) {
+  if (node.ghostAction === "addSibling") return "sibling";
+  if (node.ghostAction === "addGrandchild") return "grandchild";
+  if (node.ghostAction === "addBranchSpouse") return "branch_spouse";
+  return "person";
 }
 
 function collectPrunableNodeIds(nodes, targetId) {
@@ -529,7 +540,12 @@ function hydrateInitialNodes() {
 
   delayedGrandchildren.forEach((participant) => {
     const parentNode =
-      nodes.find((node) => node.kind === "person" && node.relationType === "child" && node.person && String(node.person.id) === String(participant.parentId || "")) ||
+      nodes.find((node) =>
+        node.kind === "person" &&
+        ["child", "sibling", "grandchild"].includes(node.relationType) &&
+        node.person &&
+        String(node.person.id) === String(participant.parentId || "")
+      ) ||
       nodes.find((node) => node.kind === "person" && node.relationType === "child" && node.person);
     if (!parentNode) return;
     nodes = [
@@ -615,7 +631,7 @@ function buildModelWarnings(models, shareMode) {
 
   models.forEach((node) => {
     if (!node.person || !node.person.death) return;
-    if (node.relationType === "child") {
+    if (["child", "sibling", "grandchild"].includes(node.relationType)) {
       const hasBranchData = models.some(
         (candidate) => candidate.kind === "person" && candidate.parentSlotId === node.id && !!candidate.person
       );
@@ -744,7 +760,7 @@ function resolveSubRelations(nodes, shareMode) {
       }));
     }
 
-    if (node.relationType === "child") {
+    if (["child", "sibling", "grandchild"].includes(node.relationType)) {
       ghostNodes.push(createLogicalNode({
         id: `ghost_grandchild_${node.id}`, kind: "ghost", label: "Thêm con thế vị",
         role: "Cháu", relationType: "ghostGrandchild", bucket: 3,
@@ -1341,10 +1357,17 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
   const ghostChildren = ghostNodes.filter((n) => n.ghostAction === "addChild");
   const grandchildren = personNodes.filter((n) => n.relationType === "grandchild");
   const ghostGrandchildren = ghostNodes.filter((n) => n.relationType === "ghostGrandchild");
+  const personNodeById = new Map(personNodes.map((node) => [node.id, node]));
   const allGrandchildParentIds = Array.from(new Set([
     ...grandchildren.map((n) => n.parentSlotId),
     ...ghostGrandchildren.map((n) => n.parentSlotId),
-  ]));
+  ].filter(Boolean)));
+  const siblingGrandchildParentIds = allGrandchildParentIds.filter((parentId) =>
+    personNodeById.get(parentId)?.relationType === "sibling"
+  );
+  const deeperGrandchildParentIds = allGrandchildParentIds.filter((parentId) =>
+    personNodeById.get(parentId)?.relationType !== "sibling"
+  );
 
   const drawConnectors = useCallback(() => {
     const contentElement = contentRef.current;
@@ -1377,16 +1400,16 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
       appendBracketConnector(lines, arrows, getNodeBox("owner"), occupiedChildBoxes, { key: "owner-children" });
     }
 
-    children.forEach((child) => {
-      if (!child.person) return;
-      const branchBox = getGroupBox(`grandchildBranch:${child.id}`);
+    [...children, ...siblings, ...grandchildren].forEach((branchParent) => {
+      if (!branchParent.person) return;
+      const branchBox = getGroupBox(`grandchildBranch:${branchParent.id}`);
       if (!branchBox) return;
       appendBracketConnector(
         lines,
         arrows,
-        getGroupBox(`childPair:${child.id}`) || getNodeBox(child.id),
+        getGroupBox(`childPair:${branchParent.id}`) || getNodeBox(branchParent.id),
         [branchBox],
-        { key: `child-branch:${child.id}`, childGap: 12 }
+        { key: `descendant-branch:${branchParent.id}`, childGap: 12 }
       );
     });
 
@@ -1396,7 +1419,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
       lines,
       arrows,
     });
-  }, [children, father, mother, owner, siblings, spFather, spMother, spouse]);
+  }, [children, father, grandchildren, mother, owner, siblings, spFather, spMother, spouse]);
 
   const scheduleConnectorDraw = useCallback(() => {
     if (drawFrameRef.current) window.cancelAnimationFrame(drawFrameRef.current);
@@ -1485,6 +1508,28 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
     );
   }
 
+  function renderGrandchildBranch(parentId) {
+    const parentNode = personNodeById.get(parentId);
+    const branchLabel = parentNode?.person?.name || parentId;
+    const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
+    const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
+    return (
+      <div key={parentId} ref={setGroupRef(`grandchildBranch:${parentId}`)}>
+        <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, marginBottom: 6, letterSpacing: ".04em" }}>
+          {"Nh\u00E1nh c\u1EE7a "}{branchLabel}:
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+          {branchGrandchildren.map((gc) => (
+            <BrickCard key={gc.id} ref={setNodeRef(gc.id)} node={gc} {...handlers} shareMode={shareMode} />
+          ))}
+          {branchGhosts.map((g) => (
+            <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderTier2() {
     return (
       <div ref={setGroupRef("childrenRow")} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start" }}>
@@ -1511,35 +1556,16 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
         {ghostChildren.map((g) => (
           <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
         ))}
+        {siblingGrandchildParentIds.map((parentId) => renderGrandchildBranch(parentId))}
       </div>
     );
   }
 
   function renderTier3() {
-    if (!allGrandchildParentIds.length) return null;
+    if (!deeperGrandchildParentIds.length) return null;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {allGrandchildParentIds.map((parentId) => {
-          const parentNode = personNodes.find((n) => n.id === parentId);
-          const branchLabel = parentNode?.person?.name || parentId;
-          const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
-          const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
-          return (
-            <div key={parentId} ref={setGroupRef(`grandchildBranch:${parentId}`)}>
-              <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, marginBottom: 6, letterSpacing: ".04em" }}>
-                {"Nh\u00E1nh c\u1EE7a "}{branchLabel}:
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-                {branchGrandchildren.map((gc) => (
-                  <BrickCard key={gc.id} ref={setNodeRef(gc.id)} node={gc} {...handlers} shareMode={shareMode} />
-                ))}
-                {branchGhosts.map((g) => (
-                  <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
-                ))}
-              </div>
-            </div>
-          );
-        })}
+        {deeperGrandchildParentIds.map((parentId) => renderGrandchildBranch(parentId))}
       </div>
     );
   }
@@ -1632,7 +1658,7 @@ function FamilyTreeApp() {
     return nodes.filter((node) => !toRemove.has(node.id));
   }, []);
 
-  const materializeGhostNode = useCallback((node, prevNodes, person) => {
+  const materializeGhostNode = useCallback((node, prevNodes, person, idOverride = "") => {
     if (!node) return node;
     const parentPersonId =
       node.parentSlotId && node.parentSlotId !== "owner"
@@ -1650,6 +1676,7 @@ function FamilyTreeApp() {
 
     const sharedProps = {
       ...node,
+      id: idOverride || node.id,
       kind: "person",
       person,
       parentPersonId,
@@ -1660,13 +1687,13 @@ function FamilyTreeApp() {
     };
 
     if (node.ghostAction === "addSibling") {
-      return { ...sharedProps, label: "Anh/Chá»‹/Em", role: "Anh/Chá»‹/Em", relationType: "sibling" };
+      return { ...sharedProps, label: "Anh/Chị/Em", role: "Anh/Chị/Em", relationType: "sibling" };
     }
     if (node.ghostAction === "addGrandchild") {
-      return { ...sharedProps, label: "Con tháº¿ vá»‹", role: "ChÃ¡u", relationType: "grandchild" };
+      return { ...sharedProps, label: "Con thế vị", role: "Cháu", relationType: "grandchild" };
     }
     if (node.ghostAction === "addBranchSpouse") {
-      return { ...sharedProps, label: "Vá»£/Chá»“ng cá»§a nhÃ¡nh", role: "Con_dau_re", relationType: "branchSpouse" };
+      return { ...sharedProps, label: "Vợ/Chồng của nhánh", role: "Con_dau_re", relationType: "branchSpouse" };
     }
     return sharedProps;
   }, []);
@@ -1705,6 +1732,16 @@ function FamilyTreeApp() {
       const source = prev.find((n) => n.id === sourceNodeId);
       if (!source?.person) return prev;
       const person = source.person;
+      const resolved = resolveSubRelations(prev, shareMode).nodes;
+      const target = resolved.find((n) => n.id === targetNodeId);
+      if (target?.kind === "ghost") {
+        return ensureSpareChildNode([
+          ...prev.map((n) =>
+            n.id === sourceNodeId ? { ...n, person: null, willReceive: false, sharePercent: "0.00" } : n
+          ),
+          materializeGhostNode(target, prev, person, nextId(ghostMaterializedIdPrefix(target))),
+        ]);
+      }
       return ensureSpareChildNode(
         prev.map((n) => {
           if (n.id === sourceNodeId) return { ...n, person: null, willReceive: false, sharePercent: "0.00" };
@@ -1713,16 +1750,33 @@ function FamilyTreeApp() {
         })
       );
     });
-  }, [materializeGhostNode]);
+  }, [materializeGhostNode, nextId, shareMode]);
 
   const preflightAssign = useCallback((nodeId, rawPerson) => {
-    return validateAssignment(logicalNodes, nodeId, normalizePersonPayload(rawPerson));
-  }, [logicalNodes]);
+    const resolved = resolveSubRelations(logicalNodes, shareMode).nodes;
+    return validateAssignment(logicalNodes, nodeId, normalizePersonPayload(rawPerson), resolved);
+  }, [logicalNodes, shareMode]);
 
   const commitAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
-    const validation = validateAssignment(logicalNodes, nodeId, person);
+    const resolved = resolveSubRelations(logicalNodes, shareMode).nodes;
+    const validation = validateAssignment(logicalNodes, nodeId, person, resolved);
     if (!validation.ok) return validation;
+    if (validation.targetNode.kind === "ghost") {
+      setLogicalNodes((prevNodes) => {
+        const prevResolved = resolveSubRelations(prevNodes, shareMode).nodes;
+        const recheck = validateAssignment(prevNodes, nodeId, validation.person, prevResolved);
+        if (!recheck.ok) return prevNodes;
+        const target = recheck.targetNode;
+        const nextIdValue = nextId(ghostMaterializedIdPrefix(target));
+        const nextNodes = [
+          ...prevNodes,
+          materializeGhostNode(target, prevNodes, validation.person, nextIdValue),
+        ];
+        return ensureSpareChildNode(nextNodes);
+      });
+      return { ok: true, person: validation.person, displacedPersons: [] };
+    }
     const preview = assignPersonToNode(logicalNodes, nodeId, validation.person);
     setLogicalNodes((prevNodes) => {
       const recheck = validateAssignment(prevNodes, nodeId, validation.person);
@@ -1730,7 +1784,7 @@ function FamilyTreeApp() {
       return assignPersonToNode(prevNodes, nodeId, validation.person).nodes;
     });
     return { ok: true, person: validation.person, displacedPersons: preview.displacedPersons };
-  }, [logicalNodes]);
+  }, [logicalNodes, materializeGhostNode, nextId, shareMode]);
 
   const removeWithWorkflow = useCallback((nodeId) => {
     const affectedPeople = collectRemovedPeople(logicalNodes, nodeId);
@@ -1747,7 +1801,16 @@ function FamilyTreeApp() {
       const source = prev.find((n) => n.id === sourceNodeId);
       if (!source?.person) return prev;
       const sourcePerson = normalizePersonPayload(source.person);
-      const target = prev.find((n) => n.id === targetNodeId);
+      const resolved = resolveSubRelations(prev, shareMode).nodes;
+      const target = resolved.find((n) => n.id === targetNodeId);
+      if (target?.kind === "ghost") {
+        return ensureSpareChildNode([
+          ...prev.map((node) =>
+            node.id === sourceNodeId ? { ...node, person: null, willReceive: false, sharePercent: "0.00" } : node
+          ),
+          materializeGhostNode(target, prev, sourcePerson, nextId(ghostMaterializedIdPrefix(target))),
+        ]);
+      }
       const targetPerson = target?.person ? normalizePersonPayload(target.person) : null;
       return ensureSpareChildNode(
         prev.map((node) => {
@@ -1760,7 +1823,7 @@ function FamilyTreeApp() {
         })
       );
     });
-  }, []);
+  }, [materializeGhostNode, nextId, shareMode]);
 
   const onToggleReceive = useCallback((nodeId) => {
     setLogicalNodes((prevNodes) =>

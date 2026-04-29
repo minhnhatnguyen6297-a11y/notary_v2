@@ -8375,9 +8375,9 @@ endif %}
 
       ev.preventDefault();
 
-      const treeState = getFamilyTreeState();
+      let treeState = getFamilyTreeState();
 
-      const treeParticipants = treeState.participants || [];
+      let treeParticipants = treeState.participants || [];
 
       const warns = treeParticipants.length ? treeState.warnings : validateTreeWarnings();
 
@@ -8443,6 +8443,10 @@ endif %}
         }
 
       }
+
+      treeState = getFamilyTreeState();
+
+      treeParticipants = treeState.participants || [];
 
 
       const draftRows = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'));
@@ -8671,8 +8675,8 @@ endif %}
   <script src="/static/vendor/react.production.min.js"></script>
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
-  <script src="/static/inheritance_engine.js?v=20260429a"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260429a"></script>
+  <script src="/static/inheritance_engine.js?v=20260430a"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260430b"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
@@ -13214,7 +13218,7 @@ endif %}
       }
 
 
-      function _syncCustomerAfterSave(raw) {
+      function _syncCustomerAfterSave(raw, options = {}) {
 
         const record = toLegacyCustomerShape(upsertCustomerRecord(raw));
 
@@ -13264,7 +13268,7 @@ endif %}
 
         }));
 
-        loadPool();
+        if (options.refreshPool !== false) loadPool();
 
         return record;
 
@@ -13699,7 +13703,7 @@ endif %}
       if (customer?.id) {
 
 
-        const synced = _syncCustomerAfterSave(customer) || customer;
+        const synced = _syncCustomerAfterSave(customer, { refreshPool: !silentSuccess }) || customer;
 
 
         saveStagingToStorage(synced);
@@ -13816,7 +13820,7 @@ endif %}
 
         }
 
-        if (savedCount) {
+        if (savedCount && !silentSuccess) {
 
           loadPool();
 

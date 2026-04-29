@@ -1,6 +1,8 @@
 """Customer router: CRUD + Excel import."""
 
 import io
+import re
+import unicodedata
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +23,16 @@ EXCEL_COLUMNS = ["ho_ten", "gioi_tinh", "ngay_sinh", "ngay_chet", "so_giay_to", 
 DATE_FIELDS = {"ngay_sinh", "ngay_chet", "ngay_cap"}
 
 
+def normalize_excel_header(value: Any) -> str:
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    decomposed = unicodedata.normalize("NFD", s)
+    without_marks = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    without_marks = without_marks.replace("đ", "d").replace("Đ", "D")
+    return re.sub(r"[^a-z0-9]+", " ", without_marks.lower()).strip()
+
+
 def parse_date(value: Any, allow_year_only: bool = True) -> Optional[date]:
     if value is None:
         return None
@@ -30,9 +42,13 @@ def parse_date(value: Any, allow_year_only: bool = True) -> Optional[date]:
         return value
 
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        v = int(value)
+        # Người dùng gõ năm trực tiếp (1900-2099) vào ô Excel chưa format Text
+        # → Excel lưu integer, không phải serial ngày. Ưu tiên xử lý như năm.
+        if allow_year_only and 1900 <= v <= 2099:
+            return date(v, 1, 1)
         try:
             from openpyxl.utils.datetime import from_excel
-
             dt = from_excel(value)
             if isinstance(dt, datetime):
                 return dt.date()
@@ -136,7 +152,7 @@ def validate_customer_form(form: Dict[str, str], db: Session, current_id: Option
         "gioi_tinh": gioi_tinh,
         "ngay_sinh": ngay_sinh,
         "ngay_chet": ngay_chet,
-        "so_giay_to": so_gt,
+        "so_giay_to": so_gt or None,  # NULL thay vì "" để tránh unique constraint khi không có số giấy tờ
         "ngay_cap": ngay_cap,
         "dia_chi": (form.get("dia_chi") or "").strip(),
     }
@@ -193,11 +209,19 @@ def download_template():
     ws = wb.active
     ws.title = "Danh sach nguoi"
 
+    # Các cột ngày tháng — cần format Text để Excel không tự chuyển năm thành serial number
+    DATE_COLS = {"ngay_sinh", "ngay_chet", "ngay_cap"}
+
     widths = [24, 14, 16, 16, 22, 16, 40]
     for idx, field in enumerate(EXCEL_COLUMNS, start=1):
         cell = ws.cell(row=1, column=idx, value=field)
         cell.font = Font(bold=True)
-        ws.column_dimensions[get_column_letter(idx)].width = widths[idx - 1]
+        col_letter = get_column_letter(idx)
+        ws.column_dimensions[col_letter].width = widths[idx - 1]
+        if field in DATE_COLS:
+            # Format @ = Text: người dùng gõ "1995" hay "15/06/1995" đều giữ nguyên text
+            for row in range(2, 1002):
+                ws.cell(row=row, column=idx).number_format = "@"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -213,7 +237,8 @@ def download_template():
 async def upload_excel(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
     import openpyxl
 
-    if not file.filename.endswith((".xlsx", ".xls")):
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
         return templates.TemplateResponse("customers/upload_result.html", {
             "request": request, "error_global": "Chi chap nhan file .xlsx",
             "results": [], "added": 0, "skipped": 0, "errors": 0, "total": 0
@@ -237,16 +262,20 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         })
 
     raw_headers = [str(h).strip() if h else "" for h in rows[0]]
+    normalized_headers = [normalize_excel_header(h) for h in raw_headers]
 
     def find_col(keywords):
         for kw in keywords:
-            for i, h in enumerate(raw_headers):
-                if kw.lower() in h.lower():
+            norm_kw = normalize_excel_header(kw)
+            if not norm_kw:
+                continue
+            for i, h in enumerate(normalized_headers):
+                if norm_kw in h:
                     return i
         return None
 
     col = {
-        "ho_ten": find_col(["ho_ten", "h?", "ten", "full_name"]),
+        "ho_ten": find_col(["ho_ten", "ho ten", "ho va ten", "ten", "full_name"]),
         "gioi_tinh": find_col(["gioi_tinh", "gioi", "gender"]),
         "ngay_sinh": find_col(["ngay_sinh", "ngay sinh", "birth"]),
         "ngay_chet": find_col(["ngay_chet", "ngay mat", "death", "chet"]),
