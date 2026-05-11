@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, Form, HTTPException, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Any
 from datetime import date, datetime
 import io
 import json
@@ -82,7 +82,189 @@ def _sync_case_property_links(db: Session, case_id: int, property_ids: list[int]
                 is_primary=(pid == primary_property_id),
             )
         )
-    db.commit()
+
+
+class DiagramPayloadValidationError(Exception):
+    def __init__(self, errors: list[str]):
+        super().__init__("; ".join(errors))
+        self.errors = errors
+
+
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _clean_nullable_text(value: Any) -> Optional[str]:
+    text = _clean_text(value)
+    return text or None
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _normalize_role(role: str, relation_type: str) -> str:
+    role_text = _clean_text(role)
+    if role_text:
+        return role_text
+    relation = _clean_text(relation_type).lower()
+    defaults = {
+        "owner": "Owner",
+        "spouse": "Vợ/Chồng",
+        "child": "Con",
+        "sibling": "Anh/Chị/Em",
+        "grandchild": "Cháu",
+        "branchspouse": "Con_dau_re",
+    }
+    return defaults.get(relation, "Khac")
+
+
+def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(raw_payload or "{}")
+    except Exception as exc:
+        raise DiagramPayloadValidationError([f"diagram_payload không phải JSON hợp lệ: {exc}"])
+    if not isinstance(payload, dict):
+        raise DiagramPayloadValidationError(["diagram_payload phải là object JSON."])
+
+    payload_root = payload
+    if isinstance(payload.get("engineState"), dict) and payload["engineState"].get("nodes") is not None:
+        payload_root = payload["engineState"]
+
+    version = payload_root.get("version", payload.get("version"))
+    updated_at = _clean_text(payload_root.get("updatedAt", payload.get("updatedAt")))
+    nodes_raw = payload_root.get("nodes")
+
+    errors: list[str] = []
+    if version != 2:
+        errors.append("diagram_payload.version phải bằng 2.")
+    if not updated_at:
+        errors.append("diagram_payload.updatedAt là bắt buộc.")
+    if not isinstance(nodes_raw, list):
+        errors.append("diagram_payload.nodes phải là danh sách.")
+    if errors:
+        raise DiagramPayloadValidationError(errors)
+
+    normalized_nodes: list[dict[str, Any]] = []
+    seen_node_ids: set[str] = set()
+    for idx, raw_node in enumerate(nodes_raw):
+        if not isinstance(raw_node, dict):
+            errors.append(f"Node #{idx + 1} không hợp lệ.")
+            continue
+        node_id = _clean_text(raw_node.get("id"))
+        if not node_id:
+            errors.append(f"Node #{idx + 1} thiếu id.")
+            continue
+        if node_id in seen_node_ids:
+            errors.append(f"Node id trùng: {node_id}.")
+            continue
+        seen_node_ids.add(node_id)
+        person_id = _clean_nullable_text(raw_node.get("personId") or (raw_node.get("person") or {}).get("id"))
+        relation_type = _clean_text(raw_node.get("relationType"))
+        normalized_nodes.append({
+            "id": node_id,
+            "kind": _clean_text(raw_node.get("kind")) or "person",
+            "label": _clean_text(raw_node.get("label")),
+            "role": _normalize_role(raw_node.get("role"), relation_type),
+            "relationType": relation_type,
+            "personId": person_id,
+            "parentPersonId": _clean_nullable_text(raw_node.get("parentPersonId") or raw_node.get("parentId")),
+            "parentSlotId": _clean_nullable_text(raw_node.get("parentSlotId")),
+            "familyGroupId": _clean_nullable_text(raw_node.get("familyGroupId")),
+            "sourceId": _clean_nullable_text(raw_node.get("sourceId")),
+            "willReceive": _coerce_bool(raw_node.get("willReceive"), True),
+            "hidden": _coerce_bool(raw_node.get("hidden"), False),
+            "deleted": _coerce_bool(raw_node.get("deleted"), False),
+            "isLandOwner": _coerce_bool(raw_node.get("isLandOwner"), False),
+        })
+
+    if errors:
+        raise DiagramPayloadValidationError(errors)
+
+    return {
+        "version": 2,
+        "updatedAt": updated_at,
+        "nodes": normalized_nodes,
+    }
+
+
+def _extract_diagram_participants(
+    diagram_state: dict[str, Any],
+    customers_by_id: dict[str, Customer],
+    deceased_customer_id: str,
+) -> tuple[list[SimpleNamespace], set[int]]:
+    errors: list[str] = []
+    active_person_ids: set[str] = set()
+    seen_participant_ids: set[str] = set()
+    participants: list[SimpleNamespace] = []
+
+    for node in diagram_state["nodes"]:
+        person_id = _clean_text(node.get("personId"))
+        if not person_id or node.get("hidden") or node.get("deleted"):
+            continue
+        active_person_ids.add(person_id)
+
+    for node in diagram_state["nodes"]:
+        person_id = _clean_text(node.get("personId"))
+        if not person_id or node.get("hidden") or node.get("deleted"):
+            continue
+        if person_id not in customers_by_id:
+            errors.append(f"Người tham gia #{person_id} không tồn tại trong danh bạ.")
+            continue
+        role = _clean_text(node.get("role")) or "Khac"
+        if role == "Owner":
+            if person_id != deceased_customer_id:
+                errors.append("Node Owner phải trùng với người chết của hồ sơ.")
+            continue
+        if person_id == deceased_customer_id:
+            errors.append("Người chết không được lưu trong danh sách participant.")
+            continue
+        if person_id in seen_participant_ids:
+            errors.append(f"Người tham gia bị trùng trong sơ đồ: #{person_id}.")
+            continue
+        parent_person_id = _clean_nullable_text(node.get("parentPersonId"))
+        if parent_person_id and parent_person_id not in active_person_ids:
+            errors.append(f"parentPersonId không hợp lệ cho participant #{person_id}.")
+            continue
+        seen_participant_ids.add(person_id)
+        customer = customers_by_id[person_id]
+        participants.append(SimpleNamespace(
+            customer_id=customer.id,
+            customer=customer,
+            vai_tro=role,
+            ty_le=0.0,
+            co_nhan_tai_san=_coerce_bool(node.get("willReceive"), True),
+            parent_customer_id=int(parent_person_id) if parent_person_id and parent_person_id.isdigit() else None,
+        ))
+
+    if errors:
+        raise DiagramPayloadValidationError(errors)
+    return participants, {p.customer_id for p in participants}
+
+
+def _parse_case_diagram_payload(
+    raw_payload: str,
+    customers_by_id: dict[str, Customer],
+    deceased_customer_id: str,
+) -> tuple[list[SimpleNamespace], set[int], str]:
+    diagram_state = _normalize_diagram_payload(raw_payload)
+    participants, participant_ids = _extract_diagram_participants(
+        diagram_state,
+        customers_by_id=customers_by_id,
+        deceased_customer_id=deceased_customer_id,
+    )
+    return participants, participant_ids, json.dumps(diagram_state, ensure_ascii=False)
 
 
 def _build_temp_participants(
@@ -134,6 +316,109 @@ def _build_temp_participants(
     return participants, participant_ids
 
 
+def _render_case_form(
+    request: Request,
+    *,
+    obj: Optional[InheritanceCase],
+    deceased: list[Customer],
+    properties: list[Property],
+    errors: list[str],
+    field_errors: dict[str, str],
+    form: dict[str, Any],
+    all_customers: list[Customer],
+    participants: list[SimpleNamespace],
+    participant_ids: set[int],
+    case_property_ids: list[int],
+):
+    return templates.TemplateResponse("cases/form.html", {
+        "request": request,
+        "obj": obj,
+        "deceased": deceased,
+        "properties": properties,
+        "errors": errors,
+        "field_errors": field_errors,
+        "form": form,
+        "all_customers": all_customers,
+        "participants": participants,
+        "participant_ids": participant_ids,
+        "case_property_ids": case_property_ids,
+    })
+
+
+def _validate_case_refs(
+    *,
+    nguoi_chet_id: str,
+    tai_san_id: str,
+    selected_property_ids: list[int],
+    customers_by_id: dict[str, Customer],
+    properties_by_id: dict[int, Property],
+    field_errors: dict[str, str],
+    errors: list[str],
+) -> None:
+    if not nguoi_chet_id:
+        field_errors["nguoi_chet_id"] = "Bắt buộc"
+    elif nguoi_chet_id not in customers_by_id:
+        field_errors["nguoi_chet_id"] = "Người chết không tồn tại"
+    if not tai_san_id:
+        field_errors["tai_san_id"] = "Bắt buộc"
+    elif not tai_san_id.isdigit() or int(tai_san_id) not in properties_by_id:
+        field_errors["tai_san_id"] = "Tài sản không tồn tại"
+
+    invalid_property_ids = [pid for pid in selected_property_ids if pid not in properties_by_id]
+    if invalid_property_ids:
+        errors.append(f"Danh sách tài sản có id không tồn tại: {', '.join(map(str, invalid_property_ids))}.")
+
+
+def _resolve_posted_participants(
+    *,
+    all_customers: list[Customer],
+    deceased_customer_id: str,
+    diagram_payload: str,
+    participant_id: Optional[Union[List[str], str]],
+    participant_role: Optional[Union[List[str], str]],
+    participant_share: Optional[Union[List[str], str]],
+    participant_receive: Optional[Union[List[str], str]],
+    participant_parent_id: Optional[Union[List[str], str]],
+    engine_state_json: str,
+) -> tuple[list[SimpleNamespace], set[int], Optional[str], str]:
+    customers_by_id = {str(c.id): c for c in all_customers}
+    raw_payload = _clean_text(diagram_payload)
+    if raw_payload:
+        participants, participant_ids, normalized_engine_state = _parse_case_diagram_payload(
+            raw_payload,
+            customers_by_id=customers_by_id,
+            deceased_customer_id=deceased_customer_id,
+        )
+        return participants, participant_ids, normalized_engine_state, normalized_engine_state
+
+    posted_participants, posted_participant_ids = _build_temp_participants(
+        all_customers,
+        participant_id,
+        participant_role,
+        participant_share,
+        participant_receive,
+        participant_parent_id,
+    )
+    normalized_engine_state = _clean_text(engine_state_json) or None
+    return posted_participants, posted_participant_ids, normalized_engine_state, raw_payload
+
+
+def _replace_case_participants(db: Session, case_id: int, participants: list[SimpleNamespace]) -> None:
+    db.query(InheritanceParticipant).filter(InheritanceParticipant.ho_so_id == case_id).delete()
+    for participant in participants:
+        db.add(
+            InheritanceParticipant(
+                ho_so_id=case_id,
+                customer_id=int(participant.customer_id),
+                vai_tro=participant.vai_tro or "Khac",
+                hang_thua_ke=_hang_for_role(participant.vai_tro or "Khac"),
+                ty_le=float(getattr(participant, "ty_le", 0.0) or 0.0),
+                co_nhan_tai_san=bool(getattr(participant, "co_nhan_tai_san", True)),
+                parent_customer_id=getattr(participant, "parent_customer_id", None),
+            )
+        )
+
+
 @router.get("/")
 def list_cases(request: Request, db: Session = Depends(get_db), q: str = ""):
     cases = db.query(InheritanceCase).order_by(InheritanceCase.id.desc()).all()
@@ -152,14 +437,21 @@ def create_form(request: Request, db: Session = Depends(get_db)):
     from datetime import date as _date
     form = {
         "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": _date.today().isoformat(),
-        "loai_van_ban": "khai_nhan", "ghi_chu": "", "engine_state_json": ""
+        "loai_van_ban": "khai_nhan", "ghi_chu": "", "engine_state_json": "", "diagram_payload": ""
     }
-    return templates.TemplateResponse("cases/form.html", {
-        "request": request, "obj": None,
-        "deceased": deceased, "properties": properties, "errors": [],
-        "field_errors": {}, "form": form,
-        "all_customers": all_customers, "participants": [], "participant_ids": set(), "case_property_ids": [],
-    })
+    return _render_case_form(
+        request,
+        obj=None,
+        deceased=deceased,
+        properties=properties,
+        errors=[],
+        field_errors={},
+        form=form,
+        all_customers=all_customers,
+        participants=[],
+        participant_ids=set(),
+        case_property_ids=[],
+    )
 
 
 @router.post("/create")
@@ -173,6 +465,7 @@ def create(
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
+    diagram_payload: Optional[str] = Form(None),
     engine_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -180,90 +473,97 @@ def create(
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
+        "diagram_payload": (diagram_payload or "").strip(),
         "engine_state_json": (engine_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
     field_errors = {}
-    if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Bắt buộc"
-    if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Bắt buộc"
-
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
+    customers_by_id = {str(c.id): c for c in all_customers}
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
-    posted_participants, posted_participant_ids = _build_temp_participants(
-        all_customers, participant_id, participant_role, participant_share, participant_receive, participant_parent_id
+    properties_by_id = {p.id: p for p in properties}
+    _validate_case_refs(
+        nguoi_chet_id=form["nguoi_chet_id"],
+        tai_san_id=form["tai_san_id"],
+        selected_property_ids=selected_property_ids,
+        customers_by_id=customers_by_id,
+        properties_by_id=properties_by_id,
+        field_errors=field_errors,
+        errors=errors,
     )
+    try:
+        posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
+            all_customers=all_customers,
+            deceased_customer_id=form["nguoi_chet_id"],
+            diagram_payload=form["diagram_payload"],
+            participant_id=participant_id,
+            participant_role=participant_role,
+            participant_share=participant_share,
+            participant_receive=participant_receive,
+            participant_parent_id=participant_parent_id,
+            engine_state_json=form["engine_state_json"],
+        )
+        form["engine_state_json"] = normalized_engine_state or ""
+        form["diagram_payload"] = normalized_payload or ""
+    except DiagramPayloadValidationError as exc:
+        errors.extend(exc.errors)
+        if form["diagram_payload"]:
+            try:
+                normalized_state = _normalize_diagram_payload(form["diagram_payload"])
+                form["engine_state_json"] = json.dumps(normalized_state, ensure_ascii=False)
+            except DiagramPayloadValidationError:
+                pass
+        posted_participants, posted_participant_ids = [], set()
 
-    if field_errors:
-        return templates.TemplateResponse("cases/form.html", {
-            "request": request, "obj": None,
-            "deceased": deceased, "properties": properties,
-            "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers,
-            "participants": posted_participants,
-            "participant_ids": posted_participant_ids,
-            "case_property_ids": selected_property_ids,
-        })
+    if field_errors or errors:
+        return _render_case_form(
+            request,
+            obj=None,
+            deceased=deceased,
+            properties=properties,
+            errors=errors,
+            field_errors=field_errors,
+            form=form,
+            all_customers=all_customers,
+            participants=posted_participants,
+            participant_ids=posted_participant_ids,
+            case_property_ids=selected_property_ids,
+        )
 
     try:
-        c = InheritanceCase(
-            nguoi_chet_id=int(form["nguoi_chet_id"]), tai_san_id=int(form["tai_san_id"]),
+        case = InheritanceCase(
+            nguoi_chet_id=int(form["nguoi_chet_id"]),
+            tai_san_id=int(form["tai_san_id"]),
             ngay_lap_ho_so=_date.today(),
-            loai_van_ban="khai_nhan", ghi_chu=None,
-            engine_state_json=(engine_state_json or "").strip() or None,
+            loai_van_ban="khai_nhan",
+            ghi_chu=None,
+            engine_state_json=form["engine_state_json"] or None,
         )
-        db.add(c); db.commit(); db.refresh(c)
+        db.add(case)
+        db.flush()
         if selected_property_ids:
-            _sync_case_property_links(db, c.id, selected_property_ids, int(form["tai_san_id"]))
-        pid_list = _to_list(participant_id)
-        role_list = _to_list(participant_role)
-        share_list = _to_list(participant_share)
-        recv_list = _to_list(participant_receive)
-        parent_list = _to_list(participant_parent_id)
-        if pid_list and role_list:
-            for idx, cid in enumerate(pid_list):
-                if not cid:
-                    continue
-                if str(cid) == str(c.nguoi_chet_id):
-                    continue
-                role = role_list[idx] if idx < len(role_list) else ""
-                share_raw = share_list[idx] if idx < len(share_list) else "0"
-                receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
-                parent_raw = parent_list[idx] if idx < len(parent_list) else ""
-                try:
-                    share_val = float(share_raw)
-                except Exception:
-                    share_val = 0.0
-                co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
-
-                parent_cid = None
-                if parent_raw and str(parent_raw).isdigit():
-                    parent_cid = int(parent_raw)
-
-                p = InheritanceParticipant(
-                    ho_so_id=c.id, customer_id=int(cid),
-                    vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                    ty_le=share_val, co_nhan_tai_san=co_nhan,
-                    parent_customer_id=parent_cid
-                )
-                db.add(p)
-            db.commit()
-        return RedirectResponse(f"/cases/{c.id}/edit", status_code=302)
+            _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))
+        _replace_case_participants(db, case.id, posted_participants)
+        db.commit()
+        return RedirectResponse(f"/cases/{case.id}/edit", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi tạo hồ sơ: {e}")
-        return templates.TemplateResponse("cases/form.html", {
-            "request": request, "obj": None,
-            "deceased": deceased, "properties": properties,
-            "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers,
-            "participants": posted_participants,
-            "participant_ids": posted_participant_ids,
-            "case_property_ids": selected_property_ids,
-        })
+        return _render_case_form(
+            request,
+            obj=None,
+            deceased=deceased,
+            properties=properties,
+            errors=errors,
+            field_errors=field_errors,
+            form=form,
+            all_customers=all_customers,
+            participants=posted_participants,
+            participant_ids=posted_participant_ids,
+            case_property_ids=selected_property_ids,
+        )
 
 
 @router.get("/{cid}")
@@ -301,14 +601,21 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "noi_niem_yet": case.noi_niem_yet or "",
         "ghi_chu": case.ghi_chu or "",
         "engine_state_json": case.engine_state_json or "",
+        "diagram_payload": case.engine_state_json or "",
     }
-    return templates.TemplateResponse("cases/form.html", {
-        "request": request, "obj": case,
-        "deceased": deceased, "properties": properties, "errors": [],
-        "field_errors": {}, "form": form,
-        "all_customers": all_customers, "participants": participants, "participant_ids": participant_ids,
-        "case_property_ids": case_property_ids,
-    })
+    return _render_case_form(
+        request,
+        obj=case,
+        deceased=deceased,
+        properties=properties,
+        errors=[],
+        field_errors={},
+        form=form,
+        all_customers=all_customers,
+        participants=participants,
+        participant_ids=participant_ids,
+        case_property_ids=case_property_ids,
+    )
 
 
 @router.post("/{cid}/edit")
@@ -322,6 +629,7 @@ def edit(
     participant_share: Optional[Union[List[str], str]] = Form(None),
     participant_receive: Optional[Union[List[str], str]] = Form(None),
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
+    diagram_payload: Optional[str] = Form(None),
     engine_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -331,88 +639,89 @@ def edit(
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
         "noi_niem_yet": (noi_niem_yet or "").strip(),
+        "diagram_payload": (diagram_payload or "").strip(),
         "engine_state_json": (engine_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
     field_errors = {}
-    if not form["nguoi_chet_id"]:
-        field_errors["nguoi_chet_id"] = "Bắt buộc"
-    if not form["tai_san_id"]:
-        field_errors["tai_san_id"] = "Bắt buộc"
-
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
+    customers_by_id = {str(c.id): c for c in all_customers}
     deceased = [c for c in all_customers if c.ngay_chet is not None]
     properties = db.query(Property).order_by(Property.id.desc()).all()
-    posted_participants, posted_participant_ids = _build_temp_participants(
-        all_customers, participant_id, participant_role, participant_share, participant_receive, participant_parent_id
+    properties_by_id = {p.id: p for p in properties}
+    _validate_case_refs(
+        nguoi_chet_id=form["nguoi_chet_id"],
+        tai_san_id=form["tai_san_id"],
+        selected_property_ids=selected_property_ids,
+        customers_by_id=customers_by_id,
+        properties_by_id=properties_by_id,
+        field_errors=field_errors,
+        errors=errors,
     )
-    if field_errors:
-        return templates.TemplateResponse("cases/form.html", {
-            "request": request, "obj": case,
-            "deceased": deceased, "properties": properties,
-            "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers,
-            "participants": posted_participants,
-            "participant_ids": posted_participant_ids,
-            "case_property_ids": selected_property_ids,
-        })
+    try:
+        posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
+            all_customers=all_customers,
+            deceased_customer_id=form["nguoi_chet_id"],
+            diagram_payload=form["diagram_payload"],
+            participant_id=participant_id,
+            participant_role=participant_role,
+            participant_share=participant_share,
+            participant_receive=participant_receive,
+            participant_parent_id=participant_parent_id,
+            engine_state_json=form["engine_state_json"],
+        )
+        form["engine_state_json"] = normalized_engine_state or ""
+        form["diagram_payload"] = normalized_payload or ""
+    except DiagramPayloadValidationError as exc:
+        errors.extend(exc.errors)
+        if form["diagram_payload"]:
+            try:
+                normalized_state = _normalize_diagram_payload(form["diagram_payload"])
+                form["engine_state_json"] = json.dumps(normalized_state, ensure_ascii=False)
+            except DiagramPayloadValidationError:
+                pass
+        posted_participants, posted_participant_ids = [], set()
+    if field_errors or errors:
+        return _render_case_form(
+            request,
+            obj=case,
+            deceased=deceased,
+            properties=properties,
+            errors=errors,
+            field_errors=field_errors,
+            form=form,
+            all_customers=all_customers,
+            participants=posted_participants,
+            participant_ids=posted_participant_ids,
+            case_property_ids=selected_property_ids,
+        )
 
     try:
         case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
         case.noi_niem_yet = form["noi_niem_yet"] or None
-        case.engine_state_json = (engine_state_json or "").strip() or None
-        db.commit()
+        case.engine_state_json = form["engine_state_json"] or None
         if selected_property_ids:
             _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))
-        db.query(InheritanceParticipant).filter(InheritanceParticipant.ho_so_id == case.id).delete()
+        _replace_case_participants(db, case.id, posted_participants)
         db.commit()
-        pid_list = _to_list(participant_id)
-        role_list = _to_list(participant_role)
-        share_list = _to_list(participant_share)
-        recv_list = _to_list(participant_receive)
-        parent_list = _to_list(participant_parent_id)
-        if pid_list and role_list:
-            for idx, participant_customer_id in enumerate(pid_list):
-                if not participant_customer_id:
-                    continue
-                if str(participant_customer_id) == str(case.nguoi_chet_id):
-                    continue
-                role = role_list[idx] if idx < len(role_list) else ""
-                share_raw = share_list[idx] if idx < len(share_list) else "0"
-                receive_raw = recv_list[idx] if idx < len(recv_list) else "1"
-                parent_raw = parent_list[idx] if idx < len(parent_list) else ""
-                try:
-                    share_val = float(share_raw)
-                except Exception:
-                    share_val = 0.0
-                co_nhan = str(receive_raw).lower() in ("1", "true", "on", "yes")
-
-                parent_cid = None
-                if parent_raw and str(parent_raw).isdigit():
-                    parent_cid = int(parent_raw)
-
-                p = InheritanceParticipant(
-                    ho_so_id=case.id, customer_id=int(participant_customer_id),
-                    vai_tro=role or "Khac", hang_thua_ke=_hang_for_role(role or "Khac"),
-                    ty_le=share_val, co_nhan_tai_san=co_nhan,
-                    parent_customer_id=parent_cid
-                )
-                db.add(p)
-            db.commit()
         return RedirectResponse(f"/cases/{cid}/edit", status_code=302)
     except Exception as e:
         db.rollback()
         errors.append(f"Lỗi cập nhật hồ sơ: {e}")
-        return templates.TemplateResponse("cases/form.html", {
-            "request": request, "obj": case,
-            "deceased": deceased, "properties": properties,
-            "errors": errors, "field_errors": field_errors, "form": form,
-            "all_customers": all_customers,
-            "participants": posted_participants,
-            "participant_ids": posted_participant_ids,
-            "case_property_ids": selected_property_ids,
-        })
+        return _render_case_form(
+            request,
+            obj=case,
+            deceased=deceased,
+            properties=properties,
+            errors=errors,
+            field_errors=field_errors,
+            form=form,
+            all_customers=all_customers,
+            participants=posted_participants,
+            participant_ids=posted_participant_ids,
+            case_property_ids=selected_property_ids,
+        )
 
 
 @router.post("/{cid}/lock")

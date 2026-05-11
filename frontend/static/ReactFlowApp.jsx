@@ -10,6 +10,8 @@ const allCustomers = window.__ALL_CUSTOMERS_DATA__ || [];
 const initialOwnerId = document.getElementById("case-nguoi-chet")?.value || "";
 const initialEngineState = window.__INITIAL_ENGINE_STATE__ || null;
 const inheritanceEngine = window.InheritanceEngine || null;
+const diagramStateStore = window.DiagramStateStore || null;
+const diagramEdges = window.DiagramEdges || null;
 
 let bootstrapSeed = 1;
 
@@ -166,6 +168,7 @@ function createLogicalNode(overrides) {
     willReceive: overrides.willReceive ?? (overrides.allowsShare !== false),
     parentSlotId: overrides.parentSlotId || "",
     parentPersonId: overrides.parentPersonId || "",
+    familyGroupId: overrides.familyGroupId || "",
     sourceId: overrides.sourceId || null,
     disabledReason: overrides.disabledReason || "",
     deathComparison: overrides.deathComparison || "unknown",
@@ -197,6 +200,7 @@ function createBaseNodes() {
       removable: true,
       sourceId: "owner",
       parentSlotId: "owner",
+      familyGroupId: "ownerSpouse",
     })
   );
   return base;
@@ -375,6 +379,7 @@ function ensureSpareChildNode(nodes) {
       removable: true,
       sourceId: "owner",
       parentSlotId: "owner",
+      familyGroupId: "ownerSpouse",
     }),
   ];
 }
@@ -383,7 +388,7 @@ function pickSiblingSource(nodes, participant) {
   const fromParentId = nodes.find(
     (node) =>
       node.kind === "person" &&
-      (node.role === "Cha" || node.role === "Mẹ") &&
+      (node.role === "Cha" || node.role === "Mẹ" || node.role === "Cha_vc" || node.role === "Me_vc") &&
       node.person &&
       String(node.person.id) === String(participant.parentId || "")
   );
@@ -392,6 +397,10 @@ function pickSiblingSource(nodes, participant) {
   if (fatherNode) return fatherNode.id;
   const motherNode = nodes.find((node) => node.id === "mother" && node.person);
   if (motherNode) return motherNode.id;
+  const spouseFatherNode = nodes.find((node) => node.id === "spouse_father" && node.person);
+  if (spouseFatherNode) return spouseFatherNode.id;
+  const spouseMotherNode = nodes.find((node) => node.id === "spouse_mother" && node.person);
+  if (spouseMotherNode) return spouseMotherNode.id;
   return "owner";
 }
 
@@ -416,6 +425,7 @@ function hydrateEngineStateNodes() {
       sourceId: saved.sourceId || null,
       parentSlotId: saved.parentSlotId || "",
       parentPersonId: saved.parentPersonId || saved.parentId || "",
+      familyGroupId: saved.familyGroupId || "",
       person: resolvedPerson,
       willReceive: saved.willReceive !== false,
       isLandOwner: !!saved.isLandOwner || (Array.isArray(initialEngineState.assetOwnerIds) && initialEngineState.assetOwnerIds.map(String).includes(personId)),
@@ -487,7 +497,7 @@ function hydrateInitialNodes() {
       if (target) {
         nodes = nodes.map((node) =>
           node.id === target.id
-            ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, parentPersonId: buildOwnerPayload()?.id || "" }
+            ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, parentPersonId: buildOwnerPayload()?.id || "", familyGroupId: "ownerSpouse" }
             : node
         );
       } else {
@@ -496,6 +506,7 @@ function hydrateInitialNodes() {
           createDynamicNode("child", {
             label: "Con ruột", role: "Con", relationType: "child", bucket: 2,
             allowsShare: true, removable: true, sourceId: "owner", parentSlotId: "owner",
+            familyGroupId: "ownerSpouse",
             parentPersonId: buildOwnerPayload()?.id || "",
             person: participant, sharePercent, willReceive: defaultWillReceive,
           }),
@@ -512,6 +523,7 @@ function hydrateInitialNodes() {
           allowsShare: true, removable: true,
           sourceId: pickSiblingSource(nodes, participant),
           parentPersonId: participant.parentId || "",
+          familyGroupId: participant.familyGroupId || "",
           person: participant, sharePercent, willReceive: defaultWillReceive,
         }),
       ];
@@ -532,6 +544,7 @@ function hydrateInitialNodes() {
         label: "Vợ/Chồng của nhánh", role: "Con_dau_re", relationType: "branchSpouse", bucket: 3,
         allowsShare: true, removable: true, sourceId: parentNode.id, parentSlotId: parentNode.id,
         parentPersonId: parentNode.person?.id || participant.parentId || "",
+        familyGroupId: `spouse:${parentNode.id}`,
         person: participant, sharePercent: participant.share || "0.00",
         willReceive: participant.receive !== "0" && !participant.death,
       }),
@@ -554,6 +567,7 @@ function hydrateInitialNodes() {
         label: "Con thế vị", role: "Cháu", relationType: "grandchild", bucket: 3,
         allowsShare: true, removable: true, sourceId: parentNode.id, parentSlotId: parentNode.id,
         parentPersonId: parentNode.person?.id || participant.parentId || "",
+        familyGroupId: `descendant:${parentNode.id}`,
         person: participant, sharePercent: participant.share || "0.00",
         willReceive: participant.receive !== "0" && !participant.death,
       }),
@@ -639,6 +653,15 @@ function buildModelWarnings(models, shareMode) {
     }
   });
 
+  if (diagramEdges?.getKinshipFamilyKey) {
+    models.forEach((node) => {
+      if (!node.person || node.relationType !== "sibling") return;
+      if (diagramEdges.getKinshipFamilyKey(node, models) === diagramEdges.FAMILY_AMBIGUOUS) {
+        warnings.push(`${node.person.name} chua xac dinh duoc nhanh cha/me, can keo tha lai dung o.`);
+      }
+    });
+  }
+
   return Array.from(new Set(warnings));
 }
 
@@ -653,6 +676,7 @@ function buildEngineInput(models) {
     relationType: node.relationType,
     parentPersonId: node.parentPersonId || "",
     parentSlotId: node.parentSlotId || "",
+    familyGroupId: node.familyGroupId || "",
     sourceId: node.sourceId || "",
     isLandOwner: !!node.isLandOwner,
     willReceive: node.willReceive !== false,
@@ -722,6 +746,7 @@ function runDiagramEngine(models) {
         relationType: node.relationType,
         parentPersonId: node.parentPersonId,
         parentSlotId: node.parentSlotId,
+        familyGroupId: node.familyGroupId,
         sourceId: node.sourceId,
         isLandOwner: node.isLandOwner,
         willReceive: node.willReceive,
@@ -747,15 +772,19 @@ function resolveSubRelations(nodes, shareMode) {
 
   const ghostNodes = [];
   const hasDeadFather = resolvedNodes.some((candidate) => candidate.id === "father" && candidate.person && candidate.person.death);
+  const hasDeadSpouseFather = resolvedNodes.some((candidate) => candidate.id === "spouse_father" && candidate.person && candidate.person.death);
   resolvedNodes.forEach((node) => {
     if (!node.person || !node.person.death) return;
 
-    if ((node.role === "Cha" || (node.role === "Mẹ" && !hasDeadFather)) && node.person.id) {
+    const canSpawnBirthSibling = node.role === "Cha" || (node.role === "Mẹ" && !hasDeadFather);
+    const canSpawnSpouseSibling = node.role === "Cha_vc" || (node.role === "Me_vc" && !hasDeadSpouseFather);
+    if ((canSpawnBirthSibling || canSpawnSpouseSibling) && node.person.id) {
       ghostNodes.push(createLogicalNode({
         id: `ghost_sibling_${node.id}`, kind: "ghost", label: "Thêm anh/chị/em",
         role: "Anh/Chị/Em", relationType: "ghostSibling", bucket: 1,
         allowsShare: false, removable: false, sourceId: node.id,
         parentSlotId: node.id, parentPersonId: node.person.id,
+        familyGroupId: canSpawnSpouseSibling ? "spouseParents" : "birthParents",
         ghostAction: "addSibling", ghostLabel: "+ Thêm Anh/Chị/Em",
       }));
     }
@@ -766,6 +795,7 @@ function resolveSubRelations(nodes, shareMode) {
         role: "Cháu", relationType: "ghostGrandchild", bucket: 3,
         allowsShare: false, removable: false, sourceId: node.id,
         parentSlotId: node.id, parentPersonId: node.person.id,
+        familyGroupId: `descendant:${node.id}`,
         ghostAction: "addGrandchild", ghostLabel: "+ Thêm Cháu thế vị",
       }));
 
@@ -779,6 +809,7 @@ function resolveSubRelations(nodes, shareMode) {
             role: "Con_dau_re", relationType: "ghostBranchSpouse", bucket: 3,
             allowsShare: false, removable: false, sourceId: node.id,
             parentSlotId: node.id, parentPersonId: node.person.id,
+            familyGroupId: `spouse:${node.id}`,
             ghostAction: "addBranchSpouse", ghostLabel: "+ Thêm Dâu/Rể",
           }));
         }
@@ -790,6 +821,104 @@ function resolveSubRelations(nodes, shareMode) {
   const engineWarnings = (engineRun.engineState?.warnings || []).map((warning) => warning.message || warning.code || String(warning));
   const warnings = [...buildModelWarnings(mergedNodes, shareMode), ...engineWarnings];
   return { nodes: mergedNodes, warnings: Array.from(new Set(warnings)), engineState: engineRun.engineState };
+}
+
+function buildParticipantsPayload(resolvedNodes) {
+  return resolvedNodes
+    .filter((node) => node.kind === "person" && node.person)
+    .map((node) => ({
+      id: node.person.id,
+      role: node.role,
+      name: node.person.name,
+      doc: node.person.doc,
+      gender: node.person.gender,
+      birth: node.person.birth,
+      death: node.person.death,
+      address: node.person.address,
+      issue_date: node.person.issue_date,
+      issue_place: node.person.issue_place,
+      place_of_origin: node.person.place_of_origin,
+      willReceive: !!node.willReceive,
+      sharePercent: node.sharePercent || "0.00",
+      share: node.sharePercent || "0.00",
+      disabledReason: node.disabledReason || "",
+      relationType: node.relationType,
+      deathComparison: node.deathComparison || "unknown",
+      parentId: node.parentPersonId || "",
+      familyGroupId: node.familyGroupId || "",
+      isLandOwner: !!node.isLandOwner,
+    }));
+}
+
+function buildCommittedSnapshot(logicalNodes, shareMode) {
+  const resolved = resolveSubRelations(logicalNodes, shareMode);
+  const snapshot = {
+    participants: buildParticipantsPayload(resolved.nodes),
+    warnings: resolved.warnings,
+    shareMode,
+    engineState: resolved.engineState || null,
+    updatedAt: new Date().toISOString(),
+  };
+  return {
+    logicalNodes,
+    resolvedNodes: resolved.nodes,
+    warnings: resolved.warnings,
+    diagramEngineState: resolved.engineState || null,
+    snapshot,
+  };
+}
+
+function createFallbackDiagramStore(initialSnapshot, onPublish) {
+  const subscribers = new Set();
+  let snapshot = initialSnapshot;
+  let pendingSnapshot = null;
+  let saving = false;
+  let busyCount = 0;
+
+  function emit(nextSnapshot) {
+    snapshot = nextSnapshot;
+    if (typeof onPublish === "function") onPublish(snapshot);
+    subscribers.forEach((cb) => cb(snapshot));
+    return snapshot;
+  }
+
+  return {
+    getCommittedState: () => snapshot,
+    publish(nextSnapshot) {
+      if (saving) {
+        pendingSnapshot = nextSnapshot;
+        snapshot = nextSnapshot;
+        return snapshot;
+      }
+      pendingSnapshot = null;
+      return emit(nextSnapshot);
+    },
+    subscribe(cb) {
+      if (typeof cb !== "function") return () => {};
+      subscribers.add(cb);
+      cb(snapshot);
+      return () => subscribers.delete(cb);
+    },
+    isSaving: () => saving,
+    setSaving(nextSaving) {
+      saving = !!nextSaving;
+      if (!saving && pendingSnapshot) {
+        const replay = pendingSnapshot;
+        pendingSnapshot = null;
+        emit(replay);
+      }
+    },
+    incrementBusy() {
+      busyCount += 1;
+      return busyCount;
+    },
+    decrementBusy() {
+      busyCount = Math.max(0, busyCount - 1);
+      return busyCount;
+    },
+    getBusyCount: () => busyCount,
+    isBusy: () => busyCount > 0,
+  };
 }
 
 // ─── Brick-Wall Render Components ────────────────────────────────────────────
@@ -887,42 +1016,115 @@ function getBoxBottomY(box) {
   return box.top + box.height;
 }
 
-function buildArrowPoints(centerX, tipY) {
-  return `${centerX},${tipY} ${centerX - 6},${tipY - 5} ${centerX + 6},${tipY - 5}`;
+function getBoxCenterY(box) {
+  return box.top + (box.height / 2);
 }
 
-function appendBracketConnector(lines, arrows, parentBox, childBoxes, options = {}) {
-  const validChildren = childBoxes.filter(Boolean);
-  if (!parentBox || !validChildren.length) return;
-  const parentX = getBoxCenterX(parentBox);
-  const parentY = getBoxBottomY(parentBox) + (options.parentGap ?? 6);
-  const childStops = validChildren.map((box) => ({
-    centerX: getBoxCenterX(box),
-    lineEndY: Math.max(box.top - (options.childGap ?? 10), parentY + 14),
-    arrowTipY: Math.max(box.top - 3, parentY + 18),
-  }));
-  const minChildTop = Math.min(...childStops.map((item) => item.lineEndY));
-  if (minChildTop <= parentY) return;
-  const barY = Math.max(parentY + 12, parentY + Math.round((minChildTop - parentY) * 0.45));
-  const leftX = Math.min(...childStops.map((item) => item.centerX));
-  const rightX = Math.max(...childStops.map((item) => item.centerX));
-  const keyPrefix = options.key || "connector";
+function getCombinedBox(boxes) {
+  const valid = boxes.filter(Boolean);
+  if (!valid.length) return null;
+  const left = Math.min(...valid.map((box) => box.left));
+  const top = Math.min(...valid.map((box) => box.top));
+  const right = Math.max(...valid.map((box) => box.right));
+  const bottom = Math.max(...valid.map((box) => box.bottom));
+  return { left, top, right, bottom, width: right - left, height: bottom - top };
+}
 
-  lines.push({ x1: parentX, y1: parentY, x2: parentX, y2: barY, key: `${keyPrefix}:stem` });
-  lines.push({ x1: leftX, y1: barY, x2: rightX, y2: barY, key: `${keyPrefix}:bar` });
-  childStops.forEach((item, index) => {
-    lines.push({
-      x1: item.centerX,
-      y1: barY,
-      x2: item.centerX,
-      y2: item.lineEndY,
-      key: `${keyPrefix}:drop:${index}`,
-    });
-    arrows.push({
-      points: buildArrowPoints(item.centerX, item.arrowTipY),
-      key: `${keyPrefix}:arrow:${index}`,
+function getKinshipSourcePoint(sourceBox, targetBox) {
+  if (!sourceBox || !targetBox) return null;
+  const sourceX = getBoxCenterX(sourceBox);
+  const targetY = getBoxCenterY(targetBox);
+  if (targetY >= getBoxCenterY(sourceBox)) {
+    return { x: sourceX, y: sourceBox.bottom + 4 };
+  }
+  return { x: sourceX, y: sourceBox.top - 4 };
+}
+
+function getFlowOrientation(sourceBox, targetBox) {
+  if (!sourceBox || !targetBox) return null;
+  const sourceCenter = { x: getBoxCenterX(sourceBox), y: getBoxCenterY(sourceBox) };
+  const targetCenter = { x: getBoxCenterX(targetBox), y: getBoxCenterY(targetBox) };
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return {
+      sourceSide: dx >= 0 ? "right" : "left",
+      targetSide: dx >= 0 ? "left" : "right",
+      sourceCenter,
+      targetCenter,
+      dx,
+      dy,
+    };
+  }
+  return {
+    sourceSide: dy >= 0 ? "bottom" : "top",
+    targetSide: dy >= 0 ? "top" : "bottom",
+    sourceCenter,
+    targetCenter,
+    dx,
+    dy,
+  };
+}
+
+function slotSortValue(box, side) {
+  if (side === "top" || side === "bottom") return getBoxCenterX(box);
+  return getBoxCenterY(box);
+}
+
+function buildEdgeSlotMap(edges, keyBuilder, valueBuilder) {
+  const groups = new Map();
+  edges.forEach((edge) => {
+    const key = keyBuilder(edge);
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(edge);
+  });
+  const slotMap = new Map();
+  groups.forEach((group) => {
+    group.sort((left, right) => valueBuilder(left) - valueBuilder(right));
+    group.forEach((edge, index) => {
+      slotMap.set(edge.id, { index, count: group.length });
     });
   });
+  return slotMap;
+}
+
+function getSlottedCardPoint(box, side, slotIndex, slotCount, mode) {
+  if (!box) return null;
+  const count = Math.max(slotCount || 1, 1);
+  const index = Math.max(slotIndex || 0, 0);
+  const slotRatio = (index + 1) / (count + 1);
+  if (side === "top" || side === "bottom") {
+    const padding = Math.min(18, box.width * 0.16);
+    const usable = Math.max(box.width - (padding * 2), 12);
+    const x = box.left + padding + (usable * slotRatio);
+    const y = side === "top"
+      ? (mode === "target" ? box.top + 1 : box.top - 4)
+      : (mode === "target" ? box.bottom - 1 : box.bottom + 4);
+    return { x, y };
+  }
+  const padding = Math.min(18, box.height * 0.16);
+  const usable = Math.max(box.height - (padding * 2), 12);
+  const y = box.top + padding + (usable * slotRatio);
+  const x = side === "left"
+    ? (mode === "target" ? box.left + 1 : box.left - 4)
+    : (mode === "target" ? box.right - 1 : box.right + 4);
+  return { x, y };
+}
+
+function buildSoftCurve(source, target) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const verticalBias = Math.max(28, Math.min(120, Math.abs(dy) * 0.55));
+  const horizontalBias = Math.max(24, Math.min(120, Math.abs(dx) * 0.45));
+  if (Math.abs(dx) > Math.abs(dy)) {
+    const c1 = { x: source.x + (dx > 0 ? horizontalBias : -horizontalBias), y: source.y };
+    const c2 = { x: target.x - (dx > 0 ? horizontalBias : -horizontalBias), y: target.y };
+    return `M ${source.x} ${source.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`;
+  }
+  const c1 = { x: source.x, y: source.y + (dy > 0 ? verticalBias : -verticalBias) };
+  const c2 = { x: target.x, y: target.y - (dy > 0 ? verticalBias : -verticalBias) };
+  return `M ${source.x} ${source.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`;
 }
 
 const BrickCard = React.forwardRef(function BrickCard(
@@ -1005,9 +1207,9 @@ const BrickCard = React.forwardRef(function BrickCard(
 
       {/* Land owner badge */}
       <span
-        style={S.landBadge(!!node.isLandOwner)}
-        title="Đồng chủ sở hữu"
-        onClick={(e) => { e.stopPropagation(); if (isOccupied) onToggleLandOwner(node.id); }}
+        style={{ ...S.landBadge(!!node.isLandOwner), cursor: "not-allowed", opacity: node.isLandOwner ? 0.85 : 0.55 }}
+        title="Tính năng đồng chủ sở hữu đang phát triển. Đánh dấu này hiện không ảnh hưởng chia thừa kế, sẽ active sau khi engine refactor đa chủ."
+        onClick={(e) => { e.stopPropagation(); }}
       >★</span>
 
       {/* Remove button */}
@@ -1063,7 +1265,8 @@ function PairConnector({ show }) {
   return (
     <div style={{
       width: 24, flexShrink: 0, display: "flex", alignItems: "center",
-      justifyContent: "center", fontSize: 14, color: "#d97706", fontWeight: 900,
+      justifyContent: "center", fontSize: 14, color: "#94a3b8", fontWeight: 900,
+      opacity: 0.55,
     }}>↔</div>
   );
 }
@@ -1073,9 +1276,9 @@ function SvgPairConnector({ show }) {
   return (
     <div style={{ width: 28, height: 24, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <svg width="28" height="16" viewBox="0 0 28 16" aria-hidden="true">
-        <line x1="5" y1="8" x2="23" y2="8" stroke="#d97706" strokeWidth="1.75" strokeDasharray="4 3" strokeLinecap="round" />
-        <polyline points="7,5 3,8 7,11" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points="21,5 25,8 21,11" fill="none" stroke="#d97706" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        <line x1="5" y1="8" x2="23" y2="8" stroke="#94a3b8" strokeWidth="1.35" strokeDasharray="4 4" strokeLinecap="round" opacity="0.55" />
+        <polyline points="7,5 3,8 7,11" fill="none" stroke="#94a3b8" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
+        <polyline points="21,5 25,8 21,11" fill="none" stroke="#94a3b8" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
       </svg>
     </div>
   );
@@ -1322,13 +1525,13 @@ function TieredDiagramLegacy({ resolvedNodes, handlers, shareMode, warnings }) {
 
 // ─── FamilyTreeApp (main component) ─────────────────────────────────────────
 
-function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
+function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineState }) {
   const containerRef = useRef(null);
   const contentRef = useRef(null);
   const nodeRefs = useRef({});
   const groupRefs = useRef({});
   const drawFrameRef = useRef(0);
-  const [connectorModel, setConnectorModel] = useState({ width: 0, height: 0, lines: [], arrows: [] });
+  const [connectorModel, setConnectorModel] = useState({ width: 0, height: 0, kinshipPaths: [], flowPaths: [] });
 
   const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
   const handleDrop = (e) => e.preventDefault();
@@ -1353,6 +1556,13 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
   const spouse = personNodes.find((n) => n.id === "spouse");
   const siblings = personNodes.filter((n) => n.relationType === "sibling");
   const ghostSiblings = ghostNodes.filter((n) => n.relationType === "ghostSibling");
+  const kinshipFamilyOf = (node) => diagramEdges?.getKinshipFamilyKey ? diagramEdges.getKinshipFamilyKey(node, resolvedNodes) : "";
+  const birthSiblings = siblings.filter((node) => kinshipFamilyOf(node) === diagramEdges?.FAMILY_BIRTH);
+  const spouseSiblings = siblings.filter((node) => kinshipFamilyOf(node) === diagramEdges?.FAMILY_SPOUSE);
+  const ambiguousSiblings = siblings.filter((node) => ![diagramEdges?.FAMILY_BIRTH, diagramEdges?.FAMILY_SPOUSE].includes(kinshipFamilyOf(node)));
+  const birthGhostSiblings = ghostSiblings.filter((node) => kinshipFamilyOf(node) === diagramEdges?.FAMILY_BIRTH);
+  const spouseGhostSiblings = ghostSiblings.filter((node) => kinshipFamilyOf(node) === diagramEdges?.FAMILY_SPOUSE);
+  const ambiguousGhostSiblings = ghostSiblings.filter((node) => ![diagramEdges?.FAMILY_BIRTH, diagramEdges?.FAMILY_SPOUSE].includes(kinshipFamilyOf(node)));
   const children = personNodes.filter((n) => n.relationType === "child");
   const ghostChildren = ghostNodes.filter((n) => n.ghostAction === "addChild");
   const grandchildren = personNodes.filter((n) => n.relationType === "grandchild");
@@ -1374,52 +1584,69 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
     if (!contentElement) return;
 
     const getNodeBox = (nodeId) => getRelativeBox(nodeRefs.current[nodeId], contentElement);
-    const getGroupBox = (groupId) => getRelativeBox(groupRefs.current[groupId], contentElement);
-    const lines = [];
-    const arrows = [];
+    const edgeModel = diagramEdges?.buildDiagramEdges
+      ? diagramEdges.buildDiagramEdges(resolvedNodes, engineState)
+      : { kinshipEdges: [], flowEdges: [] };
 
-    const ownerSiblingTargets = [
-      owner?.person ? getNodeBox("owner") : null,
-      ...siblings.filter((node) => !!node.person).map((node) => getNodeBox(node.id)),
-    ].filter(Boolean);
+    const getSourceBox = (edge) => {
+      if (edge.sourceNodeIds?.length) return getCombinedBox(edge.sourceNodeIds.map((nodeId) => getNodeBox(nodeId)));
+      return getNodeBox(edge.sourceNodeId);
+    };
 
-    if ((father?.person || mother?.person) && ownerSiblingTargets.length) {
-      appendBracketConnector(lines, arrows, getGroupBox("birthParentsPair"), ownerSiblingTargets, { key: "birth-family" });
-    }
+    const kinshipPaths = (edgeModel.kinshipEdges || []).map((edge) => {
+      const sourceBox = getSourceBox(edge);
+      const targetBox = getNodeBox(edge.targetNodeId);
+      if (!sourceBox || !targetBox) return null;
+      const source = getKinshipSourcePoint(sourceBox, targetBox);
+      if (!source) return null;
+      const targetIsBelow = getBoxCenterY(targetBox) >= getBoxCenterY(sourceBox);
+      const target = {
+        x: getBoxCenterX(targetBox),
+        y: targetIsBelow ? targetBox.top - 4 : targetBox.bottom + 4,
+      };
+      return { key: edge.id, d: buildSoftCurve(source, target) };
+    }).filter(Boolean);
 
-    if ((spFather?.person || spMother?.person) && spouse?.person) {
-      appendBracketConnector(lines, arrows, getGroupBox("spouseParentsPair"), [getNodeBox("spouse")], { key: "spouse-family" });
-    }
+    const measuredFlowEdges = (edgeModel.flowEdges || []).map((edge) => {
+      const sourceBox = getNodeBox(edge.sourceNodeId);
+      const targetBox = getNodeBox(edge.targetNodeId);
+      const orientation = getFlowOrientation(sourceBox, targetBox);
+      if (!sourceBox || !targetBox || !orientation) return null;
+      return { ...edge, sourceBox, targetBox, orientation };
+    }).filter(Boolean);
 
-    const occupiedChildBoxes = children
-      .filter((node) => !!node.person)
-      .map((node) => getNodeBox(node.id))
-      .filter(Boolean);
+    const sourceSlotMap = buildEdgeSlotMap(
+      measuredFlowEdges,
+      (edge) => `${edge.sourceNodeId}:${edge.orientation.sourceSide}`,
+      (edge) => slotSortValue(edge.targetBox, edge.orientation.sourceSide)
+    );
+    const targetSlotMap = buildEdgeSlotMap(
+      measuredFlowEdges,
+      (edge) => `${edge.targetNodeId}:${edge.orientation.targetSide}`,
+      (edge) => slotSortValue(edge.sourceBox, edge.orientation.targetSide)
+    );
 
-    if (owner?.person && occupiedChildBoxes.length) {
-      appendBracketConnector(lines, arrows, getNodeBox("owner"), occupiedChildBoxes, { key: "owner-children" });
-    }
-
-    [...children, ...siblings, ...grandchildren].forEach((branchParent) => {
-      if (!branchParent.person) return;
-      const branchBox = getGroupBox(`grandchildBranch:${branchParent.id}`);
-      if (!branchBox) return;
-      appendBracketConnector(
-        lines,
-        arrows,
-        getGroupBox(`childPair:${branchParent.id}`) || getNodeBox(branchParent.id),
-        [branchBox],
-        { key: `descendant-branch:${branchParent.id}`, childGap: 12 }
-      );
-    });
+    const flowPaths = measuredFlowEdges.map((edge) => {
+      const sourceSlot = sourceSlotMap.get(edge.id) || { index: 0, count: 1 };
+      const targetSlot = targetSlotMap.get(edge.id) || { index: 0, count: 1 };
+      const source = getSlottedCardPoint(edge.sourceBox, edge.orientation.sourceSide, sourceSlot.index, sourceSlot.count, "source");
+      const target = getSlottedCardPoint(edge.targetBox, edge.orientation.targetSide, targetSlot.index, targetSlot.count, "target");
+      if (!source || !target) return null;
+      return {
+        key: edge.id,
+        d: buildSoftCurve(source, target),
+        fraction: edge.fraction,
+        eventDateKey: edge.eventDateKey || "",
+      };
+    }).filter(Boolean);
 
     setConnectorModel({
       width: Math.max(contentElement.scrollWidth, contentElement.clientWidth),
       height: Math.max(contentElement.scrollHeight, contentElement.clientHeight),
-      lines,
-      arrows,
+      kinshipPaths,
+      flowPaths,
     });
-  }, [children, father, grandchildren, mother, owner, siblings, spFather, spMother, spouse]);
+  }, [resolvedNodes, engineState]);
 
   const scheduleConnectorDraw = useCallback(() => {
     if (drawFrameRef.current) window.cancelAnimationFrame(drawFrameRef.current);
@@ -1482,6 +1709,22 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
   }
 
   function renderTier1() {
+    const renderSiblingSet = (groupId, label, groupSiblings, groupGhosts) => {
+      if (!groupSiblings.length && !groupGhosts.length) return null;
+      return (
+        <>
+          <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
+          <div ref={setGroupRef(groupId)} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+            {groupSiblings.map((sib) => (
+              <BrickCard key={sib.id} ref={setNodeRef(sib.id)} node={sib} {...handlers} shareMode={shareMode} />
+            ))}
+            {groupGhosts.map((g) => (
+              <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
+            ))}
+          </div>
+        </>
+      );
+    };
     return (
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
         {owner && (
@@ -1491,19 +1734,9 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
             {spouse && <BrickCard ref={setNodeRef(spouse.id)} node={spouse} {...handlers} shareMode={shareMode} />}
           </div>
         )}
-        {(siblings.length > 0 || ghostSiblings.length > 0) && (
-          <>
-            <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
-            <div ref={setGroupRef("siblingsGroup")} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-              {siblings.map((sib) => (
-                <BrickCard key={sib.id} ref={setNodeRef(sib.id)} node={sib} {...handlers} shareMode={shareMode} />
-              ))}
-              {ghostSiblings.map((g) => (
-                <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
-              ))}
-            </div>
-          </>
-        )}
+        {renderSiblingSet("birthSiblingsGroup", "birth", birthSiblings, birthGhostSiblings)}
+        {renderSiblingSet("spouseSiblingsGroup", "spouse", spouseSiblings, spouseGhostSiblings)}
+        {renderSiblingSet("ambiguousSiblingsGroup", "ambiguous", ambiguousSiblings, ambiguousGhostSiblings)}
       </div>
     );
   }
@@ -1589,20 +1822,38 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
           style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "visible", zIndex: 0 }}
           aria-hidden="true"
         >
-          {connectorModel.lines.map((line) => (
-            <line
-              key={line.key}
-              x1={line.x1}
-              y1={line.y1}
-              x2={line.x2}
-              y2={line.y2}
+          <defs>
+            <marker id="kinship-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" opacity="0.42" />
+            </marker>
+            <marker id="flow-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c" />
+            </marker>
+          </defs>
+          {connectorModel.kinshipPaths.map((path) => (
+            <path
+              key={path.key}
+              d={path.d}
+              fill="none"
               stroke="#94a3b8"
-              strokeWidth="1.6"
+              strokeWidth="1.2"
+              strokeDasharray="5 6"
               strokeLinecap="round"
+              opacity="0.42"
+              markerEnd="url(#kinship-arrow)"
             />
           ))}
-          {connectorModel.arrows.map((arrow) => (
-            <polygon key={arrow.key} points={arrow.points} fill="#64748b" />
+          {connectorModel.flowPaths.map((path) => (
+            <path
+              key={path.key}
+              d={path.d}
+              fill="none"
+              stroke="#ea580c"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              opacity="0.95"
+              markerEnd="url(#flow-arrow)"
+            />
           ))}
         </svg>
 
@@ -1642,15 +1893,54 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings }) {
 
 function FamilyTreeApp() {
   const counterRef = useRef(Date.now());
-  const [logicalNodes, setLogicalNodes] = useState(() => hydrateInitialNodes());
+  const initialNodesRef = useRef(null);
+  if (!initialNodesRef.current) {
+    initialNodesRef.current = hydrateInitialNodes();
+  }
   const [shareMode] = useState("auto");
-  const [resolvedNodes, setResolvedNodes] = useState([]);
-  const [warnings, setWarnings] = useState([]);
+  const logicalNodesRef = useRef(initialNodesRef.current);
+  const initialCommittedRef = useRef(null);
+  if (!initialCommittedRef.current) {
+    initialCommittedRef.current = buildCommittedSnapshot(initialNodesRef.current, "auto");
+  }
+  const [logicalNodes, setLogicalNodes] = useState(() => initialNodesRef.current);
+  const [resolvedNodes, setResolvedNodes] = useState(() => initialCommittedRef.current.resolvedNodes);
+  const [warnings, setWarnings] = useState(() => initialCommittedRef.current.warnings);
+  const [diagramEngineState, setDiagramEngineState] = useState(() => initialCommittedRef.current.diagramEngineState);
+  const diagramStoreRef = useRef(null);
+  if (!diagramStoreRef.current) {
+    const initialSnapshot = initialCommittedRef.current.snapshot;
+    const onPublish = (snapshot) => {
+      window.__FAMILY_TREE_STATE__ = snapshot;
+      window.dispatchEvent(new CustomEvent("onFamilyTreeUpdate", { detail: snapshot }));
+    };
+    diagramStoreRef.current = diagramStateStore?.createStore
+      ? diagramStateStore.createStore(initialSnapshot, onPublish)
+      : createFallbackDiagramStore(initialSnapshot, onPublish);
+  }
 
   const nextId = useCallback((prefix) => {
     counterRef.current += 1;
     return `${prefix}_${counterRef.current}`;
   }, []);
+
+  const applyCommittedState = useCallback((committed) => {
+    setResolvedNodes(committed.resolvedNodes);
+    setWarnings(committed.warnings);
+    setDiagramEngineState(committed.diagramEngineState);
+    diagramStoreRef.current.publish(committed.snapshot);
+  }, []);
+
+  const commitLogicalNodes = useCallback((updater, reason = "") => {
+    const previousNodes = logicalNodesRef.current;
+    const nextNodes = typeof updater === "function" ? updater(previousNodes) : updater;
+    if (!Array.isArray(nextNodes)) return previousNodes;
+    logicalNodesRef.current = nextNodes;
+    const committed = buildCommittedSnapshot(nextNodes, shareMode);
+    setLogicalNodes(nextNodes);
+    applyCommittedState(committed);
+    return nextNodes;
+  }, [applyCommittedState, shareMode]);
 
   const pruneLinkedNodes = useCallback((nodes, targetId) => {
     if (targetId === "__noop__") return nodes.slice();
@@ -1669,6 +1959,7 @@ function FamilyTreeApp() {
         ...node,
         person,
         parentPersonId,
+        familyGroupId: node.familyGroupId || "",
         willReceive: node.allowsShare && !person.death ? true : false,
         sharePercent: "0.00",
       };
@@ -1680,6 +1971,7 @@ function FamilyTreeApp() {
       kind: "person",
       person,
       parentPersonId,
+      familyGroupId: node.familyGroupId || "",
       allowsShare: true,
       removable: true,
       willReceive: !person.death,
@@ -1701,7 +1993,7 @@ function FamilyTreeApp() {
   const onAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
     if (!person || !person.id) return;
-    setLogicalNodes((prevNodes) => {
+    commitLogicalNodes((prevNodes) => {
       const duplicate = prevNodes.find(
         (node) => node.id !== nodeId && node.kind === "person" && node.person && String(node.person.id) === String(person.id)
       );
@@ -1712,10 +2004,10 @@ function FamilyTreeApp() {
       });
       return ensureSpareChildNode(nextNodes);
     });
-  }, [materializeGhostNode]);
+  }, [commitLogicalNodes, materializeGhostNode]);
 
   const onRemove = useCallback((nodeId) => {
-    setLogicalNodes((prevNodes) => {
+    commitLogicalNodes((prevNodes) => {
       const target = prevNodes.find((node) => node.id === nodeId);
       if (!target) return prevNodes;
       if (!target.removable) {
@@ -1725,10 +2017,10 @@ function FamilyTreeApp() {
       }
       return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId));
     });
-  }, [pruneLinkedNodes]);
+  }, [commitLogicalNodes, pruneLinkedNodes]);
 
   const onMoveWithin = useCallback((sourceNodeId, targetNodeId) => {
-    setLogicalNodes((prev) => {
+    commitLogicalNodes((prev) => {
       const source = prev.find((n) => n.id === sourceNodeId);
       if (!source?.person) return prev;
       const person = source.person;
@@ -1750,20 +2042,22 @@ function FamilyTreeApp() {
         })
       );
     });
-  }, [materializeGhostNode, nextId, shareMode]);
+  }, [commitLogicalNodes, materializeGhostNode, nextId, shareMode]);
 
   const preflightAssign = useCallback((nodeId, rawPerson) => {
-    const resolved = resolveSubRelations(logicalNodes, shareMode).nodes;
-    return validateAssignment(logicalNodes, nodeId, normalizePersonPayload(rawPerson), resolved);
-  }, [logicalNodes, shareMode]);
+    const currentNodes = logicalNodesRef.current;
+    const resolved = resolveSubRelations(currentNodes, shareMode).nodes;
+    return validateAssignment(currentNodes, nodeId, normalizePersonPayload(rawPerson), resolved);
+  }, [shareMode]);
 
   const commitAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
-    const resolved = resolveSubRelations(logicalNodes, shareMode).nodes;
-    const validation = validateAssignment(logicalNodes, nodeId, person, resolved);
+    const currentNodes = logicalNodesRef.current;
+    const resolved = resolveSubRelations(currentNodes, shareMode).nodes;
+    const validation = validateAssignment(currentNodes, nodeId, person, resolved);
     if (!validation.ok) return validation;
     if (validation.targetNode.kind === "ghost") {
-      setLogicalNodes((prevNodes) => {
+      commitLogicalNodes((prevNodes) => {
         const prevResolved = resolveSubRelations(prevNodes, shareMode).nodes;
         const recheck = validateAssignment(prevNodes, nodeId, validation.person, prevResolved);
         if (!recheck.ok) return prevNodes;
@@ -1777,27 +2071,27 @@ function FamilyTreeApp() {
       });
       return { ok: true, person: validation.person, displacedPersons: [] };
     }
-    const preview = assignPersonToNode(logicalNodes, nodeId, validation.person);
-    setLogicalNodes((prevNodes) => {
+    const preview = assignPersonToNode(currentNodes, nodeId, validation.person);
+    commitLogicalNodes((prevNodes) => {
       const recheck = validateAssignment(prevNodes, nodeId, validation.person);
       if (!recheck.ok) return prevNodes;
       return assignPersonToNode(prevNodes, nodeId, validation.person).nodes;
     });
     return { ok: true, person: validation.person, displacedPersons: preview.displacedPersons };
-  }, [logicalNodes, materializeGhostNode, nextId, shareMode]);
+  }, [commitLogicalNodes, materializeGhostNode, nextId, shareMode]);
 
   const removeWithWorkflow = useCallback((nodeId) => {
-    const affectedPeople = collectRemovedPeople(logicalNodes, nodeId);
+    const affectedPeople = collectRemovedPeople(logicalNodesRef.current, nodeId);
     onRemove(nodeId);
     // Chỉ cập nhật inDiagram — HTML tree là projection riêng biệt, không được tự xóa inTree từ đây
     bridgeWorkflowUpdates(affectedPeople.map((person) => ({
       id: person.id,
       patch: { inDiagram: false, inPool: true },
     })));
-  }, [logicalNodes, onRemove]);
+  }, [onRemove]);
 
   const moveWithinDiagram = useCallback((sourceNodeId, targetNodeId) => {
-    setLogicalNodes((prev) => {
+    commitLogicalNodes((prev) => {
       const source = prev.find((n) => n.id === sourceNodeId);
       if (!source?.person) return prev;
       const sourcePerson = normalizePersonPayload(source.person);
@@ -1823,27 +2117,27 @@ function FamilyTreeApp() {
         })
       );
     });
-  }, [materializeGhostNode, nextId, shareMode]);
+  }, [commitLogicalNodes, materializeGhostNode, nextId, shareMode]);
 
   const onToggleReceive = useCallback((nodeId) => {
-    setLogicalNodes((prevNodes) =>
+    commitLogicalNodes((prevNodes) =>
       prevNodes.map((node) =>
         node.id === nodeId
           ? { ...node, willReceive: !node.willReceive }
           : node
       )
     );
-  }, []);
+  }, [commitLogicalNodes]);
 
   const onToggleLandOwner = useCallback((nodeId) => {
-    setLogicalNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, isLandOwner: !n.isLandOwner } : n));
-  }, []);
+    commitLogicalNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, isLandOwner: !n.isLandOwner } : n));
+  }, [commitLogicalNodes]);
 
   useEffect(() => {
     const handleParticipantRecordUpdated = (evt) => {
       const person = normalizePersonPayload(evt?.detail?.customer || evt?.detail);
       if (!person?.id) return;
-      setLogicalNodes((prevNodes) =>
+      commitLogicalNodes((prevNodes) =>
         prevNodes.map((node) => {
           if (!node.person || String(node.person.id) !== String(person.id)) return node;
           return {
@@ -1858,10 +2152,10 @@ function FamilyTreeApp() {
     };
     window.addEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
     return () => window.removeEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
-  }, []);
+  }, [commitLogicalNodes]);
 
   const onGhostExpand = useCallback((nodeId) => {
-    setLogicalNodes((prevNodes) => {
+    commitLogicalNodes((prevNodes) => {
       const ghostNode = resolveSubRelations(prevNodes, shareMode).nodes.find((node) => node.id === nodeId);
       if (!ghostNode) return prevNodes;
 
@@ -1870,7 +2164,8 @@ function FamilyTreeApp() {
           id: nextId("sibling"), label: "Anh/Chị/Em", role: "Anh/Chị/Em",
           relationType: "sibling", bucket: 1, allowsShare: true, removable: true,
           sourceId: ghostNode.sourceId, parentSlotId: ghostNode.parentSlotId,
-          parentPersonId: ghostNode.parentPersonId, willReceive: true,
+          parentPersonId: ghostNode.parentPersonId, familyGroupId: ghostNode.familyGroupId || "",
+          willReceive: true,
         })];
       }
       if (ghostNode.ghostAction === "addGrandchild") {
@@ -1878,7 +2173,8 @@ function FamilyTreeApp() {
           id: nextId("grandchild"), label: "Con thế vị", role: "Cháu",
           relationType: "grandchild", bucket: 3, allowsShare: true, removable: true,
           sourceId: ghostNode.sourceId, parentSlotId: ghostNode.parentSlotId,
-          parentPersonId: ghostNode.parentPersonId, willReceive: true,
+          parentPersonId: ghostNode.parentPersonId, familyGroupId: ghostNode.familyGroupId || "",
+          willReceive: true,
         })];
       }
       if (ghostNode.ghostAction === "addBranchSpouse") {
@@ -1890,62 +2186,49 @@ function FamilyTreeApp() {
           id: nextId("branch_spouse"), label: "Vợ/Chồng của nhánh", role: "Con_dau_re",
           relationType: "branchSpouse", bucket: 3, allowsShare: true, removable: true,
           sourceId: ghostNode.sourceId, parentSlotId: ghostNode.parentSlotId,
-          parentPersonId: ghostNode.parentPersonId, willReceive: true,
+          parentPersonId: ghostNode.parentPersonId, familyGroupId: ghostNode.familyGroupId || "",
+          willReceive: true,
         })];
       }
       return prevNodes;
     });
-  }, [nextId, shareMode]);
+  }, [commitLogicalNodes, nextId, shareMode]);
 
   const addChildNode = useCallback(() => {
-    setLogicalNodes((prevNodes) => {
+    commitLogicalNodes((prevNodes) => {
       const hasEmptyChild = prevNodes.some((node) => node.kind === "person" && node.relationType === "child" && !node.person);
       if (hasEmptyChild) return prevNodes;
       return [...prevNodes, createLogicalNode({
         id: nextId("child"), label: "Con ruột", role: "Con", relationType: "child", bucket: 2,
         allowsShare: true, removable: true, sourceId: "owner", parentSlotId: "owner",
+        familyGroupId: "ownerSpouse",
         parentPersonId: prevNodes.find((node) => node.id === "owner")?.person?.id || "",
         willReceive: true,
       })];
     });
-  }, [nextId]);
+  }, [commitLogicalNodes, nextId]);
 
   // ── Main effect: resolve + dispatch ──────────────────────────────────────────
   useEffect(() => {
-    const resolved = resolveSubRelations(logicalNodes, shareMode);
-    setResolvedNodes(resolved.nodes);
-    setWarnings(resolved.warnings);
-
-    const participants = resolved.nodes
-      .filter((n) => n.kind === "person" && n.person)
-      .map((n) => ({
-        id: n.person.id, role: n.role, name: n.person.name,
-        doc: n.person.doc, gender: n.person.gender,
-        birth: n.person.birth, death: n.person.death,
-        address: n.person.address,
-        issue_date: n.person.issue_date,
-        issue_place: n.person.issue_place,
-        place_of_origin: n.person.place_of_origin,
-        willReceive: !!n.willReceive,
-        sharePercent: n.sharePercent || "0.00",
-        share: n.sharePercent || "0.00",
-        disabledReason: n.disabledReason || "",
-        relationType: n.relationType,
-        deathComparison: n.deathComparison || "unknown",
-        parentId: n.parentPersonId || "",
-        isLandOwner: !!n.isLandOwner,
-      }));
-
-    window.dispatchEvent(new CustomEvent("onFamilyTreeUpdate", {
-      detail: {
-        participants,
-        warnings: resolved.warnings,
-        shareMode,
-        engineState: resolved.engineState || null,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-  }, [logicalNodes, shareMode]);
+    const store = diagramStoreRef.current;
+    const api = {
+      ready: true,
+      getCommittedState: () => store.getCommittedState(),
+      subscribe: (cb) => store.subscribe(cb),
+      isSaving: () => store.isSaving(),
+      setSaving: (nextSaving) => store.setSaving(nextSaving),
+      getBusyCount: () => store.getBusyCount(),
+      isBusy: () => store.isBusy(),
+    };
+    window.__DIAGRAM_API__ = api;
+    applyCommittedState(initialCommittedRef.current);
+    window.dispatchEvent(new CustomEvent("diagram-api-ready"));
+    return () => {
+      if (window.__DIAGRAM_API__ === api) {
+        delete window.__DIAGRAM_API__;
+      }
+    };
+  }, [applyCommittedState]);
 
   const handlers = {
     onAssign: commitAssign,
@@ -1993,6 +2276,7 @@ function FamilyTreeApp() {
           handlers={handlers}
           shareMode={shareMode}
           warnings={warnings}
+          engineState={diagramEngineState}
         />
       </div>
     </div>

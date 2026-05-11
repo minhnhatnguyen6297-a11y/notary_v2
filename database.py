@@ -1,9 +1,12 @@
 import sqlite3
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Dùng SQLite — file notary.db tự tạo trong thư mục dự án
-DATABASE_URL = "sqlite:///./notary.db"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "notary.db"
+DATABASE_URL = f"sqlite:///{DB_PATH.as_posix()}"
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -12,7 +15,7 @@ Base = declarative_base()
 
 def migrate_customers_nullable():
     """Chuyển các cột customers (trừ ho_ten) sang nullable nếu chưa có."""
-    con = sqlite3.connect("notary.db")
+    con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'")
     row = cur.fetchone()
@@ -57,7 +60,7 @@ def _ensure_table_columns(cur, table_name: str, expected_columns: dict[str, str]
 
 def migrate_inheritance_cases_schema():
     """Them cac cot moi cho cac bang thua ke tren DB cu."""
-    con = sqlite3.connect("notary.db")
+    con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     _ensure_table_columns(cur, "inheritance_cases", {
         "noi_niem_yet": "VARCHAR(200)",
@@ -72,7 +75,7 @@ def migrate_inheritance_cases_schema():
 
 def migrate_properties_schema():
     """Them cac cot moi cho bang properties tren DB cu."""
-    con = sqlite3.connect("notary.db")
+    con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     _ensure_table_columns(cur, "properties", {
         "dien_tich": "FLOAT",
@@ -85,7 +88,7 @@ def migrate_properties_schema():
 
 def migrate_inheritance_case_properties_schema():
     """Tao bang lien ket nhieu tai san cho ho so neu chua co."""
-    con = sqlite3.connect("notary.db")
+    con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
     cur.executescript(
         """

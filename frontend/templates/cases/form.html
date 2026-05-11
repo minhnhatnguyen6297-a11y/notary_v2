@@ -23,7 +23,7 @@
   </div>
 </div>
 
-{% if errors %}<div class="alert alert-danger py-2 mb-2">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{%
+{% if errors %}<div id="validation-errors-banner" class="alert alert-danger py-2 mb-2">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>{%
 endif %}
 
 <form method="post" action="{{ action }}" id="case-form">
@@ -31,6 +31,8 @@ endif %}
   <input type="hidden" name="tai_san_id" id="case-tai-san" value="{{ f.get('tai_san_id','') }}">
   <input type="hidden" name="noi_niem_yet" id="case-noi-niem-yet"
     value="{{ f.get('noi_niem_yet', obj.noi_niem_yet if obj and obj.noi_niem_yet else '') }}">
+  <input type="hidden" name="diagram_payload" id="case-diagram-payload"
+    value="{{ f.get('diagram_payload', '') | e }}">
   <input type="hidden" name="engine_state_json" id="case-engine-state"
     value="{{ f.get('engine_state_json', obj.engine_state_json if obj and obj.engine_state_json else '') | e }}">
   <div id="case-property-ids-holder"></div>
@@ -315,6 +317,18 @@ endif %}
       border-radius: 6px;
     }
 
+    .ocr-staged-row[data-state="pending"] {
+
+      border-color: #fbbf24;
+      background: #fffbeb;
+    }
+
+    .ocr-staged-row[data-state="staged"] {
+
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+
     .ocr-staged-row .form-control,
     .ocr-staged-row .form-select {
 
@@ -350,6 +364,30 @@ endif %}
       padding: 2px 3px;
 
       align-items: center;
+    }
+
+    .draft-row-lifecycle {
+
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .ocr-staged-row[data-state="pending"] .draft-row-lifecycle {
+
+      color: #92400e;
+      background: #fef3c7;
+    }
+
+    .ocr-staged-row[data-state="staged"] .draft-row-lifecycle {
+
+      color: #166534;
+      background: #dcfce7;
     }
 
     .property-compact .border.rounded {
@@ -5058,6 +5096,12 @@ endif %}
       ? restoredCaseWorkspace.treeState.participants
 
       : existingParticipants;
+    if (persistedEngineState && caseWorkspaceKey) {
+      try {
+        localStorage.removeItem(caseWorkspaceKey);
+        localStorage.removeItem('case_workspace_new');
+      } catch (e) { }
+    }
 
     const allCustomersData = [
 
@@ -5123,6 +5167,8 @@ endif %}
     window.__CUSTOMER_REGISTRY__ = window.__CUSTOMER_REGISTRY__ || {};
     window.__CUSTOMER_WORKFLOW__ = window.__CUSTOMER_WORKFLOW__ || {};
     window.__POOL_DATA_MAP__ = window.__POOL_DATA_MAP__ || {};
+    window.__PENDING_CUSTOMER_UPDATES__ = window.__PENDING_CUSTOMER_UPDATES__ || new Map();
+    window.__PENDING_CUSTOMER_UPDATE_TIMERS__ = window.__PENDING_CUSTOMER_UPDATE_TIMERS__ || new Map();
 
     const CUSTOMER_WORKFLOW_DEFAULTS = Object.freeze({
 
@@ -5607,8 +5653,6 @@ endif %}
 
         inPool: true,
 
-        inStaging: false,
-
         inTree: false,
 
         inDiagram: false
@@ -5655,13 +5699,40 @@ endif %}
       return window.__CUSTOMER_WORKFLOW__[id];
     }
 
+    function shallowEqualWorkflow(left, right) {
+
+      if (left === right) return true;
+
+      const leftObj = left && typeof left === 'object' ? left : {};
+
+      const rightObj = right && typeof right === 'object' ? right : {};
+
+      const keys = new Set([...Object.keys(leftObj), ...Object.keys(rightObj)]);
+
+      for (const key of keys) {
+
+        if (leftObj[key] !== rightObj[key]) return false;
+
+      }
+
+      return true;
+    }
+
     function setCustomerWorkflowState(customerId, patch = {}) {
 
       const id = normalizeCustomerId(customerId);
 
       if (!id) return null;
 
-      const next = { ...ensureCustomerWorkflow(id), ...patch };
+      const current = ensureCustomerWorkflow(id);
+      const allowClearStaging = patch && patch.__allowClearStaging === true;
+      const nextPatch = { ...patch };
+      delete nextPatch.__allowClearStaging;
+      const next = { ...current, ...nextPatch };
+
+      if (current?.inStaging && Object.prototype.hasOwnProperty.call(nextPatch, 'inStaging') && nextPatch.inStaging === false && !allowClearStaging && !nextPatch.deleted) {
+        next.inStaging = true;
+      }
 
       if (next.deleted) {
 
@@ -5681,6 +5752,12 @@ endif %}
 
       }
 
+      if (shallowEqualWorkflow(window.__CUSTOMER_WORKFLOW__[id], next)) {
+
+        return window.__CUSTOMER_WORKFLOW__[id];
+
+      }
+
       window.__CUSTOMER_WORKFLOW__[id] = next;
 
       return next;
@@ -5694,7 +5771,7 @@ endif %}
 
       if (!record || !state) return false;
 
-      return !!record.id && !state.deleted && !!state.inPool && !state.inStaging && !state.inTree && !state.inDiagram;
+      return !!record.id && !state.deleted && !!state.inPool && !state.inTree && !state.inDiagram;
     }
 
     function renderPoolRow(customerId) {
@@ -5710,8 +5787,6 @@ endif %}
       updateCustomerWorkflow(record.id, {
 
         inPool: true,
-
-        inStaging: false,
 
         inTree: false
 
@@ -6001,9 +6076,15 @@ endif %}
     allCustomersData.forEach((item) => upsertCustomerRecord(item));
     restoreCaseWorkspaceSnapshot();
 
+    function getDiagramApi() {
+
+      return window.__DIAGRAM_API__ && window.__DIAGRAM_API__.ready ? window.__DIAGRAM_API__ : null;
+
+    }
+
     function getFamilyTreeState() {
 
-      const state = window.__FAMILY_TREE_STATE__ || {};
+      const state = getDiagramApi()?.getCommittedState?.() || window.__FAMILY_TREE_STATE__ || {};
 
       return {
 
@@ -6088,23 +6169,13 @@ endif %}
 
     window.addEventListener('onFamilyTreeUpdate', (evt) => {
 
+      const api = getDiagramApi();
+
+      if (api?.isSaving && api.isSaving()) return;
+
       const detail = evt.detail || {};
 
       const participants = Array.isArray(detail.participants) ? detail.participants : [];
-
-      window.__FAMILY_TREE_STATE__ = {
-
-        participants,
-
-        warnings: Array.isArray(detail.warnings) ? detail.warnings : [],
-
-        engineState: detail.engineState || null,
-
-        shareMode: detail.shareMode || 'auto',
-
-        updatedAt: detail.updatedAt || ''
-
-      };
 
       window.__CURRENT_TREE_PAYLOAD__ = participants;
 
@@ -6151,7 +6222,9 @@ endif %}
 
       loadPool();
 
-      renderFamilyTreeWarnings(window.__FAMILY_TREE_STATE__.warnings);
+      _syncAllDraftRowStates();
+
+      renderFamilyTreeWarnings(Array.isArray(detail.warnings) ? detail.warnings : []);
     });
 
     // ─── DRAG STATE (HTML5 NATIVE FOR REACT FLOW) ──────────────────────────────────────────────────────────────
@@ -8375,6 +8448,198 @@ endif %}
 
       ev.preventDefault();
 
+      const form = ev.target;
+
+      if (form.dataset.submitting === '1') return;
+
+      const api = getDiagramApi();
+
+      if (!api?.ready) {
+
+        showToast('Sơ đồ chưa sẵn sàng để lưu. Tải lại trang rồi thử lại.', 'warning');
+
+        return;
+
+      }
+
+      if (api.isBusy && api.isBusy()) {
+
+        showToast('Sơ đồ đang cập nhật. Chờ một chút rồi lưu lại.', 'warning');
+
+        return;
+
+      }
+
+      const sel = document.getElementById('pr-tai-san-select');
+
+      const hidden = document.getElementById('case-tai-san');
+
+      if (sel && hidden && !hidden.value && sel.value) hidden.value = sel.value;
+
+      syncPrimaryPropertySelection();
+
+      const noiInput = document.getElementById('pr-noi-niem-yet');
+
+      const noiFld = document.getElementById('case-noi-niem-yet');
+
+      if (noiInput && noiFld) noiFld.value = noiInput.value;
+
+      const propertyHolder = document.getElementById('case-property-ids-holder');
+
+      if (propertyHolder) {
+
+        propertyHolder.innerHTML = '';
+
+        collectSelectedPropertyIds().forEach((pid) => {
+
+          propertyHolder.insertAdjacentHTML('beforeend', `<input type="hidden" name="property_ids" value="${pid}">`);
+
+        });
+
+      }
+
+      if (typeof flushPendingDebounces === 'function') {
+
+        await flushPendingDebounces();
+
+      }
+
+      if (typeof waitForPendingCustomerUpdates === 'function') {
+
+        const pendingResult = await waitForPendingCustomerUpdates(10000);
+
+        if (!pendingResult?.ok) {
+
+          showToast(pendingResult?.timedOut ? 'Đồng bộ thông tin người bị timeout. Kiểm tra lại các dòng đang lưu.' : 'Có dòng người tham gia chưa lưu xong. Kiểm tra lại rồi lưu lại.', 'warning');
+
+          return;
+
+        }
+
+      }
+
+      if (typeof window.saveParticipantDraftRows === 'function') {
+
+        const saveResult = await window.saveParticipantDraftRows({
+
+          silentSuccess: true,
+
+          skipEmptyWarning: true
+
+        });
+
+        if ((saveResult?.failedCount || 0) > 0) {
+
+          showToast('Còn dòng người tham gia đang lỗi, chưa thể lưu hồ sơ.', 'warning');
+
+          return;
+
+        }
+
+      }
+
+      let treeState = getFamilyTreeState();
+
+      let treeParticipants = Array.isArray(treeState?.participants) ? treeState.participants : [];
+
+      const warns = treeParticipants.length ? (treeState.warnings || []) : validateTreeWarnings();
+
+      if (warns.length > 0) {
+
+        const ok = window.confirm(`Hồ sơ đang có ${warns.length} cảnh báo. Vẫn lưu hồ sơ?`);
+
+        if (!ok) return;
+
+      }
+
+      _syncAllDraftRowStates();
+
+      const pendingRows = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row[data-state="pending"]'));
+
+      if (pendingRows.length > 0) {
+
+        const ok = window.confirm(`Có ${pendingRows.length} dòng chưa vào sơ đồ. Nếu tiếp tục lưu, các dòng này sẽ không vào participant của hồ sơ hiện tại. Tiếp tục?`);
+
+        if (!ok) return;
+
+      }
+
+      treeState = getFamilyTreeState();
+
+      treeParticipants = Array.isArray(treeState?.participants) ? treeState.participants : [];
+
+      const holder = document.getElementById('participants-hidden');
+
+      if (holder) {
+
+        holder.innerHTML = '';
+
+        treeParticipants.forEach((p) => {
+
+          const pid = String(p?.id || '').trim();
+
+          if (!pid || p?.role === 'Owner') return;
+
+          holder.insertAdjacentHTML('beforeend', `
+
+        <input type="hidden" name="participant_id" value="${pid}">
+
+        <input type="hidden" name="participant_role" value="${p.role || 'Khac'}">
+
+        <input type="hidden" name="participant_share" value="${p.sharePercent || p.share || '0'}">
+
+        <input type="hidden" name="participant_receive" value="${p.willReceive ? '1' : '0'}">
+
+        <input type="hidden" name="participant_parent_id" value="${p.parentId || ''}">
+
+      `);
+
+        });
+
+      }
+
+      const owner = treeParticipants.find((p) => p.role === 'Owner');
+
+      if (ownerInput) ownerInput.value = owner ? owner.id : '';
+
+      const latestEngineState = treeState.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
+
+      if (engineStateInput) {
+
+        engineStateInput.value = latestEngineState ? JSON.stringify(latestEngineState) : '';
+
+      }
+
+      const diagramPayloadInput = document.getElementById('case-diagram-payload');
+
+      if (diagramPayloadInput) {
+
+        const hasNodes = Array.isArray(latestEngineState?.nodes) && latestEngineState.nodes.length > 0;
+
+        const payload = hasNodes ? {
+
+          version: 2,
+
+          updatedAt: treeState.updatedAt || new Date().toISOString(),
+
+          engineState: latestEngineState
+
+        } : null;
+
+        diagramPayloadInput.value = payload ? JSON.stringify(payload) : '';
+
+      }
+
+      saveCaseWorkspaceSnapshot();
+
+      form.dataset.submitting = '1';
+
+      if (api.setSaving) api.setSaving(true);
+
+      form.submit();
+
+      return;
+
       let treeState = getFamilyTreeState();
 
       let treeParticipants = treeState.participants || [];
@@ -8676,7 +8941,9 @@ endif %}
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
   <script src="/static/inheritance_engine.js?v=20260430a"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260430b"></script>
+  <script src="/static/diagram_state.js?v=20260511a"></script>
+  <script src="/static/diagram_edges.js?v=20260511a"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260511a"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
@@ -12040,7 +12307,11 @@ endif %}
 
         else area.insertBefore(row, area.firstChild);
 
+        _syncDraftRowState(row);
+
         _updateStagingCount();
+
+        _syncAllDraftRowStates();
 
       }
 
@@ -12377,6 +12648,7 @@ endif %}
         row.className = 'ocr-staged-row';
 
         row.dataset.cid = record.id;
+        row.dataset.state = 'pending';
 
 
         const escVal = v => (v || '').toString().replace(/"/g, '&quot;');
@@ -12473,7 +12745,7 @@ endif %}
       clearTimeout(saveTimer);
 
 
-      saveTimer = setTimeout(() => _saveStagingRow(row, record.id, status), 800);
+      _queueDraftRowSave(row, record.id, status);
 
           });
 
@@ -12487,10 +12759,8 @@ endif %}
           saveStagingToStorage(snapshot);
 
           addPersonRowToPool(snapshot);
-
-          row.remove();
-
-          _updateStagingCount();
+          commitCustomerToPool(snapshot, { highlight: false });
+          _syncDraftRowState(row);
 
         });
 
@@ -12508,23 +12778,16 @@ endif %}
           updateCustomerWorkflow(record.id, {
 
 
-      deleted: true,
-
-
       inStaging: false,
 
 
-      inPool: false,
-
-
-      inTree: false,
-
-
-      inDiagram: false
+      __allowClearStaging: true
 
           });
 
           _updateStagingCount();
+
+          loadPool();
 
         });
 
@@ -12596,6 +12859,25 @@ endif %}
           if (statusEl) statusEl.textContent = '!';
 
         }
+
+      };
+
+
+      const __baseSaveStagingRow = _saveStagingRow;
+
+      _saveStagingRow = async function (row, cid, statusEl) {
+
+        const savePromise = (async () => {
+
+          await __baseSaveStagingRow(row, cid, statusEl);
+
+          _syncDraftRowState(row);
+
+          return { ok: statusEl ? statusEl.textContent !== '!' : true };
+
+        })();
+
+        return _markCustomerRowSavePending(cid, savePromise);
 
       };
 
@@ -13170,11 +13452,196 @@ endif %}
       }
 
 
+      function _getDraftStatusElement(row) {
+
+        return row?.querySelector('.draft-row-status, .staged-save-status') || null;
+
+      }
+
+
+      function _ensureDraftLifecycleBadge(row) {
+
+        if (!row) return null;
+
+        let badge = row.querySelector('.draft-row-lifecycle');
+
+        if (badge) return badge;
+
+        const actions = row.querySelector('.row-actions');
+
+        if (!actions) return null;
+
+        badge = document.createElement('span');
+
+        badge.className = 'draft-row-lifecycle';
+
+        actions.prepend(badge);
+
+        return badge;
+
+      }
+
+
+      function _setDraftLifecycleState(row, state) {
+
+        if (!row) return;
+
+        const normalizedState = state === 'staged' ? 'staged' : 'pending';
+
+        row.dataset.state = normalizedState;
+
+        const badge = _ensureDraftLifecycleBadge(row);
+
+        if (badge) {
+
+          badge.textContent = normalizedState === 'staged' ? 'Trong sơ đồ' : 'Chưa vào sơ đồ';
+
+        }
+
+        row.title = normalizedState === 'staged'
+
+          ? 'Dòng này đã có người tương ứng trong sơ đồ và sẽ được lưu cùng hồ sơ.'
+
+          : 'Dòng này chưa có người tương ứng trong sơ đồ. Nếu lưu hồ sơ, dòng này không vào participant của case.';
+
+      }
+
+
+      function _syncDraftRowState(row) {
+
+        if (!row) return;
+
+        const cid = String(row.dataset.cid || '').trim();
+
+        if (!cid) {
+
+          _setDraftLifecycleState(row, 'pending');
+
+          return;
+
+        }
+
+        const treeState = getFamilyTreeState();
+
+        const participants = Array.isArray(treeState?.participants) ? treeState.participants : [];
+
+        const inDiagram = participants.some((participant) => String(participant?.id || '').trim() === cid);
+
+        _setDraftLifecycleState(row, inDiagram ? 'staged' : 'pending');
+
+      }
+
+
+      function _syncAllDraftRowStates() {
+
+        document.querySelectorAll('#ocr-staging-area .ocr-staged-row').forEach((row) => _syncDraftRowState(row));
+
+      }
+
+
       function _setDraftRowStatus(row, text) {
 
-        const status = row.querySelector('.draft-row-status');
+        const status = _getDraftStatusElement(row);
 
         if (status) status.textContent = text || '';
+
+      }
+
+
+      function _markCustomerRowSavePending(customerId, promise) {
+
+        const key = normalizeCustomerId(customerId);
+
+        if (!key || !promise) return promise;
+
+        window.__PENDING_CUSTOMER_UPDATES__.set(key, promise);
+
+        promise.finally(() => {
+
+          if (window.__PENDING_CUSTOMER_UPDATES__.get(key) === promise) {
+
+            window.__PENDING_CUSTOMER_UPDATES__.delete(key);
+
+          }
+
+        });
+
+        return promise;
+
+      }
+
+
+      function _queueDraftRowSave(row, customerId, statusEl, delayMs = 800) {
+
+        const key = normalizeCustomerId(customerId) || `draft:${row?.dataset?.source || 'new'}:${Date.now()}`;
+
+        const timers = window.__PENDING_CUSTOMER_UPDATE_TIMERS__;
+
+        const existing = timers.get(key);
+
+        if (existing?.timerId) clearTimeout(existing.timerId);
+
+        const timerId = setTimeout(() => {
+
+          timers.delete(key);
+
+          _saveStagingRow(row, customerId, statusEl);
+
+        }, delayMs);
+
+        timers.set(key, { row, customerId, statusEl, timerId });
+
+      }
+
+
+      async function flushPendingDebounces() {
+
+        const timers = Array.from(window.__PENDING_CUSTOMER_UPDATE_TIMERS__.values());
+
+        window.__PENDING_CUSTOMER_UPDATE_TIMERS__.clear();
+
+        for (const entry of timers) {
+
+          if (entry?.timerId) clearTimeout(entry.timerId);
+
+          if (entry?.row) {
+
+            await _saveStagingRow(entry.row, entry.customerId, entry.statusEl);
+
+          }
+
+        }
+
+      }
+
+
+      async function waitForPendingCustomerUpdates(timeoutMs = 10000) {
+
+        const pending = Array.from(window.__PENDING_CUSTOMER_UPDATES__.values());
+
+        if (!pending.length) return { ok: true, timedOut: false };
+
+        let timeoutHandle = null;
+
+        const timeoutPromise = new Promise((resolve) => {
+
+          timeoutHandle = setTimeout(() => resolve({ ok: false, timedOut: true }), timeoutMs);
+
+        });
+
+        const settlePromise = Promise.allSettled(pending).then((results) => ({
+
+          ok: results.every((result) => result.status === 'fulfilled' && result.value?.ok !== false),
+
+          timedOut: false,
+
+        }));
+
+        const result = await Promise.race([settlePromise, timeoutPromise]);
+
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+
+        return result;
 
       }
 
@@ -13213,6 +13680,8 @@ endif %}
 
         });
 
+        _syncDraftRowState(row);
+
         return record;
 
       }
@@ -13248,9 +13717,6 @@ endif %}
 
 
       deleted: false,
-
-
-      inStaging: false,
 
 
       inTree: isPlacedInTree,
@@ -13320,6 +13786,7 @@ endif %}
         row.dataset.cid = data?.id || '';
 
         row.dataset.source = options.source || data?.source || (data?.id ? 'existing' : 'manual');
+        row.dataset.state = 'pending';
 
         row.innerHTML = `
 
@@ -13347,6 +13814,8 @@ endif %}
 
       <div class="row-actions">
 
+        <span class="draft-row-lifecycle">Chưa vào sơ đồ</span>
+
         <span class="draft-row-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
         <button type="button" class="btn btn-xs btn-outline-danger" title="Xoá khi danh sách">✕</button>
@@ -13364,6 +13833,27 @@ endif %}
 
 
       _setDraftRowStatus(row, '');
+
+
+      _syncDraftRowState(row);
+
+
+      const snapshot = _collectDraftSnapshot(row);
+
+
+      if (row.dataset.cid) {
+
+
+        saveStagingToStorage({ id: row.dataset.cid, ...snapshot });
+
+
+        _setDraftRowStatus(row, '…');
+
+
+        _queueDraftRowSave(row, row.dataset.cid, _getDraftStatusElement(row));
+
+
+      }
 
           });
 
@@ -13396,11 +13886,15 @@ endif %}
 
       removeStagingFromStorage(row.dataset.cid);
 
+      updateCustomerWorkflow(row.dataset.cid, { inStaging: false, __allowClearStaging: true }, { refreshPool: false });
+
           }
 
           row.remove();
 
           _updateStagingCount();
+
+          loadPool();
 
         });
 
@@ -13409,7 +13903,11 @@ endif %}
 
         area.style.display = '';
 
+        _syncDraftRowState(row);
+
         _updateStagingCount();
+
+        _syncAllDraftRowStates();
 
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
@@ -13473,7 +13971,7 @@ endif %}
       deleted: false,
 
 
-      inStaging: false,
+      inStaging: true,
 
 
       inTree: isPlacedInTree,
@@ -13803,6 +14301,8 @@ endif %}
 
         _updateStagingCount();
 
+        _syncAllDraftRowStates();
+
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
           window.__pushCaseDebugEvent__('PARTICIPANTS_SAVE_FINISHED', {
@@ -13863,6 +14363,8 @@ endif %}
       hydrateDraftRowsFromExistingParticipants();
 
       _updateStagingCount();
+
+      _syncAllDraftRowStates();
 
       window.saveParticipantDraftRows = saveParticipantDraftRows;
 

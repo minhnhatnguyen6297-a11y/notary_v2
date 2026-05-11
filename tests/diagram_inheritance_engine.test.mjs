@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import engine from "../frontend/static/inheritance_engine.js";
+import diagramEdges from "../frontend/static/diagram_edges.js";
 
 const { runInheritanceCase } = engine;
 
@@ -202,4 +203,87 @@ test("missing asset owner emits warning and produces zero allocations", () => {
 
   assert.equal(allocationOf(result, "A"), "0");
   assert.ok(result.warnings.some((w) => w.code === "missing_asset_owner"));
+});
+
+test("diagram edges separate kinship from inheritance flow", () => {
+  const people = [
+    { id: "X", name: "X", death: "2011" },
+    { id: "Y", name: "Y", death: "2015" },
+    { id: "M", name: "M" },
+    { id: "N", name: "N" },
+    { id: "O", name: "O" },
+    { id: "A", name: "A", death: "1995" },
+    { id: "B", name: "B", death: "1996" },
+    { id: "C", name: "C", death: "1997" },
+    { id: "D", name: "D", death: "2016" },
+    { id: "Z", name: "Z", death: "2015" },
+    { id: "Z2", name: "Z2" },
+    { id: "Z3", name: "Z3" },
+  ];
+  const result = runInheritanceCase({
+    people,
+    assetOwnerIds: ["X", "Y"],
+    relationships: {
+      spousesByPerson: { X: ["Y"], C: ["D"] },
+      parentsByChild: {
+        X: ["A", "B"],
+        Y: ["C", "D"],
+        M: ["X", "Y"],
+        N: ["X", "Y"],
+        O: ["X", "Y"],
+        Z: ["C", "D"],
+        Z2: ["Z"],
+        Z3: ["Z"],
+      },
+    },
+  });
+  const personById = new Map(people.map((person) => [person.id, person]));
+  const nodes = [
+    { id: "father", kind: "person", role: "Cha", relationType: "parent", person: personById.get("A") },
+    { id: "mother", kind: "person", role: "Mẹ", relationType: "parent", person: personById.get("B") },
+    { id: "spouse_father", kind: "person", role: "Cha_vc", relationType: "spouseParent", person: personById.get("C") },
+    { id: "spouse_mother", kind: "person", role: "Me_vc", relationType: "spouseParent", person: personById.get("D") },
+    { id: "owner", kind: "person", role: "Owner", relationType: "owner", person: personById.get("X"), isLandOwner: true },
+    { id: "spouse", kind: "person", role: "Vợ/Chồng", relationType: "spouse", person: personById.get("Y"), isLandOwner: true },
+    { id: "child_m", kind: "person", role: "Con", relationType: "child", person: personById.get("M"), parentSlotId: "owner", familyGroupId: "ownerSpouse" },
+    { id: "child_n", kind: "person", role: "Con", relationType: "child", person: personById.get("N"), parentSlotId: "owner", familyGroupId: "ownerSpouse" },
+    { id: "child_o", kind: "person", role: "Con", relationType: "child", person: personById.get("O"), parentSlotId: "owner", familyGroupId: "ownerSpouse" },
+    { id: "sibling_z", kind: "person", role: "Anh/Chị/Em", relationType: "sibling", person: personById.get("Z"), parentSlotId: "spouse_mother", parentPersonId: "D", familyGroupId: "spouseParents" },
+    { id: "grandchild_z2", kind: "person", role: "Cháu", relationType: "grandchild", person: personById.get("Z2"), parentSlotId: "sibling_z", parentPersonId: "Z" },
+    { id: "grandchild_z3", kind: "person", role: "Cháu", relationType: "grandchild", person: personById.get("Z3"), parentSlotId: "sibling_z", parentPersonId: "Z" },
+  ];
+
+  const edges = diagramEdges.buildDiagramEdges(nodes, result);
+  const kinshipTargetsFromBirthParents = edges.kinshipEdges
+    .filter((edge) => edge.familyKey === diagramEdges.FAMILY_BIRTH)
+    .map((edge) => edge.targetNodeId);
+  const kinshipTargetsFromSpouseParents = edges.kinshipEdges
+    .filter((edge) => edge.familyKey === diagramEdges.FAMILY_SPOUSE)
+    .map((edge) => edge.targetNodeId);
+  const flowPairs = edges.flowEdges.map((edge) => `${edge.sourceNodeId}->${edge.targetNodeId}`);
+
+  assert.ok(kinshipTargetsFromBirthParents.includes("owner"));
+  assert.ok(!kinshipTargetsFromBirthParents.includes("sibling_z"));
+  assert.ok(kinshipTargetsFromSpouseParents.includes("spouse"));
+  assert.ok(kinshipTargetsFromSpouseParents.includes("sibling_z"));
+  assert.ok(edges.kinshipEdges.some((edge) => edge.sourceNodeId === "sibling_z" && edge.targetNodeId === "grandchild_z2"));
+  assert.ok(!flowPairs.includes("father->owner"));
+  assert.ok(!flowPairs.includes("mother->owner"));
+  assert.ok(flowPairs.includes("owner->spouse"));
+  assert.ok(flowPairs.includes("spouse->spouse_mother"));
+  assert.ok(flowPairs.includes("spouse_mother->child_m"));
+  assert.ok(flowPairs.includes("spouse_mother->grandchild_z2"));
+  assert.ok(flowPairs.includes("spouse_mother->grandchild_z3"));
+});
+
+test("ambiguous sibling is not attached to the birth parent group", () => {
+  const edges = diagramEdges.buildDiagramEdges([
+    { id: "father", kind: "person", role: "Cha", relationType: "parent", person: { id: "A" } },
+    { id: "mother", kind: "person", role: "Mẹ", relationType: "parent", person: { id: "B" } },
+    { id: "owner", kind: "person", role: "Owner", relationType: "owner", person: { id: "X" } },
+    { id: "sibling_unknown", kind: "person", role: "Anh/Chị/Em", relationType: "sibling", person: { id: "Z" } },
+  ], { trace: [] });
+
+  assert.deepEqual(edges.ambiguousSiblingIds, ["sibling_unknown"]);
+  assert.ok(!edges.kinshipEdges.some((edge) => edge.targetNodeId === "sibling_unknown"));
 });
