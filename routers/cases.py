@@ -437,7 +437,7 @@ def create_form(request: Request, db: Session = Depends(get_db)):
     from datetime import date as _date
     form = {
         "nguoi_chet_id": "", "tai_san_id": "", "ngay_lap_ho_so": _date.today().isoformat(),
-        "loai_van_ban": "khai_nhan", "ghi_chu": "", "engine_state_json": "", "diagram_payload": ""
+        "loai_van_ban": "khai_nhan", "ghi_chu": "", "engine_state_json": "", "diagram_payload": "", "case_state_json": ""
     }
     return _render_case_form(
         request,
@@ -467,6 +467,7 @@ def create(
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
     diagram_payload: Optional[str] = Form(None),
     engine_state_json: Optional[str] = Form(None),
+    case_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     from datetime import date as _date
@@ -475,6 +476,7 @@ def create(
         "tai_san_id": (tai_san_id or "").strip(),
         "diagram_payload": (diagram_payload or "").strip(),
         "engine_state_json": (engine_state_json or "").strip(),
+        "case_state_json": (case_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
@@ -507,6 +509,7 @@ def create(
         )
         form["engine_state_json"] = normalized_engine_state or ""
         form["diagram_payload"] = normalized_payload or ""
+        form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -540,6 +543,7 @@ def create(
             loai_van_ban="khai_nhan",
             ghi_chu=None,
             engine_state_json=form["engine_state_json"] or None,
+            case_state_json=form["case_state_json"] or None,
         )
         db.add(case)
         db.flush()
@@ -569,7 +573,8 @@ def create(
 @router.get("/{cid}")
 def detail(cid: int, request: Request, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
+    if not case:
+        raise HTTPException(404)
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
     participant_ids = {p.customer_id for p in case.participants}
     available = [c for c in all_customers if c.id not in participant_ids and c.id != case.nguoi_chet_id]
@@ -582,7 +587,8 @@ def detail(cid: int, request: Request, db: Session = Depends(get_db)):
 @router.get("/{cid}/edit")
 def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
+    if not case:
+        raise HTTPException(404)
     if case.is_locked:
         return RedirectResponse(f"/cases/{cid}", status_code=302)
     all_customers = db.query(Customer).order_by(Customer.ho_ten).all()
@@ -602,6 +608,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "ghi_chu": case.ghi_chu or "",
         "engine_state_json": case.engine_state_json or "",
         "diagram_payload": case.engine_state_json or "",
+        "case_state_json": case.case_state_json or "",
     }
     return _render_case_form(
         request,
@@ -631,16 +638,19 @@ def edit(
     participant_parent_id: Optional[Union[List[str], str]] = Form(None),
     diagram_payload: Optional[str] = Form(None),
     engine_state_json: Optional[str] = Form(None),
+    case_state_json: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case or case.is_locked: raise HTTPException(400)
+    if not case or case.is_locked:
+        raise HTTPException(400)
     form = {
         "nguoi_chet_id": (nguoi_chet_id or "").strip(),
         "tai_san_id": (tai_san_id or "").strip(),
         "noi_niem_yet": (noi_niem_yet or "").strip(),
         "diagram_payload": (diagram_payload or "").strip(),
         "engine_state_json": (engine_state_json or "").strip(),
+        "case_state_json": (case_state_json or "").strip(),
     }
     selected_property_ids = _normalize_property_ids(form["tai_san_id"], property_ids)
     errors = []
@@ -673,6 +683,7 @@ def edit(
         )
         form["engine_state_json"] = normalized_engine_state or ""
         form["diagram_payload"] = normalized_payload or ""
+        form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -698,9 +709,11 @@ def edit(
         )
 
     try:
-        case.nguoi_chet_id = int(form["nguoi_chet_id"]); case.tai_san_id = int(form["tai_san_id"])
+        case.nguoi_chet_id = int(form["nguoi_chet_id"])
+        case.tai_san_id = int(form["tai_san_id"])
         case.noi_niem_yet = form["noi_niem_yet"] or None
         case.engine_state_json = form["engine_state_json"] or None
+        case.case_state_json = form["case_state_json"] or None
         if selected_property_ids:
             _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))
         _replace_case_participants(db, case.id, posted_participants)
@@ -727,14 +740,18 @@ def edit(
 @router.post("/{cid}/lock")
 def lock(cid: int, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if case: case.trang_thai = "locked"; db.commit()
+    if case:
+        case.trang_thai = "locked"
+        db.commit()
     return RedirectResponse(f"/cases/{cid}", status_code=302)
 
 
 @router.post("/{cid}/unlock")
 def unlock(cid: int, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if case: case.trang_thai = "draft"; db.commit()
+    if case:
+        case.trang_thai = "draft"
+        db.commit()
     return RedirectResponse(f"/cases/{cid}", status_code=302)
 
 
@@ -742,14 +759,15 @@ def unlock(cid: int, db: Session = Depends(get_db)):
 def delete(cid: int, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if case and not case.is_locked:
-        db.delete(case); db.commit()
+        db.delete(case)
+        db.commit()
     return RedirectResponse("/cases", status_code=302)
 
 
 def _get_selected_word_template_path(db: Session) -> Optional[Path]:
     active = (
         db.query(WordTemplate)
-        .filter(WordTemplate.is_active == True)
+        .filter(WordTemplate.is_active)
         .order_by(WordTemplate.id.desc())
         .first()
     )
@@ -969,7 +987,6 @@ def _so_thanh_chu(so: float) -> str:
     if so is None:
         return ""
     don_vi = ["", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
-    hang = ["", "mười", "trăm", "nghìn", "", "", "triệu", "", "", "tỷ"]
 
     def _doc_ba_chu_so(n: int) -> str:
         tram = n // 100
@@ -1015,15 +1032,22 @@ def _so_thanh_chu(so: float) -> str:
     # Xử lý số nguyên
     parts = []
     n = phan_nguyen
-    ty  = n // 1_000_000_000; n %= 1_000_000_000
-    tr  = n // 1_000_000;     n %= 1_000_000
-    ng  = n // 1_000;         n %= 1_000
+    ty  = n // 1_000_000_000
+    n %= 1_000_000_000
+    tr  = n // 1_000_000
+    n %= 1_000_000
+    ng  = n // 1_000
+    n %= 1_000
     dv3 = n
 
-    if ty:  parts.append(_doc_ba_chu_so(ty) + " tỷ")
-    if tr:  parts.append(_doc_ba_chu_so(tr) + " triệu")
-    if ng:  parts.append(_doc_ba_chu_so(ng) + " nghìn")
-    if dv3: parts.append(_doc_ba_chu_so(dv3))
+    if ty:
+        parts.append(_doc_ba_chu_so(ty) + " tỷ")
+    if tr:
+        parts.append(_doc_ba_chu_so(tr) + " triệu")
+    if ng:
+        parts.append(_doc_ba_chu_so(ng) + " nghìn")
+    if dv3:
+        parts.append(_doc_ba_chu_so(dv3))
 
     return (" ".join(parts) + phan_le_str).strip()
 
@@ -1194,6 +1218,25 @@ def _build_normalized_mapping(mapping: dict) -> dict:
     return normalized
 
 
+def _normalize_case_state_json(raw_payload: str) -> str:
+    raw_text = _clean_text(raw_payload)
+    if not raw_text:
+        return ""
+    try:
+        payload = json.loads(raw_text)
+    except Exception as exc:
+        raise DiagramPayloadValidationError([f"case_state_json không phải JSON hợp lệ: {exc}"])
+    if not isinstance(payload, dict):
+        raise DiagramPayloadValidationError(["case_state_json phải là object JSON."])
+    stage = payload.get("stage", [])
+    diagram = payload.get("diagram", {})
+    if not isinstance(stage, list):
+        raise DiagramPayloadValidationError(["case_state_json.stage phải là danh sách."])
+    if not isinstance(diagram, dict):
+        raise DiagramPayloadValidationError(["case_state_json.diagram phải là object JSON."])
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _replace_text_placeholders(text: str, mapping: dict, normalized_mapping: dict) -> str:
     new_text = text
     for k, v in mapping.items():
@@ -1268,7 +1311,8 @@ def export_word(cid: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Thieu thu vien python-docx. Vui long cai requirements.")
 
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
+    if not case:
+        raise HTTPException(404)
 
     doc = Document()
 
@@ -1450,7 +1494,7 @@ def create_live_preview(
         
     id_list = _to_list(participant_id)
     role_list = _to_list(participant_role)
-    share_list = _to_list(participant_share)
+    _to_list(participant_share)
     receive_list = _to_list(participant_receive)
     parent_list = _to_list(participant_parent_id)
     
@@ -1463,7 +1507,8 @@ def create_live_preview(
     
     for idx, cid in enumerate(id_list):
         c = customers_by_id.get(str(cid))
-        if not c: continue
+        if not c:
+            continue
         role = role_list[idx] if idx < len(role_list) else ""
         recv = str(receive_list[idx]).lower() in ("1", "true") if idx < len(receive_list) else True
         parent_raw = parent_list[idx] if idx < len(parent_list) else ""
@@ -1475,17 +1520,24 @@ def create_live_preview(
         p = SimpleNamespace(customer=c, vai_tro=role, co_nhan_tai_san=recv, parent_customer_id=parent_cid)
         participants.append(p)
         
-        if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc"): parents.append(p)
-        elif role == "Vợ/Chồng": spouses.append(p)
-        elif role == "Con": children.append(p)
-        elif role == "Cháu": grand.append(p)
-        elif role == "Owner": owner = c
+        if role in ("Cha", "Mẹ", "Cha_vc", "Me_vc"):
+            parents.append(p)
+        elif role == "Vợ/Chồng":
+            spouses.append(p)
+        elif role == "Con":
+            children.append(p)
+        elif role == "Cháu":
+            grand.append(p)
+        elif role == "Owner":
+            owner = c
         
     # If owner missing (due to roleMap bug in JS we just wrote), let's guess from dead people
     if not owner:
         dead = [p.customer for p in participants if p.customer.ngay_chet]
-        if dead: owner = dead[0]
-        else: owner = SimpleNamespace(ho_ten="[Người để lại di sản]", so_giay_to="...", ngay_sinh=None, ngay_chet=None)
+        if dead:
+            owner = dead[0]
+        else:
+            owner = SimpleNamespace(ho_ten="[Người để lại di sản]", so_giay_to="...", ngay_sinh=None, ngay_chet=None)
 
     nhan = [p for p in participants if p.co_nhan_tai_san and p.customer != owner]
     tuchoi = [p for p in participants if not p.co_nhan_tai_san and p.customer != owner]
@@ -1498,7 +1550,7 @@ def create_live_preview(
     if ngay_lap_ho_so:
         try:
             ngay_lap = datetime.strptime(ngay_lap_ho_so, "%Y-%m-%d").date()
-        except:
+        except Exception:
             pass
 
     template = templates.get_template("cases/_document_template.html")
@@ -1548,7 +1600,8 @@ def export_draft_generic(html_content: str = Form("")):
 @router.get("/{cid}/preview")
 def preview_word(cid: int, request: Request, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
+    if not case:
+        raise HTTPException(404)
     mapping = _build_template_mapping(case)
     
     html_content = f"""
@@ -1582,7 +1635,8 @@ def preview_word(cid: int, request: Request, db: Session = Depends(get_db)):
 @router.post("/{cid}/export-preview")
 def export_preview(cid: int, html_content: str = Form(""), db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
-    if not case: raise HTTPException(404)
+    if not case:
+        raise HTTPException(404)
     
     try:
         from docx import Document

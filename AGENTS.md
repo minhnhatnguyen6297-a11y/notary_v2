@@ -1,10 +1,20 @@
 # AGENTS.md - notary_v2
 
-Tai lieu van hanh nhanh cho team khi lam viec voi du an `notary_v2`.
-Cap nhat: 13/04/2026.
+Source of truth duy nhat cho agent khi lam viec voi du an `notary_v2`.
+Cap nhat: 12/05/2026.
 
-## Nguyen tac van hanh mac dinh
+## 1. RULE CUNG - doc moi turn
+- `AGENTS.md` la source of truth duy nhat. `CLAUDE.md` chi duoc redirect ve file nay, khong duplicate rule.
+- Section 1 va 2 la rule cung; agent phai doc truoc khi plan hoac sua code.
+- Section 3-6 la tham chieu; doc dung phan theo module/feature dang lam.
 - Mac dinh phat trien va test tren local.
+- Khong doc lai toan bo codebase tu dau moi khi debug; bat dau tu entrypoint trong Section 3 va plan lien quan trong `docs/plans/`.
+- Truoc khi sua code task Normal/Major, phai lap scope lock theo Section 2. Neu can sua ngoai scope da lock, dung lai va bao `SCOPE BREAK REQUEST`.
+- Khong sua, format, revert, move, hay xoa thay doi khong lien quan cua user.
+- Khong tao helper/class/module/abstraction moi trong task Normal neu user chua dong y.
+- Khong doi API contract, router signature, task Celery, schema DB, OCR flow, hoac rule nghiep vu khi chua co scope ro.
+- Neu gap rule nghiep vu mo ho, phai ghi ro case va hoi user; khong tu quyet.
+- Sau khi sua xong, bat buoc co post-task report theo Section 2.
 - OCR toc do cao mac dinh `no fallback`:
   - Khong them fallback theo thoi quen.
   - Chi them fallback khi co benchmark moi chung minh recall tang dang ke va latency van chap nhan duoc.
@@ -14,18 +24,73 @@ Cap nhat: 13/04/2026.
   - Khi thay output sai, phai ghi ro case sai va stage sai.
   - Neu gap cho mo ho nghiep vu, khong duoc tu quyet rule.
   - Phai hoi lai user de chot huong truoc khi sua logic nghiep vu.
-## Tong quan
+
+## 2. TIER / SCOPE / VERIFY / REPORT
+
+### Tier
+- `TRIVIAL`: toi da 1 file va toi da 20 dong net; chi sua text/log/comment/doc nho; khong dung `routers/*.py` signature, `models.py`, `tasks.py`, DB schema, OCR flow, Celery task, hay API contract.
+- `NORMAL`: toi da 3 file va toi da 100 dong net; duoc fix bug/tinh nang nho; khong tao helper/class/module moi; khong doi schema, router signature, Celery contract, hoac tach/nhap flow lon.
+- `MAJOR`: bat ky task nao vuot gioi han Normal, hoac dung OCR flow, router signature, DB schema, `models.py`, `tasks.py`, refactor, migration, dependency moi, hay thay doi cross-module contract.
+- User co the nang/ha tier bang lenh ro rang. Agent khong duoc tu ha tier user da goi; neu mo ho thi chon tier cao hon.
+- Task OCR co batch anh cu the va expected cu the phai theo `Vong lap kiem thu OCR bat buoc` duoi day, bat ke tier.
+
+### Scope lock
+Truoc khi sua code trong task Normal/Major, agent phai in scope lock ngan gon:
+
+```text
+TASK:
+TIER:
+FILE SE DUNG:
+FILE KHONG DUNG:
+RUI RO:
+TEST:
+TRANG THAI SCOPE: LOCKED
+```
+
+Sau `LOCKED`, neu can sua file ngoai `FILE SE DUNG`, tang tier, hoac vuot diff budget, agent phai dung va in:
+
+```text
+SCOPE BREAK REQUEST
+- Ly do:
+- File/tang can them:
+- Rui ro neu khong them:
+- Test bo sung:
+```
+
+### Verify
+- `TRIVIAL`: chay kiem tra lien quan neu co; neu khong chay thi noi ro ly do.
+- `NORMAL` va `MAJOR`: bat buoc chay `.\verify.bat` truoc khi bao xong, tru khi task chi sua docs va script khong lien quan; `verify.bat` chi la wrapper goi `verify.ps1` de tranh PowerShell ExecutionPolicy tren Windows.
+- `verify.ps1` uu tien Python trong `venv`, compile core files, lint Python files da thay doi neu co ruff, va chay `tests/test_ocr_ai.py` khi co thay doi OCR-relevant hoac `FULL_VERIFY=1`.
+- Neu sua OCR, sau verify chung van phai chay dung vong doi chieu OCR bat buoc khi task co batch/expected.
+- Neu `.\verify.bat` fail, khong bao thanh cong; phai ghi ro fail o buoc nao va hanh dong ke tiep.
+
+### Post-task report
+Moi task co sua file phai ket thuc bang bao cao ngan gon:
+
+```text
+BAO CAO HOAN THANH:
+- File da sua:
+- File da them:
+- File da xoa:
+- Ham/symbol da xoa:
+- Ham/symbol moi them:
+- verify:
+- Scope match list ban dau:
+- Ghi chu rui ro/test con lai:
+```
+
+## 3. Repo map / tong quan
 - Ung dung quan ly ho so thua ke dat dai cho van phong cong chung.
 - Backend: FastAPI + SQLAlchemy + SQLite.
 - Frontend: Jinja2 + Bootstrap + Vanilla JS.
 - Local OCR: RapidOCR detection + VietOCR recognition (CPU-only).
 
-## Cach doc repo nay
+### Cach doc repo nay
 - Khong doc lai toan bo codebase tu dau moi khi debug.
 - Bat dau tu `AGENTS.md` de xac dinh dung entrypoint, sau do mo file plan trong `docs/plans/`, roi moi doc file code lien quan.
 - Neu sua 1 flow lon ma thay `AGENTS.md` khong con dung nua, phai cap nhat lai ngay. `AGENTS.md` la ban do repo, khong chi la ghi chu chung chung.
 
-## Ban do repo / ownership
+### Ban do repo / ownership
 - `main.py`
   - Tao FastAPI app.
   - Load `.env`.
@@ -56,7 +121,7 @@ Cap nhat: 13/04/2026.
 - `docs/plans/`
   - Noi giu decision record theo feature. Sua feature nao thi doc plan do truoc.
 
-## Quan he goi nhau quan trong
+### Quan he goi nhau quan trong
 - App startup
   - `main.py` -> load env -> migrate DB -> include routers -> warmup `routers.ocr_local.warmup_local_ocr()`.
 - Cloud OCR sync
@@ -74,7 +139,7 @@ Cap nhat: 13/04/2026.
   - `frontend/static/ReactFlowApp.jsx` la UI ReactFlow duoc nhung vao `cases/form.html`, khong phai mot app frontend tach rieng.
   - AI button va Local button phai duoc debug nhu 2 flow doc lap; khong duoc mac dinh chung helper neu khong co ly do rat ro.
 
-## Khi debug, mo file nao truoc
+### Khi debug, mo file nao truoc
 - Bug Cloud OCR / AI OCR
   - Doc `docs/plans/ocr_ai.md` -> `routers/ocr_ai.py` -> `.env` -> `frontend/templates/cases/form.html`.
 - Bug Local OCR / pairing / front-back / merge
@@ -92,7 +157,9 @@ Cap nhat: 13/04/2026.
 - Bug tai san
   - `routers/properties.py` -> `frontend/templates/properties/*.html`.
 
-## Bai toan OCR tong the
+## 4. OCR special rules / operations
+
+### Bai toan OCR tong the
 - Day khong phai bai toan OCR thuan `1 anh -> 1 doan text`.
 - Input thuong la nhieu anh cung luc, thu tu lon xon, co the chen mat truoc, mat sau, nhieu CCCD khac nhau, va ca anh khong phai CCCD.
 - He thong phai giai dong thoi cac bai toan nho sau:
@@ -106,7 +173,7 @@ Cap nhat: 13/04/2026.
   - Moi thay doi OCR phai kiem tra lai xem co dang giai quyet ket hop ca `phan loai + nhan dien side + ghep cap + trich xuat JSON` nhanh hon hay khong.
   - Khong coi accuracy OCR text don le la metric duy nhat; metric dung la do dung cua ket qua JSON cuoi cung tren ca batch anh lon xon.
 
-## Boundary AI vs Local
+### Boundary AI vs Local
 - `routers/ocr_ai.py` va `routers/ocr_local.py` la 2 pipeline tach rieng.
 - OCR AI:
   - Uu tien latency.
@@ -119,7 +186,7 @@ Cap nhat: 13/04/2026.
   - Duoc giu triage, rotate, crop, QR rescue, deterministic merge.
 - Khong import helper QR/parser giua AI va Local. Neu can giong nhau thi duplicate co chu dich de giu kha nang debug doc lap.
 
-## Vong lap kiem thu OCR bat buoc
+### Vong lap kiem thu OCR bat buoc
 - Skill `test-ocr` trong `.Codex/skills/test-ocr/SKILL.md` la wrapper auto-trigger cho muc nay.
 - Muc nay chi kich hoat khi user dang yeu cau thuc thi `test OCR`, `debug OCR`, `kiem thu OCR`, `doi chieu OCR`, `OCR sai`, hoac sua OCR tren case/batch anh cu the.
 - Khong kich hoat muc nay cho cau hoi giai thich, review kien truc, brainstorming, hay phan tich ly thuyet khong chay test that.
@@ -155,7 +222,7 @@ Cap nhat: 13/04/2026.
 - Neu bo anh dang debug la anh local cua phien hien tai, uu tien dung bo anh do truoc bo regression cu.
 - Muc tieu dung la ket qua JSON/cu phap nghiep vu cuoi cung, khong chi la text OCR tho.
 
-## Chay du an
+### Chay du an
 ```bash
 # Windows
 run.bat
@@ -167,13 +234,13 @@ python -m uvicorn main:app --port 8000
 
 URL mac dinh: `http://127.0.0.1:8000`
 
-## Local OCR - RapidOCR Only
+### Local OCR - RapidOCR Only
 
 - Engine: `RapidOCR det + VietOCR rec (CPU)`, model `vgg_transformer`.
 - Pipeline: Smart Crop → Triage V2 (4 huong) → Targeted Extraction → Deterministic Merge → Wide Fallback.
 - Chi tiet buoc xu ly, env vars, ROI presets, luat du lieu: `docs/plans/ocr_local.md`.
 
-## API Local OCR
+### API Local OCR
 - `POST /api/ocr/local/submit`
 - `POST /api/ocr/local/submit-batch`
 - `GET /api/ocr/local/status/{job_id}`
@@ -182,17 +249,17 @@ URL mac dinh: `http://127.0.0.1:8000`
 - `client_qr_failed` la telemetry tu frontend; backend van co quyen QR rescue.
 - Batch dung `client_qr_failed_json` (list bool theo thu tu file).
 
-## Task worker
+### Task worker
 - Task name giu nguyen:
   - `process_ocr_job`
   - `process_ocr_batch_job`
 - Worker startup: `python -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO`
 
-## Script setup/run
+### Script setup/run
 - `run.bat`: tao venv, tao `.env`, cai dependency, khoi dong worker/server.
 - `requirements-gpu.txt`: optional cho may NVIDIA (onnxruntime-gpu).
 
-## Bien moi truong lien quan Local OCR
+### Bien moi truong lien quan Local OCR
 - `LOCAL_OCR_SMART_CROP_MIN_CONF`
 - `LOCAL_OCR_DET_MAX_SIDE_LEN`
 - `LOCAL_OCR_VIETOCR_MODEL`
@@ -211,7 +278,7 @@ URL mac dinh: `http://127.0.0.1:8000`
 - `LOCAL_OCR_TRIAGE_MRZ_MIN_SCORE`
 - `OCR_TEXT_LLM_MODEL`
 
-## Backlog / Roadmap
+### Backlog / Roadmap
 - LLM Fallback (tu dong sua dau / bu truong) dang tam tat de toi uu toc do Local OCR.
 - Da chuyen sang co che canh bao do tren UI de nguoi dung tu sua tay.
 - Se phat trien lai LLM Fallback o giai doan sau.
@@ -223,13 +290,13 @@ URL mac dinh: `http://127.0.0.1:8000`
   - Backward compatible: template cu khong co markers van chay binh thuong.
   - Plan chi tiet: xem commit hoac file `docs/plans/word_template_v2.md` khi bat dau trien khai.
 
-## Quy uoc khi sua code
+### Quy uoc khi sua code
 - Uu tien fix theo huong giu contract API hien tai.
 - Khong doi ten task Celery.
 - Khong thay doi schema DB neu khong bat buoc.
 - Neu sua flow OCR, phai test lai bo anh regression 10 anh CCCD.
 
-## Feature Plans — Doc truoc khi sua code
+### Feature Plans — Doc truoc khi sua code
 
 Moi chuc nang lon co file plan rieng trong `docs/plans/`. Agent phai mo va doc plan truoc khi lam viec voi chuc nang do.
 
@@ -242,13 +309,13 @@ Index day du: `docs/plans/_INDEX.md`
 
 **Quy tac:** Sau khi chot quyet dinh thiet ke moi hoac thay doi approach → cap nhat file plan tuong ung.
 
-## Kiem tra nhanh truoc khi ban giao
+### Kiem tra nhanh truoc khi ban giao
 ```bash
-python -m py_compile routers/ocr_local.py tasks.py
+.\verify.bat
 rg -n "rapidocr|onnxruntime|opencv-python|LOCAL_OCR_TRIAGE" .env.example AGENTS.md run.bat
 ```
 
-## Quy trinh Claudex — Lam viec voi Codex
+## 5. Claudex workflow
 
 Claudex la quy trinh chuan khi giao task lon: Codex va Codex debate plan, user duyet, Codex implement.
 
@@ -321,7 +388,7 @@ Muc tieu fix vong nay: <ly do goi Codex trong vong nay>
 - Codex chi sua dung tang da duoc Codex khoanh bang bang chung doi chieu; khong tu mo rong sang tang khac neu chua co bang chung moi.
 - Sau khi Codex implement xong, Codex phai tu chay lai vong doi chieu va cap nhat bao cao `match/mismatch/blocked`; khong duoc xem task da xong chi vi "da sua code".
 
-## Lich su chuc nang
+## 6. History / lich su chuc nang
 
 <!-- claudex-history-start -->
 ### cases > OCR tai san
@@ -345,4 +412,15 @@ Muc tieu fix vong nay: <ly do goi Codex trong vong nay>
 - Quyet dinh: `SKILL.md` = trigger, `AGENTS.md` = source of truth, `claudex.md` = relay gate; khong lam lui logic OCR engine
 - Bug con lai: chua co smoke test runtime positive/negative trigger; `claudex.md` co bat nhat menu `[d]` can sua; scope hoi bi keo rong sang `Phase 4 KNOWLEDGE CAPTURE` can tach rieng neu can
 - Cap nhat: 22/04/2026
+### cases > diagram data flow
+**[Mo ta]:** Fix luong du lieu OCR -> staging -> pool -> diagram: du lieu khong con bi mat khi user bam nut xoa, xoa cascade, keo tha that bai, hoac luu ho so bi loi server. Pool luon biet ai dang o dau.
+**[Tech]:**
+- File: `frontend/templates/cases/form.html`, `frontend/static/ReactFlowApp.jsx`
+- Kien truc moi: `window.__CUSTOMER_REGISTRY__` (canonical data) + `window.__CUSTOMER_WORKFLOW__` (state flags: inStaging/inPool/inTree/inDiagram/deleted) thay the cho DOM-as-source-of-truth
+- Adapter hai chieu: `normalizeCustomerRecord`, `mergeCustomerRecord`, `toReactPersonShape`, `toPoolRowShape` - tat ca entry points (OCR, import, search, inline-create) deu upsert qua registry
+- React bridge: `removeWithWorkflow` phat event tra nguoi ve pool khi xoa node, `validateAssignment` la rule duy nhat cho ca preflight va commit
+- localStorage staging luu `{id, snapshot}` thay vi chi ID - restore duoc khi server khong co data
+- `localStorage.removeItem(stagingKey)` da bo khoi native submit path
+- Bug con lai (reviewer flag): import Excel chua auto-refresh pool ngay (chi hien nut Lam moi), `commitAssign()` co the co half-state nho neu setLogicalNodes updater race
+- Cap nhat: 23/04/2026
 <!-- claudex-history-end -->

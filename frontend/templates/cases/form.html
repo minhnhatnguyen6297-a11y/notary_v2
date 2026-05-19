@@ -35,6 +35,8 @@ endif %}
     value="{{ f.get('diagram_payload', '') | e }}">
   <input type="hidden" name="engine_state_json" id="case-engine-state"
     value="{{ f.get('engine_state_json', obj.engine_state_json if obj and obj.engine_state_json else '') | e }}">
+  <input type="hidden" name="case_state_json" id="case-state-json"
+    value="{{ f.get('case_state_json', obj.case_state_json if obj and obj.case_state_json else '') | e }}">
   <div id="case-property-ids-holder"></div>
   <input type="hidden" id="case-id-hidden" value="{{ obj.id if obj else '' }}">
   <style>
@@ -317,18 +319,6 @@ endif %}
       border-radius: 6px;
     }
 
-    .ocr-staged-row[data-state="pending"] {
-
-      border-color: #fbbf24;
-      background: #fffbeb;
-    }
-
-    .ocr-staged-row[data-state="staged"] {
-
-      border-color: #86efac;
-      background: #f0fdf4;
-    }
-
     .ocr-staged-row .form-control,
     .ocr-staged-row .form-select {
 
@@ -364,30 +354,6 @@ endif %}
       padding: 2px 3px;
 
       align-items: center;
-    }
-
-    .draft-row-lifecycle {
-
-      display: inline-flex;
-      align-items: center;
-      height: 22px;
-      padding: 0 6px;
-      border-radius: 999px;
-      font-size: 10px;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-
-    .ocr-staged-row[data-state="pending"] .draft-row-lifecycle {
-
-      color: #92400e;
-      background: #fef3c7;
-    }
-
-    .ocr-staged-row[data-state="staged"] .draft-row-lifecycle {
-
-      color: #166534;
-      background: #dcfce7;
     }
 
     .property-compact .border.rounded {
@@ -2961,7 +2927,7 @@ endif %}
 
         if (typeof window.addToOcrStaging === 'function') {
 
-          const added = window.addToOcrStaging(customer, { source: 'excel' });
+          const added = window.addToOcrStaging(customer, { source: 'excel', skipDuplicateGuard: true });
 
           if (added) addedCount += 1;
 
@@ -5087,9 +5053,22 @@ endif %}
         return null;
       }
     }
+    function readInitialCaseState() {
+      const raw = document.getElementById('case-state-json')?.value || '';
+      if (!raw.trim()) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+      } catch (e) {
+        console.warn('Cannot parse case_state_json', e);
+        return null;
+      }
+    }
     const persistedEngineState = readPersistedEngineState();
+    const initialCaseState = readInitialCaseState();
     const restoredCaseWorkspace = persistedEngineState ? null : readCaseWorkspaceSnapshot();
     window.__INITIAL_ENGINE_STATE__ = persistedEngineState;
+    window.__INITIAL_CASE_STATE__ = initialCaseState;
     window.__RESTORED_CASE_WORKSPACE__ = restoredCaseWorkspace;
     window.__INITIAL_PARTICIPANTS__ = Array.isArray(restoredCaseWorkspace?.treeState?.participants) && restoredCaseWorkspace.treeState.participants.length
 
@@ -5150,6 +5129,7 @@ endif %}
     const warningList = document.getElementById('tree-warnings-list');
     const ownerInput = document.getElementById('case-nguoi-chet');
     const engineStateInput = document.getElementById('case-engine-state');
+    const caseStateInput = document.getElementById('case-state-json');
 
     window.__FAMILY_TREE_STATE__ = window.__FAMILY_TREE_STATE__ || {
 
@@ -5746,7 +5726,9 @@ endif %}
 
       }
 
-      if (window.__CUSTOMER_WORKFLOW__[id]?.deleted && Object.prototype.hasOwnProperty.call(patch, 'inPool') && patch.inPool) {
+      const explicitUndelete = Object.prototype.hasOwnProperty.call(nextPatch, 'deleted') && nextPatch.deleted === false;
+
+      if (window.__CUSTOMER_WORKFLOW__[id]?.deleted && !explicitUndelete && Object.prototype.hasOwnProperty.call(patch, 'inPool') && patch.inPool) {
 
         next.inPool = false;
 
@@ -6214,7 +6196,7 @@ endif %}
 
         if (window.__CUSTOMER_WORKFLOW__[id]?.inDiagram && !nextDiagramIds.has(id)) {
 
-          setCustomerWorkflowState(id, { inDiagram: false });
+          setCustomerWorkflowState(id, { inDiagram: false, inTree: false, inPool: true, deleted: false });
 
         }
 
@@ -6222,7 +6204,7 @@ endif %}
 
       loadPool();
 
-      _syncAllDraftRowStates();
+      if (typeof _syncAllDraftRowStates === 'function') _syncAllDraftRowStates();
 
       renderFamilyTreeWarnings(Array.isArray(detail.warnings) ? detail.warnings : []);
     });
@@ -8444,6 +8426,49 @@ endif %}
       validateTreeWarnings();
     }
 
+    function collectCaseStateSnapshot(latestEngineState = null, treeState = null) {
+      const stage = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'))
+        .map((row) => {
+          const id = String(row.dataset.cid || '').trim();
+          if (!id) return null;
+          const base = toLegacyCustomerShape(resolveCustomerById(id) || { id }) || { id };
+          const snapshot = { ...base, id };
+          row.querySelectorAll('[data-key]').forEach((el) => {
+            snapshot[el.dataset.key] = el.value || '';
+          });
+          return {
+            id: String(snapshot.id || id),
+            ho_ten: snapshot.ho_ten || '',
+            gioi_tinh: snapshot.gioi_tinh || '',
+            ngay_sinh: snapshot.ngay_sinh || '',
+            ngay_chet: snapshot.ngay_chet || '',
+            so_giay_to: snapshot.so_giay_to || '',
+            ngay_cap: snapshot.ngay_cap || snapshot.issue_date || '',
+            noi_cap: snapshot.noi_cap || snapshot.issue_place || '',
+            dia_chi: snapshot.dia_chi || '',
+            place_of_origin: snapshot.place_of_origin || '',
+          };
+        })
+        .filter(Boolean);
+      const assignments = {};
+      const nodes = Array.isArray(latestEngineState?.nodes) ? latestEngineState.nodes : [];
+      nodes.forEach((node) => {
+        const slotId = String(node?.id || '').trim();
+        const personId = String(node?.personId || '').trim();
+        if (slotId && personId) assignments[slotId] = personId;
+      });
+      return {
+        schemaVersion: 1,
+        caseId: String(document.getElementById('case-id-hidden')?.value || '').trim() || null,
+        stage,
+        diagram: {
+          assignments,
+          engineState: latestEngineState || null,
+          updatedAt: treeState?.updatedAt || new Date().toISOString(),
+        },
+      };
+    }
+
     document.getElementById('case-form')?.addEventListener('submit', async (ev) => {
 
       ev.preventDefault();
@@ -8552,18 +8577,6 @@ endif %}
 
       }
 
-      _syncAllDraftRowStates();
-
-      const pendingRows = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row[data-state="pending"]'));
-
-      if (pendingRows.length > 0) {
-
-        const ok = window.confirm(`Có ${pendingRows.length} dòng chưa vào sơ đồ. Nếu tiếp tục lưu, các dòng này sẽ không vào participant của hồ sơ hiện tại. Tiếp tục?`);
-
-        if (!ok) return;
-
-      }
-
       treeState = getFamilyTreeState();
 
       treeParticipants = Array.isArray(treeState?.participants) ? treeState.participants : [];
@@ -8629,6 +8642,9 @@ endif %}
         diagramPayloadInput.value = payload ? JSON.stringify(payload) : '';
 
       }
+      if (caseStateInput) {
+        caseStateInput.value = JSON.stringify(collectCaseStateSnapshot(latestEngineState, treeState));
+      }
 
       saveCaseWorkspaceSnapshot();
 
@@ -8639,301 +8655,6 @@ endif %}
       form.submit();
 
       return;
-
-      let treeState = getFamilyTreeState();
-
-      let treeParticipants = treeState.participants || [];
-
-      const warns = treeParticipants.length ? treeState.warnings : validateTreeWarnings();
-
-      if (warns.length > 0) {
-
-        const ok = window.confirm(`Hồ sơ đang có ${warns.length} cảnh báo đ. Bạn vẫn muốn lưu?`);
-
-        if (!ok) return;
-
-      }
-
-      const sel = document.getElementById('pr-tai-san-select');
-
-      const hidden = document.getElementById('case-tai-san');
-
-      if (sel && hidden && !hidden.value && sel.value) hidden.value = sel.value;
-
-      syncPrimaryPropertySelection();
-
-      // Sync noi_niem_yet từ visible input vào hidden field
-
-      const noiInput = document.getElementById('pr-noi-niem-yet');
-
-      const noiFld = document.getElementById('case-noi-niem-yet');
-
-      if (noiInput && noiFld) noiFld.value = noiInput.value;
-
-      const propertyHolder = document.getElementById('case-property-ids-holder');
-
-      if (propertyHolder) {
-
-        propertyHolder.innerHTML = '';
-
-        collectSelectedPropertyIds().forEach(pid => {
-
-          propertyHolder.insertAdjacentHTML('beforeend', `<input type="hidden" name="property_ids" value="${pid}">`);
-
-        });
-
-      }
-
-      const holder = document.getElementById('participants-hidden');
-
-      holder.innerHTML = '';
-
-
-      if (typeof window.saveParticipantDraftRows === 'function') {
-
-        const saveResult = await window.saveParticipantDraftRows({
-
-          silentSuccess: true,
-
-          skipEmptyWarning: true
-
-        });
-
-        if ((saveResult?.failedCount || 0) > 0) {
-
-          showToast('Con nguoi tham gia chua luu xong, vui long kiem tra lai cac dong dang loi', 'warning');
-
-          return;
-
-        }
-
-      }
-
-      treeState = getFamilyTreeState();
-
-      treeParticipants = treeState.participants || [];
-
-
-      const draftRows = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'));
-
-      const missingCidRow = draftRows.find(row => !String(row.dataset.cid || '').trim());
-
-      if (missingCidRow) {
-
-        showToast('Con dong nguoi tham gia chua co ma du lieu, chua the luu ho so', 'warning');
-
-        missingCidRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-        missingCidRow.querySelector('[data-key="ho_ten"]')?.focus();
-
-        return;
-
-      }
-
-
-      const treeById = new Map(
-
-        treeParticipants
-
-          .filter(p => p && p.id != null && p.id !== '')
-
-          .map(p => [String(p.id), p])
-
-      );
-
-      const owner = treeParticipants.find(p => p.role === 'Owner');
-
-      if (ownerInput) ownerInput.value = owner ? owner.id : '';
-
-
-      const committed = new Set();
-
-      function appendCommittedParticipant(id, role, share, receive, parentId) {
-
-        const pid = String(id || '').trim();
-
-        if (!pid) return;
-
-        const key = `${pid}:${role || 'Khac'}`;
-
-        if (committed.has(key)) return;
-
-        committed.add(key);
-
-        holder.insertAdjacentHTML('beforeend', `
-
-        <input type="hidden" name="participant_id" value="${pid}">
-
-        <input type="hidden" name="participant_role" value="${role || 'Khac'}">
-
-        <input type="hidden" name="participant_share" value="${share || '0'}">
-
-        <input type="hidden" name="participant_receive" value="${receive || '0'}">
-
-        <input type="hidden" name="participant_parent_id" value="${parentId || ''}">
-
-      `);
-
-      }
-
-
-      draftRows.forEach(row => {
-
-        const cid = String(row.dataset.cid || '').trim();
-
-        if (!cid) return;
-
-        const overlay = treeById.get(cid);
-
-        appendCommittedParticipant(
-
-          cid,
-
-          overlay?.role || 'Khac',
-
-          String(overlay?.sharePercent || overlay?.share || '0'),
-
-          overlay?.willReceive ? '1' : '0',
-
-          overlay?.parentId || ''
-
-        );
-
-      });
-
-
-      treeParticipants.forEach(p => {
-
-        appendCommittedParticipant(
-
-          p.id,
-
-          p.role || 'Khac',
-
-          String(p.sharePercent || p.share || '0'),
-
-          p.willReceive ? '1' : '0',
-
-          p.parentId || ''
-
-        );
-
-      });
-
-      if (engineStateInput) {
-        const latestEngineState = window.__FAMILY_TREE_STATE__?.engineState || treeState.engineState || null;
-        engineStateInput.value = latestEngineState ? JSON.stringify(latestEngineState) : '';
-      }
-
-      saveCaseWorkspaceSnapshot();
-
-      ev.target.submit();
-
-      return;
-
-
-      if (treeParticipants.length > 0) {
-
-        const owner = treeParticipants.find(p => p.role === 'Owner');
-
-        if (ownerInput) ownerInput.value = owner ? owner.id : '';
-
-
-        treeParticipants.forEach(p => {
-
-          holder.insertAdjacentHTML('beforeend', `
-
-        <input type="hidden" name="participant_id" value="${p.id}">
-
-        <input type="hidden" name="participant_role" value="${p.role}">
-
-        <input type="hidden" name="participant_share" value="${p.sharePercent || p.share || '0'}">
-
-        <input type="hidden" name="participant_receive" value="${p.willReceive ? '1' : '0'}">
-
-        <input type="hidden" name="participant_parent_id" value="${p.parentId || ''}">
-
-      `);
-
-        });
-
-
-        ev.target.submit();
-
-        return;
-
-      }
-
-
-      function addParticipant(card, role) {
-
-        if (!card) return;
-
-        const id = card.dataset.id;
-
-        const share = card.querySelector('.share-input')?.value || '0';
-
-        const receive = Number(share) > 0 ? '1' : (card.querySelector('.receive-input')?.checked ? '1' : '0');
-
-        holder.insertAdjacentHTML('beforeend', `
-
-        <input type="hidden" name="participant_id" value="${id}">
-
-        <input type="hidden" name="participant_role" value="${role}">
-
-        <input type="hidden" name="participant_share" value="${share}">
-
-        <input type="hidden" name="participant_receive" value="${receive}">
-
-      `);
-
-      }
-
-
-      const roleMap = {
-
-        'Cha': 'Cha',
-
-        'Mẹ': 'Mẹ',
-
-        'Cha_vc': 'Cha_vc',
-
-        'Me_vc': 'Me_vc',
-
-        'Vợ/Chồng': 'Vợ/Chồng',
-
-        'Con': 'Con',
-
-        'Vo_chong_con': 'Con_dau_re',
-
-        'Con_dau_re': 'Con_dau_re',
-
-        'Cháu': 'Cháu',
-
-        'Owner': 'Owner'
-
-      };
-
-
-      const sent = new Set();
-
-      Array.from(document.querySelectorAll('.person-card')).forEach(card => {
-
-        const role = roleMap[card.dataset.role || ''];
-
-        if (!role) return;
-
-        const key = `${card.dataset.id}:${role}`;
-
-        if (sent.has(key)) return;
-
-        sent.add(key);
-
-        addParticipant(card, role);
-
-      });
-
-      ev.target.submit();
     });
     // Load React app
   </script>
@@ -8943,7 +8664,7 @@ endif %}
   <script src="/static/inheritance_engine.js?v=20260430a"></script>
   <script src="/static/diagram_state.js?v=20260511a"></script>
   <script src="/static/diagram_edges.js?v=20260511a"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260511a"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260518a"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
@@ -12648,7 +12369,7 @@ endif %}
         row.className = 'ocr-staged-row';
 
         row.dataset.cid = record.id;
-        row.dataset.state = 'pending';
+        row.dataset.state = 'stage';
 
 
         const escVal = v => (v || '').toString().replace(/"/g, '&quot;');
@@ -12940,10 +12661,7 @@ endif %}
       deleted: false,
 
 
-      inStaging: true,
-
-
-      inPool: false
+      inStaging: true
 
           });
 
@@ -12959,7 +12677,46 @@ endif %}
 
       window.loadStagingFromStorage = loadStagingFromStorage;
 
-      window.loadStagingFromStorage();
+      function hydrateStagingFromCaseState() {
+        const stage = Array.isArray(window.__INITIAL_CASE_STATE__?.stage) ? window.__INITIAL_CASE_STATE__.stage : [];
+        if (!stage.length) return false;
+        const assignedIds = new Set();
+        const assignments = window.__INITIAL_CASE_STATE__?.diagram?.assignments || {};
+        Object.values(assignments).forEach((id) => {
+          const text = String(id || '').trim();
+          if (text) assignedIds.add(text);
+        });
+        const nodes = window.__INITIAL_CASE_STATE__?.diagram?.engineState?.nodes || window.__INITIAL_ENGINE_STATE__?.nodes || [];
+        if (Array.isArray(nodes)) {
+          nodes.forEach((node) => {
+            const text = String(node?.personId || '').trim();
+            if (text) assignedIds.add(text);
+          });
+        }
+        const kept = [];
+        stage.forEach((item) => {
+          const record = toLegacyCustomerShape(upsertCustomerRecord(item));
+          if (!record?.id) return;
+          _addStagingCard(record);
+          const inDiagram = assignedIds.has(String(record.id));
+          setCustomerWorkflowState(record.id, {
+            deleted: false,
+            inStaging: true,
+            inTree: false,
+            inDiagram,
+            inPool: !inDiagram,
+          });
+          kept.push({ id: record.id, snapshot: record });
+        });
+        const storageKey = _stagingKey();
+        if (storageKey) localStorage.setItem(storageKey, JSON.stringify(kept));
+        loadPool();
+        return true;
+      }
+
+      if (!hydrateStagingFromCaseState()) {
+        window.loadStagingFromStorage();
+      }
 
 
       addPersonRowToPool = function (c) {
@@ -13465,19 +13222,9 @@ endif %}
 
         let badge = row.querySelector('.draft-row-lifecycle');
 
-        if (badge) return badge;
+        if (badge) badge.remove();
 
-        const actions = row.querySelector('.row-actions');
-
-        if (!actions) return null;
-
-        badge = document.createElement('span');
-
-        badge.className = 'draft-row-lifecycle';
-
-        actions.prepend(badge);
-
-        return badge;
+        return null;
 
       }
 
@@ -13486,23 +13233,13 @@ endif %}
 
         if (!row) return;
 
-        const normalizedState = state === 'staged' ? 'staged' : 'pending';
+        const normalizedState = 'stage';
 
         row.dataset.state = normalizedState;
 
-        const badge = _ensureDraftLifecycleBadge(row);
+        _ensureDraftLifecycleBadge(row);
 
-        if (badge) {
-
-          badge.textContent = normalizedState === 'staged' ? 'Trong sơ đồ' : 'Chưa vào sơ đồ';
-
-        }
-
-        row.title = normalizedState === 'staged'
-
-          ? 'Dòng này đã có người tương ứng trong sơ đồ và sẽ được lưu cùng hồ sơ.'
-
-          : 'Dòng này chưa có người tương ứng trong sơ đồ. Nếu lưu hồ sơ, dòng này không vào participant của case.';
+        row.removeAttribute('title');
 
       }
 
@@ -13511,23 +13248,7 @@ endif %}
 
         if (!row) return;
 
-        const cid = String(row.dataset.cid || '').trim();
-
-        if (!cid) {
-
-          _setDraftLifecycleState(row, 'pending');
-
-          return;
-
-        }
-
-        const treeState = getFamilyTreeState();
-
-        const participants = Array.isArray(treeState?.participants) ? treeState.participants : [];
-
-        const inDiagram = participants.some((participant) => String(participant?.id || '').trim() === cid);
-
-        _setDraftLifecycleState(row, inDiagram ? 'staged' : 'pending');
+        _setDraftLifecycleState(row, 'stage');
 
       }
 
@@ -13786,7 +13507,7 @@ endif %}
         row.dataset.cid = data?.id || '';
 
         row.dataset.source = options.source || data?.source || (data?.id ? 'existing' : 'manual');
-        row.dataset.state = 'pending';
+        row.dataset.state = 'stage';
 
         row.innerHTML = `
 
@@ -13813,8 +13534,6 @@ endif %}
       <input type="text" class="form-control" value="${_escHtml(data.dia_chi)}" data-key="dia_chi" placeholder="ịa chỉ">
 
       <div class="row-actions">
-
-        <span class="draft-row-lifecycle">Chưa vào sơ đồ</span>
 
         <span class="draft-row-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 

@@ -1,13 +1,21 @@
 import json
+import inspect
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
-from models import Customer, Property
+import database
+from models import Customer, InheritanceCase, Property
 from routers.cases import (
     DiagramPayloadValidationError,
+    _normalize_case_state_json,
     _normalize_diagram_payload,
     _parse_case_diagram_payload,
     _resolve_posted_participants,
     _validate_case_refs,
+    create,
+    edit,
 )
 
 
@@ -25,6 +33,68 @@ def _payload(nodes):
         "updatedAt": "2026-05-11T10:00:00.000Z",
         "nodes": nodes,
     })
+
+
+class CaseStateSchemaTests(unittest.TestCase):
+    def test_inheritance_case_model_declares_case_state_json_column(self):
+        self.assertIn("case_state_json", InheritanceCase.__table__.columns)
+        column = InheritanceCase.__table__.columns["case_state_json"]
+        self.assertEqual(str(column.type).upper(), "TEXT")
+
+    def test_inheritance_cases_schema_migration_adds_case_state_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "legacy.db"
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute(
+                """
+                CREATE TABLE inheritance_cases (
+                    id INTEGER PRIMARY KEY,
+                    nguoi_chet_id INTEGER NOT NULL,
+                    tai_san_id INTEGER NOT NULL,
+                    ngay_lap_ho_so DATE NOT NULL
+                )
+                """
+            )
+            con.commit()
+            con.close()
+
+            original_db_path = database.DB_PATH
+            try:
+                database.DB_PATH = db_path
+                database.migrate_inheritance_cases_schema()
+            finally:
+                database.DB_PATH = original_db_path
+
+            con = sqlite3.connect(db_path)
+            cur = con.cursor()
+            cur.execute("PRAGMA table_info(inheritance_cases)")
+            columns = {row[1] for row in cur.fetchall()}
+            con.close()
+
+        self.assertIn("case_state_json", columns)
+
+
+class CaseStatePayloadTests(unittest.TestCase):
+    def test_create_and_edit_accept_case_state_json_form_field(self):
+        self.assertIn("case_state_json", inspect.signature(create).parameters)
+        self.assertIn("case_state_json", inspect.signature(edit).parameters)
+
+    def test_normalize_case_state_json_accepts_stage_and_diagram(self):
+        raw = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "z3", "ho_ten": "z3"}],
+            "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+        })
+
+        normalized = json.loads(_normalize_case_state_json(raw))
+
+        self.assertEqual(normalized["stage"][0]["ho_ten"], "z3")
+        self.assertEqual(normalized["diagram"]["assignments"], {})
+
+    def test_normalize_case_state_json_rejects_non_object_payload(self):
+        with self.assertRaises(DiagramPayloadValidationError):
+            _normalize_case_state_json("[]")
 
 
 class DiagramPayloadParserTests(unittest.TestCase):

@@ -1207,9 +1207,15 @@ const BrickCard = React.forwardRef(function BrickCard(
 
       {/* Land owner badge */}
       <span
-        style={{ ...S.landBadge(!!node.isLandOwner), cursor: "not-allowed", opacity: node.isLandOwner ? 0.85 : 0.55 }}
-        title="Tính năng đồng chủ sở hữu đang phát triển. Đánh dấu này hiện không ảnh hưởng chia thừa kế, sẽ active sau khi engine refactor đa chủ."
-        onClick={(e) => { e.stopPropagation(); }}
+        style={{ ...S.landBadge(!!node.isLandOwner), opacity: isOccupied ? 1 : 0.35 }}
+        title="Đánh dấu chủ sở hữu tài sản"
+        draggable={false}
+        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!isOccupied) return;
+          onToggleLandOwner?.(node.id);
+        }}
       >★</span>
 
       {/* Remove button */}
@@ -2083,10 +2089,9 @@ function FamilyTreeApp() {
   const removeWithWorkflow = useCallback((nodeId) => {
     const affectedPeople = collectRemovedPeople(logicalNodesRef.current, nodeId);
     onRemove(nodeId);
-    // Chỉ cập nhật inDiagram — HTML tree là projection riêng biệt, không được tự xóa inTree từ đây
     bridgeWorkflowUpdates(affectedPeople.map((person) => ({
       id: person.id,
-      patch: { inDiagram: false, inPool: true },
+      patch: { inDiagram: false, inTree: false, inPool: true, deleted: false },
     })));
   }, [onRemove]);
 
