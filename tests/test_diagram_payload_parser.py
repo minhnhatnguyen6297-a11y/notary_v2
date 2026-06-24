@@ -3,12 +3,19 @@ import inspect
 import sqlite3
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from fastapi.responses import JSONResponse
 
 import database
 from models import Customer, InheritanceCase, Property
 from routers.cases import (
     DiagramPayloadValidationError,
+    _derive_case_state_json_from_participants,
+    _merge_case_state_diagram,
     _normalize_case_state_json,
     _normalize_diagram_payload,
     _parse_case_diagram_payload,
@@ -16,6 +23,8 @@ from routers.cases import (
     _validate_case_refs,
     create,
     edit,
+    update_diagram,
+    update_stage,
 )
 
 
@@ -25,6 +34,10 @@ def _customer(cid: int, name: str) -> Customer:
 
 def _property(pid: int) -> Property:
     return Property(id=pid, so_serial=f"SER-{pid}", dia_chi=f"Dia chi {pid}")
+
+
+def _participant(customer: Customer):
+    return type("Participant", (), {"customer": customer, "customer_id": customer.id})()
 
 
 def _payload(nodes):
@@ -80,6 +93,22 @@ class CaseStatePayloadTests(unittest.TestCase):
         self.assertIn("case_state_json", inspect.signature(create).parameters)
         self.assertIn("case_state_json", inspect.signature(edit).parameters)
 
+    def test_stage_update_accepts_case_state_json_form_field(self):
+        self.assertIn("case_state_json", inspect.signature(update_stage).parameters)
+
+    def test_diagram_update_accepts_diagram_only_form_fields(self):
+        signature = inspect.signature(update_diagram)
+        self.assertIn("case_state_json", signature.parameters)
+        self.assertIn("diagram_payload", signature.parameters)
+        self.assertIn("engine_state_json", signature.parameters)
+
+    def test_edit_form_derives_case_state_for_legacy_cases(self):
+        from routers.cases import edit_form
+
+        source = inspect.getsource(edit_form)
+
+        self.assertIn("_derive_case_state_json_from_participants(participants)", source)
+
     def test_normalize_case_state_json_accepts_stage_and_diagram(self):
         raw = json.dumps({
             "schemaVersion": 1,
@@ -95,6 +124,2819 @@ class CaseStatePayloadTests(unittest.TestCase):
     def test_normalize_case_state_json_rejects_non_object_payload(self):
         with self.assertRaises(DiagramPayloadValidationError):
             _normalize_case_state_json("[]")
+
+    def test_normalize_case_state_json_rejects_duplicate_stage_ids(self):
+        raw = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10"}, {"id": "10"}],
+            "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+        })
+
+        with self.assertRaises(DiagramPayloadValidationError) as exc:
+            _normalize_case_state_json(raw)
+
+        self.assertIn("trung", str(exc.exception))
+
+    def test_normalize_case_state_json_rejects_diagram_refs_outside_stage(self):
+        raw = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Kept"}],
+            "diagram": {
+                "assignments": {"slot_child": "99"},
+                "engineState": {"nodes": [{"id": "child", "personId": "99"}]},
+            },
+        })
+
+        with self.assertRaises(DiagramPayloadValidationError) as exc:
+            _normalize_case_state_json(raw)
+
+        self.assertIn("khong co trong stage", str(exc.exception))
+
+    def test_normalize_case_state_json_prunes_orphan_edges_outside_engine_nodes(self):
+        raw = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {"id": "child_2", "personId": "2"},
+                    ],
+                    "edges": [
+                        {"id": "keep-edge", "source": "child_2", "target": "child_2"},
+                        {"id": "drop-edge", "source": "ghost_missing", "target": "child_2"},
+                    ],
+                },
+            },
+        })
+
+        normalized = json.loads(_normalize_case_state_json(raw))
+
+        self.assertEqual(
+            [edge["id"] for edge in normalized["diagram"]["engineState"]["edges"]],
+            ["keep-edge"],
+        )
+
+    def test_normalize_case_state_json_preserves_supplemental_engine_state_fields(self):
+        raw = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {"id": "child_2", "personId": "2"},
+                    ],
+                    "edges": [
+                        {"id": "keep-edge", "source": "child_2", "target": "child_2"},
+                    ],
+                    "allocations": {"2": {"displayPercent": "50.00"}},
+                    "warnings": [{"code": "demo_warning"}],
+                    "trace": [{"type": "flow", "from": "1", "to": "2"}],
+                    "viewport": {"x": 120.5, "y": -32.25, "zoom": 0.85},
+                    "layoutMeta": {
+                        "laneOffsets": {"children": 240},
+                        "collapsedBranches": ["child_2"],
+                    },
+                },
+            },
+        })
+
+        normalized = json.loads(_normalize_case_state_json(raw))
+        normalized_engine_state = normalized["diagram"]["engineState"]
+
+        self.assertEqual(normalized_engine_state["allocations"]["2"]["displayPercent"], "50.00")
+        self.assertEqual(normalized_engine_state["warnings"][0]["code"], "demo_warning")
+        self.assertEqual(normalized_engine_state["trace"][0]["to"], "2")
+        self.assertEqual(normalized_engine_state["viewport"]["zoom"], 0.85)
+        self.assertEqual(normalized_engine_state["layoutMeta"]["laneOffsets"]["children"], 240)
+        self.assertEqual(normalized_engine_state["layoutMeta"]["collapsedBranches"][0], "child_2")
+
+    def test_merge_case_state_diagram_preserves_existing_stage_rows(self):
+        existing = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Stage source"}],
+            "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+        })
+        submitted = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Draft should not overwrite"}],
+            "diagram": {
+                "assignments": {"owner": "10"},
+                "engineState": {"nodes": [{"id": "owner", "personId": "10"}]},
+            },
+        })
+
+        merged = json.loads(_merge_case_state_diagram(existing, submitted))
+
+        self.assertEqual(merged["stage"][0]["ho_ten"], "Stage source")
+        self.assertEqual(merged["diagram"]["assignments"], {"owner": "10"})
+
+    def test_merge_case_state_diagram_rejects_refs_outside_preserved_stage(self):
+        existing = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Stage source"}],
+            "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+        })
+        submitted = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "99", "ho_ten": "Submitted only"}],
+            "diagram": {
+                "assignments": {"owner": "99"},
+                "engineState": {"nodes": [{"id": "owner", "personId": "99"}]},
+            },
+        })
+
+        with self.assertRaises(DiagramPayloadValidationError):
+            _merge_case_state_diagram(existing, submitted)
+
+    def test_merge_case_state_diagram_preserves_submitted_engine_state_supplemental_fields(self):
+        existing = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Stage source"}],
+            "diagram": {
+                "assignments": {"owner": "10"},
+                "engineState": {
+                    "nodes": [{"id": "owner", "personId": "10"}],
+                    "warnings": [{"code": "old_warning"}],
+                },
+            },
+        })
+        submitted = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "10", "ho_ten": "Draft should not overwrite"}],
+            "diagram": {
+                "assignments": {"owner": "10"},
+                "engineState": {
+                    "nodes": [{"id": "owner", "personId": "10"}],
+                    "allocations": {"10": {"displayPercent": "100.00"}},
+                    "warnings": [{"code": "new_warning"}],
+                    "trace": [{"from": "owner", "to": "owner"}],
+                    "viewport": {"x": 12, "y": 24, "zoom": 0.9},
+                    "layoutMeta": {"laneOffsets": {"children": 220}},
+                },
+            },
+        })
+
+        merged = json.loads(_merge_case_state_diagram(existing, submitted))
+        merged_engine_state = merged["diagram"]["engineState"]
+
+        self.assertEqual(merged["stage"][0]["ho_ten"], "Stage source")
+        self.assertEqual(merged["diagram"]["assignments"], {"owner": "10"})
+        self.assertEqual(merged_engine_state["allocations"]["10"]["displayPercent"], "100.00")
+        self.assertEqual(merged_engine_state["warnings"][0]["code"], "new_warning")
+        self.assertEqual(merged_engine_state["trace"][0]["to"], "owner")
+        self.assertEqual(merged_engine_state["viewport"]["zoom"], 0.9)
+        self.assertEqual(merged_engine_state["layoutMeta"]["laneOffsets"]["children"], 220)
+
+    def test_update_diagram_prunes_payload_people_outside_stage(self):
+        case = SimpleNamespace(
+            id=77,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [{"id": "1", "ho_ten": "Nguoi chet"}],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(99, "Nguoi lech stage")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [{"id": "1", "ho_ten": "Draft stale"}],
+            "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+        })
+        raw_diagram_payload = _payload([
+            {"id": "child_99", "kind": "person", "role": "Con", "relationType": "child", "personId": "99"},
+        ])
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=77,
+                case_state_json=submitted_case_state,
+                diagram_payload=raw_diagram_payload,
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 77)
+        self.assertEqual(captured["participant_ids"], [])
+        self.assertEqual(json.loads(case.case_state_json)["stage"], [{"id": "1", "ho_ten": "Nguoi chet"}])
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"], [])
+        self.assertEqual(json.loads(result["diagram_payload"])["nodes"], [])
+
+    def test_update_diagram_prefers_case_state_engine_state_over_stale_diagram_payload(self):
+        case = SimpleNamespace(
+            id=88,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Con hop le"),
+            _customer(99, "Nguoi stale"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {"id": "child_2", "kind": "person", "role": "Con", "relationType": "child", "personId": "2"},
+                    ],
+                },
+                "updatedAt": "2026-06-22T10:00:00.000Z",
+            },
+        })
+        raw_diagram_payload = _payload([
+            {"id": "child_99", "kind": "person", "role": "Con", "relationType": "child", "personId": "99"},
+        ])
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=88,
+                case_state_json=submitted_case_state,
+                diagram_payload=raw_diagram_payload,
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 88)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"][0]["personId"], "2")
+        self.assertEqual(json.loads(result["diagram_payload"])["nodes"][0]["personId"], "2")
+
+    def test_update_diagram_prefers_case_state_engine_state_over_stale_engine_state_json(self):
+        case = SimpleNamespace(
+            id=88_1,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Con hop le"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_fresh": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_fresh",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T02:00:00.000Z",
+            },
+        })
+        stale_engine_state_json = json.dumps({
+            "version": 2,
+            "updatedAt": "2026-06-01T00:00:00.000Z",
+            "nodes": [
+                {
+                    "id": "child_stale",
+                    "kind": "person",
+                    "role": "Con",
+                    "relationType": "child",
+                    "personId": "2",
+                    "parentSlotId": "owner",
+                    "sourceId": "owner",
+                    "familyGroupId": "ownerSpouse",
+                },
+            ],
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=881,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json=stale_engine_state_json,
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_engine_state = json.loads(case.engine_state_json)
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 881)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertEqual(saved_case_state["diagram"]["updatedAt"], "2026-06-23T02:00:00.000Z")
+        self.assertEqual(saved_case_state["diagram"]["engineState"]["updatedAt"], "2026-06-23T02:00:00.000Z")
+        self.assertEqual(saved_case_state["diagram"]["engineState"]["nodes"][0]["id"], "child_fresh")
+        self.assertEqual(saved_engine_state["updatedAt"], "2026-06-23T02:00:00.000Z")
+        self.assertEqual(saved_engine_state["nodes"][0]["id"], "child_fresh")
+        self.assertEqual(json.loads(result["diagram_payload"])["updatedAt"], "2026-06-23T02:00:00.000Z")
+        self.assertEqual(json.loads(result["diagram_payload"])["nodes"][0]["id"], "child_fresh")
+
+    def test_update_diagram_prunes_broken_case_state_engine_nodes_before_save(self):
+        case = SimpleNamespace(
+            id=89,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Chau hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Chau hop le"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Chau hop le"},
+            ],
+            "diagram": {
+                "assignments": {"grandchild_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "grandchild_2",
+                            "kind": "person",
+                            "role": "Chau",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "99",
+                            "parentSlotId": "ghost_99",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T11:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=89,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 89)
+        self.assertEqual(captured["participant_ids"], [])
+        self.assertEqual(saved_case_state["diagram"]["assignments"], {})
+        self.assertEqual(saved_case_state["diagram"]["engineState"]["nodes"], [])
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"], [])
+
+    def test_update_diagram_does_not_keep_hidden_node_in_assignments(self):
+        case = SimpleNamespace(
+            id=90,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con an"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con an")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con an"},
+            ],
+            "diagram": {
+                "assignments": {"child_hidden": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_hidden",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "hidden": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T12:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=90,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 90)
+        self.assertEqual(captured["participant_ids"], [])
+        self.assertEqual(saved_case_state["diagram"]["assignments"], {})
+        self.assertTrue(saved_case_state["diagram"]["engineState"]["nodes"][0]["hidden"])
+
+    def test_update_diagram_drops_stale_assignment_for_empty_slot(self):
+        case = SimpleNamespace(
+            id=90_1,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Vo/chong trong stage"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Vo/chong trong stage")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Vo/chong trong stage"},
+            ],
+            "diagram": {
+                "assignments": {"spouse": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "spouse",
+                            "kind": "person",
+                            "role": "Vợ/Chồng",
+                            "relationType": "spouse",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T02:30:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=901,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(saved_assignments, {"owner": "1"})
+        self.assertEqual(saved_nodes[1]["id"], "spouse")
+        self.assertIsNone(saved_nodes[1].get("personId"))
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"][1]["id"], "spouse")
+
+    def test_update_diagram_ignores_ghost_node_with_person_id(self):
+        case = SimpleNamespace(
+            id=91,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi dang o ghost"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Nguoi dang o ghost")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi dang o ghost"},
+            ],
+            "diagram": {
+                "assignments": {"ghost_sibling_owner": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "ghost_sibling_owner",
+                            "kind": "ghost",
+                            "role": "Anh/Chị/Em",
+                            "relationType": "ghostSibling",
+                            "personId": "2",
+                            "ghostAction": "addSibling",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T13:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=91,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 91)
+        self.assertEqual(captured["participant_ids"], [])
+        self.assertEqual(saved_case_state["diagram"]["assignments"], {})
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"], [])
+
+    def test_update_diagram_prunes_duplicate_active_person_nodes(self):
+        case = SimpleNamespace(
+            id=92,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi bi duplicate"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Nguoi bi duplicate")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi bi duplicate"},
+            ],
+            "diagram": {
+                "assignments": {
+                    "child_2": "2",
+                    "grandchild_dup": "2",
+                },
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                        },
+                        {
+                            "id": "grandchild_dup",
+                            "kind": "person",
+                            "role": "Cháu",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "2",
+                            "parentSlotId": "child_2",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T14:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=92,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        self.assertNotIsInstance(result, JSONResponse)
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 92)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertEqual(saved_case_state["diagram"]["assignments"], {"child_2": "2"})
+        self.assertEqual(
+            [node["id"] for node in saved_case_state["diagram"]["engineState"]["nodes"]],
+            ["child_2"],
+        )
+
+    def test_update_diagram_prefers_root_tree_node_over_later_branch_duplicate(self):
+        case = SimpleNamespace(
+            id=93,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi can giu node goc"},
+                    {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Nguoi can giu node goc"),
+            _customer(3, "Nguoi neo nhanh"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi can giu node goc"},
+                {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+            ],
+            "diagram": {
+                "assignments": {
+                    "child_anchor": "3",
+                    "grandchild_dup": "2",
+                    "child_2": "2",
+                },
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "3",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                        {
+                            "id": "grandchild_dup",
+                            "kind": "person",
+                            "role": "Cháu",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "3",
+                            "parentSlotId": "child_anchor",
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T15:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=93,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 93)
+        self.assertEqual(captured["participant_ids"], [3, 2])
+        self.assertEqual(saved_case_state["diagram"]["assignments"], {"child_anchor": "3", "child_2": "2"})
+        self.assertEqual(
+            [node["id"] for node in saved_case_state["diagram"]["engineState"]["nodes"]],
+            ["child_anchor", "child_2"],
+        )
+
+    def test_update_diagram_preserves_flow_from_on_reused_node(self):
+        case = SimpleNamespace(
+            id=94,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi duoc reuse"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Nguoi duoc reuse")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi duoc reuse"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "flowFrom": ["owner", "spouse_mother"],
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T16:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=94,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 94)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertEqual(saved_case_state["diagram"]["engineState"]["nodes"][0]["flowFrom"], ["owner", "spouse_mother"])
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"][0]["flowFrom"], ["owner", "spouse_mother"])
+
+    def test_update_diagram_merges_flow_from_into_kept_canonical_duplicate_node(self):
+        case = SimpleNamespace(
+            id=95,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi duoc giu node canonical"},
+                    {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Nguoi duoc giu node canonical"),
+            _customer(3, "Nguoi neo nhanh"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi duoc giu node canonical"},
+                {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+            ],
+            "diagram": {
+                "assignments": {
+                    "child_anchor": "3",
+                    "grandchild_dup": "2",
+                    "child_2": "2",
+                },
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "3",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                        {
+                            "id": "grandchild_dup",
+                            "kind": "person",
+                            "role": "ChÃ¡u",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "3",
+                            "parentSlotId": "child_anchor",
+                            "flowFrom": ["child_anchor", "spouse_mother"],
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "flowFrom": ["owner"],
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T17:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=95,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 95)
+        self.assertEqual(captured["participant_ids"], [3, 2])
+        self.assertEqual(
+            [node["id"] for node in saved_case_state["diagram"]["engineState"]["nodes"]],
+            ["child_anchor", "child_2"],
+        )
+        self.assertEqual(
+            saved_case_state["diagram"]["engineState"]["nodes"][1]["flowFrom"],
+            ["owner", "child_anchor", "spouse_mother"],
+        )
+        self.assertEqual(
+            json.loads(case.engine_state_json)["nodes"][1]["flowFrom"],
+            ["owner", "child_anchor", "spouse_mother"],
+        )
+
+    def test_update_diagram_prunes_empty_slot_attached_to_removed_duplicate_branch(self):
+        case = SimpleNamespace(
+            id=95_1,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi bi duplicate"},
+                    {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Nguoi bi duplicate"),
+            _customer(3, "Nguoi neo nhanh"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi bi duplicate"},
+                {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+            ],
+            "diagram": {
+                "assignments": {
+                    "child_anchor": "3",
+                    "grandchild_dup": "2",
+                    "child_2": "2",
+                },
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "3",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "grandchild_dup",
+                            "kind": "person",
+                            "role": "Chau",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "3",
+                            "parentSlotId": "child_anchor",
+                            "sourceId": "child_anchor",
+                            "familyGroupId": "branch-3",
+                            "bucket": 4,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "branch_spouse_orphan",
+                            "kind": "person",
+                            "role": "Con_dau_re",
+                            "relationType": "branchSpouse",
+                            "parentPersonId": "2",
+                            "parentSlotId": "grandchild_dup",
+                            "sourceId": "grandchild_dup",
+                            "familyGroupId": "branch-3",
+                            "bucket": 4,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "id": "orphan-edge",
+                            "source": "child_anchor",
+                            "target": "branch_spouse_orphan",
+                            "kind": "kinship",
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T03:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=95_1,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        saved_edges = saved_case_state["diagram"]["engineState"]["edges"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 95_1)
+        self.assertEqual(captured["participant_ids"], [3, 2])
+        self.assertEqual(saved_assignments, {"child_anchor": "3", "child_2": "2"})
+        self.assertEqual(saved_node_ids, ["child_anchor", "child_2"])
+        self.assertNotIn("grandchild_dup", saved_node_ids)
+        self.assertNotIn("branch_spouse_orphan", saved_node_ids)
+        self.assertEqual(saved_edges, [])
+        self.assertNotIn(
+            "branch_spouse_orphan",
+            [node["id"] for node in json.loads(case.engine_state_json)["nodes"]],
+        )
+        self.assertEqual(json.loads(case.engine_state_json)["edges"], [])
+        self.assertEqual(json.loads(result["diagram_payload"])["edges"], [])
+
+    def test_update_diagram_preserves_valid_edges_and_prunes_edges_to_removed_nodes(self):
+        case = SimpleNamespace(
+            id=96,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Nguoi duoc giu node canonical"},
+                    {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [
+            _customer(1, "Nguoi chet"),
+            _customer(2, "Nguoi duoc giu node canonical"),
+            _customer(3, "Nguoi neo nhanh"),
+        ]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Nguoi duoc giu node canonical"},
+                {"id": "3", "ho_ten": "Nguoi neo nhanh"},
+            ],
+            "diagram": {
+                "assignments": {
+                    "child_anchor": "3",
+                    "grandchild_dup": "2",
+                    "child_2": "2",
+                },
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "3",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                        {
+                            "id": "grandchild_dup",
+                            "kind": "person",
+                            "role": "ChÃ¡u",
+                            "relationType": "grandchild",
+                            "personId": "2",
+                            "parentPersonId": "3",
+                            "parentSlotId": "child_anchor",
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "id": "keep-edge",
+                            "source": "child_anchor",
+                            "target": "child_2",
+                            "kind": "kinship",
+                            "label": "Nhanh hop le",
+                            "markerEnd": {"type": "arrowclosed"},
+                            "style": {"strokeWidth": 2},
+                        },
+                        {"id": "drop-edge", "source": "child_anchor", "target": "grandchild_dup", "kind": "kinship"},
+                    ],
+                },
+                "updatedAt": "2026-06-22T18:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=96,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_edges = saved_case_state["diagram"]["engineState"]["edges"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 96)
+        self.assertEqual(captured["participant_ids"], [3, 2])
+        self.assertEqual(len(saved_edges), 1)
+        self.assertEqual(saved_edges[0]["id"], "keep-edge")
+        self.assertEqual(saved_edges[0]["label"], "Nhanh hop le")
+        self.assertEqual(saved_edges[0]["markerEnd"]["type"], "arrowclosed")
+        self.assertEqual(saved_edges[0]["style"]["strokeWidth"], 2)
+        self.assertEqual(json.loads(case.engine_state_json)["edges"][0]["id"], "keep-edge")
+        self.assertEqual(json.loads(case.engine_state_json)["edges"][0]["label"], "Nhanh hop le")
+        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["id"], "keep-edge")
+        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["label"], "Nhanh hop le")
+        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["markerEnd"]["type"], "arrowclosed")
+        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["style"]["strokeWidth"], 2)
+
+    def test_update_diagram_preserves_engine_state_allocations_warnings_and_trace(self):
+        case = SimpleNamespace(
+            id=97,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con hop le")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                    ],
+                    "allocations": {
+                        "2": {"baseShare": "1/2", "displayPercent": "50.00"},
+                    },
+                    "warnings": [
+                        {"code": "demo_warning", "message": "Warning can giu lai"},
+                    ],
+                    "trace": [
+                        {"type": "flow", "from": "1", "to": "2", "fraction": "1/2"},
+                    ],
+                },
+                "updatedAt": "2026-06-22T19:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=97,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_engine_state = saved_case_state["diagram"]["engineState"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 97)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertIn("allocations", saved_engine_state)
+        self.assertIn("warnings", saved_engine_state)
+        self.assertIn("trace", saved_engine_state)
+        self.assertEqual(saved_engine_state["allocations"]["2"]["baseShare"], "1/2")
+        self.assertEqual(saved_engine_state["warnings"][0]["code"], "demo_warning")
+        self.assertEqual(saved_engine_state["trace"][0]["fraction"], "1/2")
+        self.assertEqual(json.loads(case.engine_state_json)["trace"][0]["to"], "2")
+        self.assertEqual(json.loads(result["diagram_payload"])["allocations"]["2"]["baseShare"], "1/2")
+        self.assertEqual(json.loads(result["diagram_payload"])["warnings"][0]["code"], "demo_warning")
+        self.assertEqual(json.loads(result["diagram_payload"])["trace"][0]["to"], "2")
+
+    def test_update_diagram_preserves_supplemental_render_metadata(self):
+        case = SimpleNamespace(
+            id=97_1,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con hop le")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                        },
+                    ],
+                    "viewport": {"x": 120.5, "y": -32.25, "zoom": 0.85},
+                    "layoutMeta": {
+                        "laneOffsets": {"children": 240},
+                        "collapsedBranches": ["child_2"],
+                    },
+                },
+                "updatedAt": "2026-06-23T01:30:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=971,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_engine_state = saved_case_state["diagram"]["engineState"]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("viewport", saved_engine_state)
+        self.assertIn("layoutMeta", saved_engine_state)
+        self.assertEqual(saved_engine_state["viewport"]["zoom"], 0.85)
+        self.assertEqual(saved_engine_state["layoutMeta"]["laneOffsets"]["children"], 240)
+        self.assertEqual(saved_engine_state["layoutMeta"]["collapsedBranches"][0], "child_2")
+        self.assertEqual(json.loads(case.engine_state_json)["viewport"]["x"], 120.5)
+        self.assertEqual(json.loads(result["diagram_payload"])["viewport"]["zoom"], 0.85)
+        self.assertEqual(json.loads(result["diagram_payload"])["layoutMeta"]["laneOffsets"]["children"], 240)
+        self.assertEqual(json.loads(result["diagram_payload"])["layoutMeta"]["collapsedBranches"][0], "child_2")
+
+    def test_update_diagram_preserves_empty_structural_slots_without_assigning_them(self):
+        case = SimpleNamespace(
+            id=98,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con hop le")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "mother",
+                            "kind": "person",
+                            "role": "Mẹ",
+                            "relationType": "parent",
+                            "bucket": 0,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 2,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T20:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+        captured = {}
+
+        def _capture_replace(_db, case_id, participants):
+            captured["case_id"] = case_id
+            captured["participant_ids"] = [p.customer_id for p in participants]
+
+        with patch("routers.cases._replace_case_participants", _capture_replace):
+            result = update_diagram(
+                cid=98,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_engine_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(captured["case_id"], 98)
+        self.assertEqual(captured["participant_ids"], [2])
+        self.assertEqual(
+            [node["id"] for node in saved_engine_nodes],
+            ["owner", "mother", "child_2"],
+        )
+        self.assertNotIn("mother", saved_assignments)
+        self.assertEqual(saved_assignments["child_2"], "2")
+        self.assertEqual(saved_engine_nodes[1].get("personId"), None)
+        self.assertEqual(json.loads(case.engine_state_json)["nodes"][1]["id"], "mother")
+
+    def test_update_diagram_preserves_bucket_allows_share_and_removable_on_saved_nodes(self):
+        case = SimpleNamespace(
+            id=99,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con hop le")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "mother",
+                            "kind": "person",
+                            "role": "Mẹ",
+                            "relationType": "parent",
+                            "bucket": 0,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 2,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T21:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=99,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_nodes = json.loads(result["case_state_json"])["diagram"]["engineState"]["nodes"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(saved_nodes[0]["id"], "mother")
+        self.assertEqual(saved_nodes[0]["bucket"], 0)
+        self.assertTrue(saved_nodes[0]["allowsShare"])
+        self.assertFalse(saved_nodes[0]["removable"])
+        self.assertEqual(saved_nodes[1]["id"], "child_2")
+        self.assertEqual(saved_nodes[1]["bucket"], 2)
+        self.assertTrue(saved_nodes[1]["allowsShare"])
+        self.assertTrue(saved_nodes[1]["removable"])
+
+    def test_update_diagram_preserves_empty_child_slot_with_owner_parent_link(self):
+        case = SimpleNamespace(
+            id=100,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con hop le"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con hop le")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con hop le"},
+            ],
+            "diagram": {
+                "assignments": {"child_2": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "child_empty",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 2,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "child_2",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "sourceId": "owner",
+                            "familyGroupId": "ownerSpouse",
+                            "bucket": 2,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T22:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=100,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        self.assertTrue(fake_db.committed)
+        self.assertEqual(
+            [node["id"] for node in saved_nodes],
+            ["owner", "child_empty", "child_2"],
+        )
+        self.assertEqual(saved_nodes[1]["parentSlotId"], "owner")
+        self.assertEqual(saved_nodes[1]["sourceId"], "owner")
+        self.assertNotIn("child_empty", saved_assignments)
+        self.assertEqual(saved_assignments["child_2"], "2")
+
+    def test_update_diagram_preserves_empty_sibling_slot_with_live_parent_person(self):
+        case = SimpleNamespace(
+            id=101,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "3", "ho_ten": "Cha ruot"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(3, "Cha ruot")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "3", "ho_ten": "Cha ruot"},
+            ],
+            "diagram": {
+                "assignments": {"father": "3"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "father",
+                            "kind": "person",
+                            "role": "Cha",
+                            "relationType": "parent",
+                            "personId": "3",
+                            "bucket": 0,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "sibling_empty",
+                            "kind": "person",
+                            "role": "Anh/Chị/Em",
+                            "relationType": "sibling",
+                            "parentSlotId": "father",
+                            "parentPersonId": "3",
+                            "sourceId": "father",
+                            "familyGroupId": "birthParents",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T23:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=101,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("father", saved_node_ids)
+        self.assertIn("sibling_empty", saved_node_ids)
+        sibling_node = next(node for node in saved_nodes if node["id"] == "sibling_empty")
+        self.assertEqual(sibling_node["parentSlotId"], "father")
+        self.assertEqual(sibling_node["parentPersonId"], "3")
+        self.assertEqual(sibling_node["sourceId"], "father")
+        self.assertNotIn("sibling_empty", saved_assignments)
+        self.assertEqual(saved_assignments["father"], "3")
+
+    def test_update_diagram_preserves_empty_grandchild_slot_with_live_parent_branch(self):
+        case = SimpleNamespace(
+            id=102,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con ruot"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con ruot")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con ruot"},
+            ],
+            "diagram": {
+                "assignments": {"child_anchor": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "parentPersonId": "1",
+                            "sourceId": "owner",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "grandchild_empty",
+                            "kind": "person",
+                            "role": "Cháu",
+                            "relationType": "grandchild",
+                            "parentSlotId": "child_anchor",
+                            "parentPersonId": "2",
+                            "sourceId": "child_anchor",
+                            "familyGroupId": "branch-2",
+                            "bucket": 4,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-22T23:30:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=102,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("child_anchor", saved_node_ids)
+        self.assertIn("grandchild_empty", saved_node_ids)
+        grandchild_node = next(node for node in saved_nodes if node["id"] == "grandchild_empty")
+        self.assertEqual(grandchild_node["parentSlotId"], "child_anchor")
+        self.assertEqual(grandchild_node["parentPersonId"], "2")
+        self.assertEqual(grandchild_node["sourceId"], "child_anchor")
+        self.assertEqual(grandchild_node["bucket"], 4)
+        self.assertNotIn("grandchild_empty", saved_assignments)
+        self.assertEqual(saved_assignments["child_anchor"], "2")
+
+    def test_update_diagram_preserves_empty_branch_spouse_slot_with_live_parent_branch(self):
+        case = SimpleNamespace(
+            id=103,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "2", "ho_ten": "Con ruot"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(2, "Con ruot")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "2", "ho_ten": "Con ruot"},
+            ],
+            "diagram": {
+                "assignments": {"child_anchor": "2"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "child_anchor",
+                            "kind": "person",
+                            "role": "Con",
+                            "relationType": "child",
+                            "personId": "2",
+                            "parentSlotId": "owner",
+                            "parentPersonId": "1",
+                            "sourceId": "owner",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                        {
+                            "id": "branch_spouse_empty",
+                            "kind": "person",
+                            "role": "Con_dau_re",
+                            "relationType": "branchSpouse",
+                            "parentSlotId": "child_anchor",
+                            "parentPersonId": "2",
+                            "sourceId": "child_anchor",
+                            "familyGroupId": "branch-2",
+                            "bucket": 4,
+                            "allowsShare": True,
+                            "removable": True,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T00:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=103,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("child_anchor", saved_node_ids)
+        self.assertIn("branch_spouse_empty", saved_node_ids)
+        branch_spouse_node = next(node for node in saved_nodes if node["id"] == "branch_spouse_empty")
+        self.assertEqual(branch_spouse_node["parentSlotId"], "child_anchor")
+        self.assertEqual(branch_spouse_node["parentPersonId"], "2")
+        self.assertEqual(branch_spouse_node["sourceId"], "child_anchor")
+        self.assertEqual(branch_spouse_node["bucket"], 4)
+        self.assertNotIn("branch_spouse_empty", saved_assignments)
+        self.assertEqual(saved_assignments["child_anchor"], "2")
+
+    def test_update_diagram_preserves_empty_spouse_parent_slot_without_assignment(self):
+        case = SimpleNamespace(
+            id=104,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                    {"id": "5", "ho_ten": "Vo chong"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet"), _customer(5, "Vo chong")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+                {"id": "5", "ho_ten": "Vo chong"},
+            ],
+            "diagram": {
+                "assignments": {"spouse": "5"},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "spouse",
+                            "kind": "person",
+                            "role": "Vợ/Chồng",
+                            "relationType": "spouse",
+                            "personId": "5",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "spouse_father",
+                            "kind": "person",
+                            "role": "Cha_vc",
+                            "relationType": "spouseParent",
+                            "sourceId": "spouse",
+                            "familyGroupId": "spouseParents",
+                            "bucket": 0,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T00:30:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=104,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("spouse", saved_node_ids)
+        self.assertIn("spouse_father", saved_node_ids)
+        spouse_parent_node = next(node for node in saved_nodes if node["id"] == "spouse_father")
+        self.assertEqual(spouse_parent_node["relationType"], "spouseParent")
+        self.assertEqual(spouse_parent_node["sourceId"], "spouse")
+        self.assertEqual(spouse_parent_node["familyGroupId"], "spouseParents")
+        self.assertEqual(spouse_parent_node["bucket"], 0)
+        self.assertFalse(spouse_parent_node["removable"])
+        self.assertNotIn("spouse_father", saved_assignments)
+        self.assertEqual(saved_assignments["spouse"], "5")
+
+    def test_update_diagram_preserves_empty_spouse_slot_without_assignment(self):
+        case = SimpleNamespace(
+            id=105,
+            is_locked=False,
+            nguoi_chet_id=1,
+            case_state_json=json.dumps({
+                "schemaVersion": 1,
+                "stage": [
+                    {"id": "1", "ho_ten": "Nguoi chet"},
+                ],
+                "diagram": {"assignments": {}, "engineState": {"nodes": []}},
+            }),
+            engine_state_json=None,
+        )
+        customers = [_customer(1, "Nguoi chet")]
+        submitted_case_state = json.dumps({
+            "schemaVersion": 1,
+            "stage": [
+                {"id": "1", "ho_ten": "Nguoi chet"},
+            ],
+            "diagram": {
+                "assignments": {},
+                "engineState": {
+                    "nodes": [
+                        {
+                            "id": "owner",
+                            "kind": "person",
+                            "role": "Owner",
+                            "relationType": "owner",
+                            "personId": "1",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                        {
+                            "id": "spouse",
+                            "kind": "person",
+                            "role": "Vợ/Chồng",
+                            "relationType": "spouse",
+                            "bucket": 1,
+                            "allowsShare": True,
+                            "removable": False,
+                        },
+                    ],
+                },
+                "updatedAt": "2026-06-23T01:00:00.000Z",
+            },
+        })
+
+        class _FakeQuery:
+            def __init__(self, *, first_item=None, all_items=None):
+                self._first_item = first_item
+                self._all_items = all_items or []
+
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return self._first_item
+
+            def all(self):
+                return self._all_items
+
+        class _FakeDb:
+            def __init__(self, stored_case, customer_rows):
+                self.stored_case = stored_case
+                self.customer_rows = customer_rows
+                self.committed = False
+
+            def query(self, model):
+                if model is InheritanceCase:
+                    return _FakeQuery(first_item=self.stored_case)
+                if model is Customer:
+                    return _FakeQuery(all_items=self.customer_rows)
+                raise AssertionError(f"Unexpected model query: {model}")
+
+            def commit(self):
+                self.committed = True
+
+        fake_db = _FakeDb(case, customers)
+
+        with patch("routers.cases._replace_case_participants", lambda *_args, **_kwargs: None):
+            result = update_diagram(
+                cid=105,
+                case_state_json=submitted_case_state,
+                diagram_payload="",
+                engine_state_json="",
+                db=fake_db,
+            )
+
+        saved_case_state = json.loads(result["case_state_json"])
+        saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
+        saved_assignments = saved_case_state["diagram"]["assignments"]
+        saved_node_ids = [node["id"] for node in saved_nodes]
+        self.assertTrue(fake_db.committed)
+        self.assertIn("owner", saved_node_ids)
+        self.assertIn("spouse", saved_node_ids)
+        spouse_node = next(node for node in saved_nodes if node["id"] == "spouse")
+        self.assertEqual(spouse_node["relationType"], "spouse")
+        self.assertEqual(spouse_node["bucket"], 1)
+        self.assertFalse(spouse_node["removable"])
+        self.assertNotIn("spouse", saved_assignments)
+        self.assertEqual(saved_assignments, {"owner": "1"})
+
+    def test_derive_case_state_from_legacy_participants(self):
+        customer = _customer(12, "Legacy Person")
+        customer.gioi_tinh = "Nam"
+        customer.ngay_sinh = date(1980, 5, 4)
+        customer.ngay_chet = date(2020, 6, 7)
+        customer.so_giay_to = "012345678901"
+        customer.ngay_cap = date(2021, 8, 9)
+        customer.dia_chi = "Legacy address"
+
+        payload = json.loads(_derive_case_state_json_from_participants([_participant(customer)]))
+
+        self.assertEqual(payload["schemaVersion"], 1)
+        self.assertEqual(payload["diagram"], {})
+        self.assertEqual(payload["stage"][0]["id"], "12")
+        self.assertEqual(payload["stage"][0]["ho_ten"], "Legacy Person")
+        self.assertEqual(payload["stage"][0]["ngay_sinh"], "04/05/1980")
+        self.assertEqual(payload["stage"][0]["ngay_chet"], "07/06/2020")
+        self.assertEqual(payload["stage"][0]["so_giay_to"], "012345678901")
+        self.assertEqual(payload["stage"][0]["ngay_cap"], "09/08/2021")
+        self.assertEqual(payload["stage"][0]["dia_chi"], "Legacy address")
+
+    def test_derive_case_state_from_legacy_participants_deduplicates_customer_ids(self):
+        customer = _customer(12, "Legacy Person")
+
+        payload = json.loads(_derive_case_state_json_from_participants([
+            _participant(customer),
+            _participant(customer),
+        ]))
+
+        self.assertEqual([row["id"] for row in payload["stage"]], ["12"])
 
 
 class DiagramPayloadParserTests(unittest.TestCase):
@@ -120,6 +2962,96 @@ class DiagramPayloadParserTests(unittest.TestCase):
         self.assertEqual(normalized["nodes"][0]["id"], "owner")
         self.assertIsNone(normalized["nodes"][0]["parentSlotId"])
         self.assertIsNone(normalized["nodes"][0]["parentPersonId"])
+
+    def test_normalize_diagram_payload_preserves_flow_from_list(self):
+        payload = _payload([
+            {
+                "id": "child_1",
+                "kind": "person",
+                "role": "Con",
+                "relationType": "child",
+                "personId": "2",
+                "flowFrom": ["owner", "spouse_mother", "", None, 5],
+            }
+        ])
+
+        normalized = _normalize_diagram_payload(payload)
+
+        self.assertEqual(normalized["nodes"][0]["flowFrom"], ["owner", "spouse_mother", "5"])
+
+    def test_normalize_diagram_payload_preserves_edges_list(self):
+        payload = json.dumps({
+            "version": 2,
+            "updatedAt": "2026-05-11T10:00:00.000Z",
+            "nodes": [
+                {
+                    "id": "owner",
+                    "kind": "person",
+                    "role": "Owner",
+                    "relationType": "owner",
+                    "personId": "1",
+                },
+                {
+                    "id": "child_1",
+                    "kind": "person",
+                    "role": "Con",
+                    "relationType": "child",
+                    "personId": "2",
+                },
+            ],
+            "edges": [
+                {
+                    "id": "edge-1",
+                    "source": " owner ",
+                    "target": "child_1",
+                    "kind": "kinship",
+                    "label": "Quan he",
+                    "markerEnd": {"type": "arrowclosed"},
+                    "style": {"strokeWidth": 2},
+                },
+            ],
+        })
+
+        normalized = _normalize_diagram_payload(payload)
+
+        self.assertEqual(normalized["edges"][0]["id"], "edge-1")
+        self.assertEqual(normalized["edges"][0]["source"], "owner")
+        self.assertEqual(normalized["edges"][0]["target"], "child_1")
+        self.assertEqual(normalized["edges"][0]["label"], "Quan he")
+        self.assertEqual(normalized["edges"][0]["markerEnd"]["type"], "arrowclosed")
+        self.assertEqual(normalized["edges"][0]["style"]["strokeWidth"], 2)
+
+    def test_normalize_diagram_payload_preserves_supplemental_engine_state_fields(self):
+        payload = json.dumps({
+            "version": 2,
+            "updatedAt": "2026-05-11T10:00:00.000Z",
+            "nodes": [
+                {
+                    "id": "child_1",
+                    "kind": "person",
+                    "role": "Con",
+                    "relationType": "child",
+                    "personId": "2",
+                },
+            ],
+            "allocations": {"2": {"displayPercent": "50.00"}},
+            "warnings": [{"code": "demo_warning"}],
+            "trace": [{"type": "flow", "from": "1", "to": "2"}],
+            "viewport": {"x": 120.5, "y": -32.25, "zoom": 0.85},
+            "layoutMeta": {
+                "laneOffsets": {"children": 240},
+                "collapsedBranches": ["child_1"],
+            },
+        })
+
+        normalized = _normalize_diagram_payload(payload)
+
+        self.assertEqual(normalized["allocations"]["2"]["displayPercent"], "50.00")
+        self.assertEqual(normalized["warnings"][0]["code"], "demo_warning")
+        self.assertEqual(normalized["trace"][0]["to"], "2")
+        self.assertEqual(normalized["viewport"]["zoom"], 0.85)
+        self.assertEqual(normalized["layoutMeta"]["laneOffsets"]["children"], 240)
+        self.assertEqual(normalized["layoutMeta"]["collapsedBranches"][0], "child_1")
 
     def test_parse_case_diagram_payload_returns_non_owner_participants_only(self):
         customers = {

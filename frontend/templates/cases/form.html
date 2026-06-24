@@ -1384,9 +1384,6 @@ endif %}
 
         <i class="bi bi-camera me-1"></i>OCR Tài sản
 
-
-      </button>
-
           </div>
 
 
@@ -1855,8 +1852,7 @@ endif %}
         <button type="button" class="btn btn-sm btn-success" id="btn-save-participants" disabled>
 
 
-          <i class="bi bi-check2-circle me-1"></i>Lưu
-
+          <i class="bi bi-check2-circle me-1"></i>Cap nhat
 
         </button>
 
@@ -1970,12 +1966,10 @@ endif %}
         <a href="/cases" class="btn btn-sm btn-light border fw-bold text-muted">Huỷ</a>
 
 
-        <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="btn-submit-case">
+        <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="{{ 'btn-submit-case' if obj else 'btn-create-case' }}" data-action="{{ 'save-diagram' if obj else 'create-case' }}">
 
 
-          <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Lưu hồ sơ' }}
-
-
+          <i class="bi bi-check-lg me-1"></i>{{ 'Luu so do' if obj else 'Tao ho so' }}
         </button>
 
 
@@ -2450,35 +2444,8 @@ endif %}
           </button>
 
 
-          <button class="btn btn-sm btn-outline-secondary" onclick="ocrClearAll()" title="Xoá tất cả ảnh">
-
-
-
-      <i class="bi bi-trash"></i>
-
-
-          </button>
-
-
         </div>
-
-
-
-
-        <button class="btn btn-sm btn-outline-primary flex-grow-1" id="ocr-btn-extract-local"
-
-
-          onclick="ocrExtractLocal()" title="Dung RapidOCR chay offline tren may chu">
-
-
-          <span id="ocr-btn-text-local"><i class="bi bi-cpu me-1"></i>Local OCR (Miễn phí)</span>
-
-
-        </button>
-
-
-      </div>
-
+        </div>
 
 
       <!-- Danh sách ảnh đã chn -->
@@ -2555,7 +2522,7 @@ endif %}
           <div class="d-flex gap-2">
 
 
-      <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">óng</button>
+      <button type="button" class="btn btn-sm btn-success" id="ocr-btn-save-results"><i class="bi bi-check2-circle me-1"></i>Luu</button>
 
           </div>
 
@@ -2638,15 +2605,6 @@ endif %}
 
 
           <i class="bi bi-robot me-1"></i>OCR Tài sản
-
-
-        </button>
-
-
-        <button class="btn btn-sm btn-outline-secondary" onclick="propertyOcrClearAll()" title="Xóa tất cả">
-
-
-          <i class="bi bi-trash"></i>
 
 
         </button>
@@ -2758,9 +2716,6 @@ endif %}
 
 
           <i class="bi bi-upload me-1"></i>Upload
-
-
-        </button>
 
 
       </div>
@@ -3044,10 +2999,6 @@ endif %}
         <i class="bi bi-upload me-1"></i>Tải lên
 
 
-
-      </button>
-
-
           </div>
 
 
@@ -3180,6 +3131,7 @@ endif %}
       btn.addEventListener('click', async () => {
 
 
+        if (!btn) return;
         btn.disabled = true;
 
 
@@ -3206,6 +3158,7 @@ endif %}
         if (!confirm(`Xóa mẫu «${btn.dataset.name}»?`)) return;
 
 
+        if (!btn) return;
         btn.disabled = true;
 
 
@@ -3277,6 +3230,7 @@ endif %}
 
         const btn = document.getElementById('tpl-btn-upload');
 
+        if (!btn) return;
         btn.disabled = true;
 
         /*
@@ -3798,8 +3752,6 @@ endif %}
 
 
       <i class="bi bi-download me-1"></i>Xuất văn bản
-
-          </button>
 
         </div>
 
@@ -4325,9 +4277,6 @@ endif %}
 
 
       <i class="bi bi-check2 me-1"></i>in vào form
-
-
-          </button>
 
 
         </div>
@@ -4891,7 +4840,6 @@ endif %}
     })();
   </script>
   {% endblock %}
-
   {% block extra_js %}
 
   <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
@@ -4987,7 +4935,7 @@ endif %}
         birth: "{{ p.customer.ngay_sinh.year if p.customer.ngay_sinh and p.customer.ngay_sinh.day == 1 and p.customer.ngay_sinh.month == 1 else (p.customer.ngay_sinh.strftime('%d/%m/%Y') if p.customer.ngay_sinh else '') }}",
 
 
-        death: "{{ p.customer.ngay_chet.isoformat() if p.customer.ngay_chet else '' }}",
+        death: "{{ p.customer.ngay_chet.year if p.customer.ngay_chet and p.customer.ngay_chet.day == 1 and p.customer.ngay_chet.month == 1 else (p.customer.ngay_chet.strftime('%d/%m/%Y') if p.customer.ngay_chet else '') }}",
 
 
           address: "{{ p.customer.dia_chi|default('', true)|e }}",
@@ -5130,6 +5078,130 @@ endif %}
     const ownerInput = document.getElementById('case-nguoi-chet');
     const engineStateInput = document.getElementById('case-engine-state');
     const caseStateInput = document.getElementById('case-state-json');
+
+    function normalizeCommittedStageRecord(raw) {
+      const record = toLegacyCustomerShape(raw) || raw || {};
+      const id = String(record.id || raw?.id || '').trim();
+      if (!id) return null;
+      return {
+        id,
+        ho_ten: record.ho_ten || record.name || '',
+        gioi_tinh: record.gioi_tinh || record.gender || '',
+        ngay_sinh: record.ngay_sinh || record.birth || '',
+        ngay_chet: record.ngay_chet || record.death || '',
+        so_giay_to: record.so_giay_to || record.doc || '',
+        ngay_cap: record.ngay_cap || record.issue_date || '',
+        noi_cap: record.noi_cap || record.issue_place || '',
+        dia_chi: record.dia_chi || record.address || '',
+        place_of_origin: record.place_of_origin || '',
+      };
+    }
+
+    window.__COMMITTED_STAGE_SNAPSHOT__ = Array.isArray(initialCaseState?.stage)
+      ? initialCaseState.stage.map(normalizeCommittedStageRecord).filter(Boolean)
+      : [];
+
+    function getCommittedStageSnapshot() {
+      return (Array.isArray(window.__COMMITTED_STAGE_SNAPSHOT__) ? window.__COMMITTED_STAGE_SNAPSHOT__ : [])
+        .map((item) => ({ ...item }));
+    }
+
+    function setCommittedStageSnapshot(rows) {
+      window.__COMMITTED_STAGE_SNAPSHOT__ = (Array.isArray(rows) ? rows : [])
+        .map(normalizeCommittedStageRecord)
+        .filter(Boolean);
+      return getCommittedStageSnapshot();
+    }
+
+    function collectDraftStageSnapshot() {
+      return Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'))
+        .map((row) => {
+          const id = String(row.dataset.cid || '').trim();
+          if (!id) return null;
+          const base = toLegacyCustomerShape(resolveCustomerById(id) || { id }) || { id };
+          const snapshot = { ...base, id };
+          row.querySelectorAll('[data-key]').forEach((el) => {
+            snapshot[el.dataset.key] = el.value || '';
+          });
+          return normalizeCommittedStageRecord(snapshot);
+        })
+        .filter(Boolean);
+    }
+
+    function getAssignedStageIds(treeState = null, latestEngineState = null) {
+      const ids = new Set();
+      const state = treeState || {};
+      (Array.isArray(state.participants) ? state.participants : []).forEach((item) => {
+        const id = String(item?.id || '').trim();
+        if (id) ids.add(id);
+      });
+      const nodes = Array.isArray(latestEngineState?.nodes) ? latestEngineState.nodes : [];
+      nodes.forEach((node) => {
+        const id = String(node?.personId || node?.person?.id || '').trim();
+        if (id) ids.add(id);
+      });
+      return ids;
+    }
+
+    async function persistCommittedStageSnapshot(options = {}) {
+      const latestEngineState = options.latestEngineState || null;
+      const treeState = options.treeState || null;
+      const previousIds = new Set(getCommittedStageSnapshot().map((item) => String(item.id)));
+      const stage = setCommittedStageSnapshot(collectDraftStageSnapshot());
+      const nextIds = new Set(stage.map((item) => String(item.id)));
+      const removedIds = Array.from(previousIds).filter((id) => !nextIds.has(id));
+      const assignedIds = getAssignedStageIds(treeState, latestEngineState);
+
+      stage.forEach((record) => {
+        upsertCustomerRecord(record);
+        updateCustomerWorkflow(record.id, {
+          deleted: false,
+          inStaging: true,
+          inTree: assignedIds.has(String(record.id)),
+          inDiagram: assignedIds.has(String(record.id)),
+          inPool: !assignedIds.has(String(record.id)),
+        }, { refreshPool: false });
+      });
+      removedIds.forEach((id) => {
+        updateCustomerWorkflow(id, {
+          deleted: true,
+          inStaging: false,
+          inTree: false,
+          inDiagram: false,
+          inPool: false,
+          __allowClearStaging: true,
+        }, { refreshPool: false });
+        document.querySelector(`#people-pool [data-id="${id}"]`)?.remove();
+      });
+
+      if (caseStateInput) {
+        caseStateInput.value = JSON.stringify(collectCaseStateSnapshot(latestEngineState, treeState));
+      }
+
+      const caseId = String(document.getElementById('case-id-hidden')?.value || '').trim();
+      if (caseId && caseStateInput?.value) {
+        const body = new URLSearchParams({ case_state_json: caseStateInput.value });
+        const resp = await fetch(`/cases/${caseId}/stage-update`, { method: 'POST', body });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || json.ok === false) {
+          throw new Error(json.error || 'stage_update_failed');
+        }
+        if (json.case_state_json && caseStateInput) {
+          caseStateInput.value = json.case_state_json;
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('caseStagePersonsCommitted', {
+        detail: { stage, stageIds: Array.from(nextIds), removedIds }
+      }));
+      loadPool();
+      return { stage, removedIds };
+    }
+
+    window.getCommittedStageSnapshot = getCommittedStageSnapshot;
+    window.setCommittedStageSnapshot = setCommittedStageSnapshot;
+    window.collectDraftStageSnapshot = collectDraftStageSnapshot;
+    window.persistCommittedStageSnapshot = persistCommittedStageSnapshot;
 
     window.__FAMILY_TREE_STATE__ = window.__FAMILY_TREE_STATE__ || {
 
@@ -5629,8 +5701,6 @@ endif %}
 
       updateCustomerWorkflow(record.id, {
 
-        deleted: false,
-
         inPool: true,
 
         inTree: false,
@@ -5727,6 +5797,11 @@ endif %}
       }
 
       const explicitUndelete = Object.prototype.hasOwnProperty.call(nextPatch, 'deleted') && nextPatch.deleted === false;
+      const allowRevive = patch && patch.__allowRevive === true;
+
+      if (window.__CUSTOMER_WORKFLOW__[id]?.deleted && explicitUndelete && !allowRevive && !next.inStaging) {
+        next.deleted = true;
+      }
 
       if (window.__CUSTOMER_WORKFLOW__[id]?.deleted && !explicitUndelete && Object.prototype.hasOwnProperty.call(patch, 'inPool') && patch.inPool) {
 
@@ -5749,11 +5824,65 @@ endif %}
 
       const record = resolveCustomerById(customerId);
 
-      const state = ensureCustomerWorkflow(customerId);
+      if (!record?.id) return false;
 
-      if (!record || !state) return false;
+      const committedStage = typeof getCommittedStageSnapshot === 'function' ? getCommittedStageSnapshot() : [];
 
-      return !!record.id && !state.deleted && !!state.inPool && !state.inTree && !state.inDiagram;
+      const stageIds = new Set(committedStage.map((item) => normalizeCustomerId(item.id)).filter(Boolean));
+
+      const assignedIds = getDiagramAssignedStageIds();
+
+      return stageIds.has(record.id) && !assignedIds.has(record.id);
+    }
+
+    function getDiagramAssignedStageIds() {
+
+      const assignedIds = new Set();
+
+      const treeState = typeof getFamilyTreeState === 'function' ? getFamilyTreeState() : {};
+
+      const participants = Array.isArray(treeState?.participants) ? treeState.participants : [];
+
+      participants.forEach((item) => {
+
+        const id = normalizeCustomerId(item?.id);
+
+        if (id) assignedIds.add(id);
+
+      });
+
+      const nodes = Array.isArray(treeState?.engineState?.nodes) ? treeState.engineState.nodes : [];
+
+      nodes.forEach((node) => {
+
+        const id = normalizeCustomerId(node?.personId || node?.person?.id);
+
+        if (id) assignedIds.add(id);
+
+      });
+
+      return assignedIds;
+
+    }
+
+    function getPoolCandidateCustomerIds() {
+
+      const committedStage = typeof getCommittedStageSnapshot === 'function' ? getCommittedStageSnapshot() : [];
+
+      if (committedStage.length) {
+
+        return committedStage
+
+          .map((item) => toLegacyCustomerShape(upsertCustomerRecord(item)))
+
+          .filter((item) => item?.id)
+
+          .map((item) => item.id);
+
+      }
+
+      return Object.keys(window.__CUSTOMER_REGISTRY__);
+
     }
 
     function renderPoolRow(customerId) {
@@ -5824,7 +5953,7 @@ endif %}
 
       window.__POOL_DATA_MAP__ = {};
 
-      Object.keys(window.__CUSTOMER_REGISTRY__)
+      getPoolCandidateCustomerIds()
 
         .filter((id) => derivePoolVisibility(id))
 
@@ -5984,14 +6113,6 @@ endif %}
         const record = upsertCustomerRecord(item);
 
         if (!record) return;
-
-        const state = ensureCustomerWorkflow(record.id);
-
-        if (!state.deleted && !state.inStaging && !state.inTree && !state.inDiagram && !state.inPool) {
-
-          setCustomerWorkflowState(record.id, { inPool: true });
-
-        }
 
       });
 
@@ -6184,9 +6305,7 @@ endif %}
 
           inDiagram: true,
 
-          inPool: false,
-
-          deleted: false
+          inPool: false
 
         });
 
@@ -6196,7 +6315,7 @@ endif %}
 
         if (window.__CUSTOMER_WORKFLOW__[id]?.inDiagram && !nextDiagramIds.has(id)) {
 
-          setCustomerWorkflowState(id, { inDiagram: false, inTree: false, inPool: true, deleted: false });
+          setCustomerWorkflowState(id, { inDiagram: false, inTree: false, inPool: true });
 
         }
 
@@ -6345,21 +6464,28 @@ endif %}
           );
 
           if (record) {
+      const addedToStage = typeof window.addToOcrStaging === 'function'
 
 
-      updateCustomerWorkflow(record.id, {
+        ? window.addToOcrStaging(toLegacyCustomerShape(record), { source: 'existing' })
 
 
-        deleted: false,
+        : false;
 
 
-        inPool: true,
+      if (addedToStage) {
 
 
-        inStaging: false
+        showToast('Da dua nguoi vao Stage. Bam Cap nhat de hien trong pool.', 'success');
 
 
-      });
+      } else {
+
+
+        showToast('Nguoi nay da co trong Stage hoac bi trung giay to.', 'warning');
+
+
+      }
 
           }
 
@@ -6910,8 +7036,6 @@ endif %}
 
         inPool: true,
 
-        inStaging: false,
-
         inTree: false
 
       });
@@ -7008,11 +7132,7 @@ endif %}
 
         inTree: true,
 
-        inPool: false,
-
-        inStaging: false,
-
-        deleted: false
+        inPool: false
 
       });
 
@@ -7205,7 +7325,7 @@ endif %}
 
           spouseSlot.appendChild(buildPersonCard(data, 'Vo_chong_con', true));
 
-          updateCustomerWorkflow(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false }, { refreshPool: false });
+          updateCustomerWorkflow(data.id, { inTree: true, inPool: false }, { refreshPool: false });
 
           loadPool();
 
@@ -7752,7 +7872,7 @@ endif %}
       slot.appendChild(buildPersonCard(data, 'Cha', true, p.share, effectiveReceive));
 
 
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false });
+      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
 
 
       return;
@@ -7793,7 +7913,7 @@ endif %}
       slot.appendChild(buildPersonCard(data, 'Cha_vc', false, p.share, effectiveReceive));
 
 
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false });
+      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
 
 
       return;
@@ -7815,7 +7935,7 @@ endif %}
       slot.appendChild(buildPersonCard(data, 'Me_vc', false, p.share, effectiveReceive));
 
 
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false });
+      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
 
 
       return;
@@ -7853,7 +7973,7 @@ endif %}
 
           childrenZone.appendChild(card);
 
-          setCustomerWorkflowState(data.id, { inTree: true, inPool: false, inStaging: false, deleted: false });
+          setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
 
           return;
 
@@ -7875,7 +7995,7 @@ endif %}
 
         }
 
-        setCustomerWorkflowState(data.id, { inTree: false, inPool: true, inStaging: false, deleted: false });
+        setCustomerWorkflowState(data.id, { inTree: false, inPool: true });
 
       });
 
@@ -8427,31 +8547,29 @@ endif %}
     }
 
     function collectCaseStateSnapshot(latestEngineState = null, treeState = null) {
-      const stage = Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'))
-        .map((row) => {
-          const id = String(row.dataset.cid || '').trim();
-          if (!id) return null;
-          const base = toLegacyCustomerShape(resolveCustomerById(id) || { id }) || { id };
-          const snapshot = { ...base, id };
-          row.querySelectorAll('[data-key]').forEach((el) => {
-            snapshot[el.dataset.key] = el.value || '';
-          });
-          return {
-            id: String(snapshot.id || id),
-            ho_ten: snapshot.ho_ten || '',
-            gioi_tinh: snapshot.gioi_tinh || '',
-            ngay_sinh: snapshot.ngay_sinh || '',
-            ngay_chet: snapshot.ngay_chet || '',
-            so_giay_to: snapshot.so_giay_to || '',
-            ngay_cap: snapshot.ngay_cap || snapshot.issue_date || '',
-            noi_cap: snapshot.noi_cap || snapshot.issue_place || '',
-            dia_chi: snapshot.dia_chi || '',
-            place_of_origin: snapshot.place_of_origin || '',
-          };
-        })
-        .filter(Boolean);
+      const stage = getCommittedStageSnapshot();
+      const stageIds = new Set(stage.map((item) => String(item.id || '').trim()).filter(Boolean));
       const assignments = {};
-      const nodes = Array.isArray(latestEngineState?.nodes) ? latestEngineState.nodes : [];
+      const nodes = Array.isArray(latestEngineState?.nodes)
+        ? latestEngineState.nodes.filter((node) => {
+          const personId = String(node?.personId || node?.person?.id || '').trim();
+          return !personId || stageIds.has(personId);
+        })
+        : [];
+      const nodeIds = new Set(nodes.map((node) => String(node?.id || '').trim()).filter(Boolean));
+      const prunedEngineState = latestEngineState
+        ? {
+          ...latestEngineState,
+          nodes,
+          edges: Array.isArray(latestEngineState.edges)
+            ? latestEngineState.edges.filter((edge) => {
+              const source = String(edge?.source || edge?.sourceId || '').trim();
+              const target = String(edge?.target || edge?.targetId || '').trim();
+              return (!source || nodeIds.has(source)) && (!target || nodeIds.has(target));
+            })
+            : latestEngineState.edges,
+        }
+        : null;
       nodes.forEach((node) => {
         const slotId = String(node?.id || '').trim();
         const personId = String(node?.personId || '').trim();
@@ -8463,7 +8581,7 @@ endif %}
         stage,
         diagram: {
           assignments,
-          engineState: latestEngineState || null,
+          engineState: prunedEngineState,
           updatedAt: treeState?.updatedAt || new Date().toISOString(),
         },
       };
@@ -8520,46 +8638,6 @@ endif %}
           propertyHolder.insertAdjacentHTML('beforeend', `<input type="hidden" name="property_ids" value="${pid}">`);
 
         });
-
-      }
-
-      if (typeof flushPendingDebounces === 'function') {
-
-        await flushPendingDebounces();
-
-      }
-
-      if (typeof waitForPendingCustomerUpdates === 'function') {
-
-        const pendingResult = await waitForPendingCustomerUpdates(10000);
-
-        if (!pendingResult?.ok) {
-
-          showToast(pendingResult?.timedOut ? 'Đồng bộ thông tin người bị timeout. Kiểm tra lại các dòng đang lưu.' : 'Có dòng người tham gia chưa lưu xong. Kiểm tra lại rồi lưu lại.', 'warning');
-
-          return;
-
-        }
-
-      }
-
-      if (typeof window.saveParticipantDraftRows === 'function') {
-
-        const saveResult = await window.saveParticipantDraftRows({
-
-          silentSuccess: true,
-
-          skipEmptyWarning: true
-
-        });
-
-        if ((saveResult?.failedCount || 0) > 0) {
-
-          showToast('Còn dòng người tham gia đang lỗi, chưa thể lưu hồ sơ.', 'warning');
-
-          return;
-
-        }
 
       }
 
@@ -8648,11 +8726,45 @@ endif %}
 
       saveCaseWorkspaceSnapshot();
 
+      const caseId = String(document.getElementById('case-id-hidden')?.value || '').trim();
+
       form.dataset.submitting = '1';
 
       if (api.setSaving) api.setSaving(true);
 
-      form.submit();
+      if (!caseId) {
+        const submitterAction = ev.submitter?.dataset?.action || '';
+        if (submitterAction === 'create-case' || ev.submitter?.id === 'btn-create-case') {
+          HTMLFormElement.prototype.submit.call(form);
+          return;
+        }
+        showToast('Can Tao ho so truoc khi Luu so do', 'warning');
+        form.dataset.submitting = '0';
+        if (api.setSaving) api.setSaving(false);
+        return;
+      }
+
+      try {
+        const body = new URLSearchParams({
+          case_state_json: caseStateInput?.value || JSON.stringify(collectCaseStateSnapshot(latestEngineState, treeState)),
+          diagram_payload: diagramPayloadInput?.value || '',
+          engine_state_json: engineStateInput?.value || '',
+        });
+        const resp = await fetch(`/cases/${caseId}/diagram-update`, { method: 'POST', body });
+        const json = await resp.json().catch(() => ({}));
+        if (!resp.ok || json.ok === false) {
+          throw new Error(json.error || 'diagram_update_failed');
+        }
+        if (json.case_state_json && caseStateInput) caseStateInput.value = json.case_state_json;
+        if (engineStateInput) engineStateInput.value = json.engine_state_json || '';
+        if (diagramPayloadInput) diagramPayloadInput.value = json.diagram_payload || '';
+        showToast('Da luu trang thai so do', 'success');
+      } catch (e) {
+        showToast(`Khong the luu so do: ${e?.message || e}`, 'danger');
+      } finally {
+        form.dataset.submitting = '0';
+        if (api.setSaving) api.setSaving(false);
+      }
 
       return;
     });
@@ -9312,7 +9424,8 @@ endif %}
 
         document.getElementById('ocr-btn-extract').disabled = !imageQueue.length;
 
-        document.getElementById('ocr-btn-extract-local').disabled = !imageQueue.length;
+        const localExtractBtn = document.querySelector('[data-local-ocr-control]');
+        if (localExtractBtn) localExtractBtn.disabled = !imageQueue.length;
 
         if (input) input.value = '';
 
@@ -9335,7 +9448,8 @@ endif %}
 
           document.getElementById('ocr-btn-extract').disabled = true;
 
-          document.getElementById('ocr-btn-extract-local').disabled = true;
+          const localExtractBtn = document.querySelector('[data-local-ocr-control]');
+          if (localExtractBtn) localExtractBtn.disabled = true;
 
           return;
 
@@ -9446,7 +9560,7 @@ endif %}
       }
 
 
-      function statusHtml(item) {
+function statusHtml(item) {
 
         // Support both old string calls and new item object calls
 
@@ -9458,17 +9572,17 @@ endif %}
 
         if (s === 'queued') return '<span style="color:#0f172a;"> ang xếp hàng</span>';
 
-        if (s === 'qr') return '<span style="color:#059669;">✅ ã nhận diện</span>';
+        if (s === 'qr') return '<span style="color:#047857;font-weight:600;">QR server</span>';
 
         if (s === 'processing') return '<span style="color:#d97706;">⚙ ang trích xuất...</span>';
 
-        if (s === 'ocr') return '<span style="color:#059669;">✅ ã nhận diện</span>';
+        if (s === 'ocr') return '<span style="color:#1d4ed8;font-weight:600;">AI OCR</span>';
 
-        if (s === 'ocr_back') return '<span style="color:#059669;">✅ ã nhận diện</span>';
+        if (s === 'ocr_back') return '<span style="color:#1d4ed8;font-weight:600;">AI OCR (back)</span>';
 
-        if (s === 'ai') return '<span style="color:#059669;">✅ ã nhận diện</span>';
+        if (s === 'ai') return '<span style="color:#1d4ed8;font-weight:600;">AI OCR</span>';
 
-        if (s === 'ai_back') return '<span style="color:#059669;">✅ ã nhận diện</span>';
+        if (s === 'ai_back') return '<span style="color:#1d4ed8;font-weight:600;">AI OCR (back)</span>';
 
         if (s === 'error') return `<span style="color:#dc2626;" title="${errMsg}"> ${errMsg || 'Lỗi'}</span>`;
 
@@ -9571,12 +9685,17 @@ endif %}
 
         }
 
-        overlay._previewItems = previewItems;
+overlay._previewItems = previewItems;
         overlay._previewIndex = Math.max(0, Math.min(Number(startIndex || 0), previewItems.length - 1));
         overlay._renderPreview = () => {
           const currentItem = overlay._previewItems[overlay._previewIndex];
+          const sourceLabel = ['qr'].includes(String(currentItem?.status || '').toLowerCase())
+            ? ' • QR'
+            : ['ocr', 'ocr_back', 'ai', 'ai_back'].includes(String(currentItem?.status || '').toLowerCase())
+              ? ' • OCR'
+              : '';
           document.getElementById('ocr-preview-img').src = currentItem.dataUrl || currentItem.qrDataUrl || '';
-          document.getElementById('ocr-preview-label').textContent = currentItem.name + (currentItem.status === 'error' ? ' — ' + (currentItem._errorMsg || 'Lỗi') : '');
+          document.getElementById('ocr-preview-label').textContent = currentItem.name + sourceLabel + (currentItem.status === 'error' ? ' — ' + (currentItem._errorMsg || 'Lỗi') : '');
           const counterEl = document.getElementById('ocr-preview-counter');
           if (counterEl) counterEl.textContent = `${overlay._previewIndex + 1}/${overlay._previewItems.length}`;
           const prevBtnEl = document.getElementById('ocr-preview-prev');
@@ -9809,14 +9928,15 @@ endif %}
 
           document.getElementById('ocr-btn-extract').disabled = true;
 
-        document.getElementById('ocr-btn-extract-local').disabled = true;
+        const localExtractBtn = document.querySelector('[data-local-ocr-control]');
+        if (localExtractBtn) localExtractBtn.disabled = true;
 
         }
 
       };
 
 
-      window.ocrClearAll = function () {
+      function clearOcrTempState() {
 
         imageQueue = [];
 
@@ -9832,7 +9952,8 @@ endif %}
 
         document.getElementById('ocr-btn-extract').disabled = true;
 
-        document.getElementById('ocr-btn-extract-local').disabled = true;
+        const localExtractBtn = document.querySelector('[data-local-ocr-control]');
+        if (localExtractBtn) localExtractBtn.disabled = true;
 
         document.getElementById('ocr-results-empty').style.display = 'flex';
 
@@ -9850,7 +9971,13 @@ endif %}
 
         if (input) input.value = '';
 
-      };
+      }
+
+      function clearOcrTempAfterStageCommit() {
+        clearOcrTempState();
+      }
+
+      window.clearOcrTempAfterStageCommit = clearOcrTempAfterStageCommit;
 
 
       function resetOcrWorkingResults() {
@@ -10117,6 +10244,26 @@ endif %}
 
           target.data = mergePersonData(target.data || {}, r.data || {});
 
+          target._files = Array.from(new Set([
+            ...(Array.isArray(target._files) ? target._files : []),
+            ...(Array.isArray(r._files) ? r._files : []),
+          ].filter(Boolean)));
+          target.data._files = target._files.slice();
+
+          const previewMap = new Map();
+          [
+            ...(Array.isArray(target._preview_items) ? target._preview_items : []),
+            ...(Array.isArray(target.data?._preview_items) ? target.data._preview_items : []),
+            ...(Array.isArray(r._preview_items) ? r._preview_items : []),
+            ...(Array.isArray(r.data?._preview_items) ? r.data._preview_items : []),
+          ].forEach((item) => {
+            const snapshot = snapshotPreviewItem(item);
+            const key = normalizePreviewItemKey(snapshot);
+            if (snapshot && key && !previewMap.has(key)) previewMap.set(key, snapshot);
+          });
+          target._preview_items = Array.from(previewMap.values());
+          target.data._preview_items = target._preview_items.slice();
+
           const targetSide = String(target.side || target.data?.side || '').toLowerCase();
 
           const incomingSide = String(r.side || r.data?.side || '').toLowerCase();
@@ -10215,11 +10362,9 @@ endif %}
 
         if (!pending.length) return;
 
-        resetOcrWorkingResults();
-
-
         const btn = document.getElementById('ocr-btn-extract');
 
+        if (!btn) return;
         btn.disabled = true;
 
         document.getElementById('ocr-btn-text').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>ang xử lý...';
@@ -10393,35 +10538,65 @@ endif %}
           }
 
 
-          ocrResults.push(...persons.map(p => ({
+          const newPersonResults = persons.map(p => {
 
 
-      type: 'person',
+      const files = Array.isArray(p._files) ? p._files.slice() : [];
 
 
-      data: p,
+      const previewItems = files.map((fileName) => {
 
 
-      source: String(p.source_type || 'AI').toUpperCase(),
+        const match = imageQueue.find((item) => normalizePreviewFileName(item?.name) === normalizePreviewFileName(fileName));
 
 
-      source_type: String(p.source_type || 'AI').toUpperCase(),
+        return snapshotPreviewItem(match);
 
-      side: p.side || 'unknown',
 
-      filename: Array.isArray(p._files) && p._files.length ? p._files[0] : '',
+      }).filter(Boolean);
 
-      _files: Array.isArray(p._files) ? p._files.slice() : [],
 
-      warnings: Array.isArray(p.warnings) ? p.warnings.slice() : [],
+      const personData = { ...p, _files: files.slice(), _preview_items: previewItems.slice() };
 
-      raw_text: p._raw_text || '',
 
-          })));
+      return {
 
-          ocrResults.push(...properties.map(p => ({ type: 'property', data: p, source: 'AI', source_type: 'AI' })));
 
-          ocrResults.push(...marriages.map(m => ({ type: 'marriage', data: m, source: 'AI', source_type: 'AI' })));
+        type: 'person',
+
+
+        data: personData,
+
+
+        source: String(p.source_type || 'AI').toUpperCase(),
+
+
+        source_type: String(p.source_type || 'AI').toUpperCase(),
+
+        side: p.side || 'unknown',
+
+        filename: files.length ? files[0] : '',
+
+        _files: files,
+
+        _preview_items: previewItems,
+
+        warnings: Array.isArray(p.warnings) ? p.warnings.slice() : [],
+
+        raw_text: p._raw_text || '',
+
+          };
+
+          });
+
+          ocrResults.unshift(...newPersonResults);
+
+          if (properties.length || marriages.length) {
+            console.info('Ignoring non-person OCR results in Phase 1 person OCR modal', {
+              propertyCount: properties.length,
+              marriageCount: marriages.length
+            });
+          }
 
         } catch (e) {
 
@@ -10446,9 +10621,6 @@ endif %}
         mergeOcrResultsInPlace();
 
         renderResults();
-
-        flushOcrResultsWhenModalHidden('ai_ocr_completed');
-
 
         btn.disabled = false;
 
@@ -10721,8 +10893,9 @@ endif %}
         resetOcrWorkingResults();
 
 
-        const btn = document.getElementById('ocr-btn-extract-local');
+        const btn = document.querySelector('[data-local-ocr-control]');
 
+        if (!btn) return;
         btn.disabled = true;
 
         document.getElementById('ocr-btn-text-local').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>ang phân tích...';
@@ -10972,6 +11145,27 @@ endif %}
           personData.side = side;
 
 
+          const files = Array.isArray(p._files) ? p._files.slice() : [];
+
+
+          const previewItems = files.map((fileName) => {
+
+
+      const match = imageQueue.find((item) => normalizePreviewFileName(item?.name) === normalizePreviewFileName(fileName));
+
+
+      return snapshotPreviewItem(match);
+
+
+          }).filter(Boolean);
+
+
+          personData._files = files.slice();
+
+
+          personData._preview_items = previewItems.slice();
+
+
           if (p.field_sources) personData.field_sources = p.field_sources;
 
 
@@ -11018,11 +11212,15 @@ endif %}
 
 
 
-      filename: Array.isArray(p._files) && p._files.length ? p._files[0] : '',
+      filename: files.length ? files[0] : '',
 
 
 
-      _files: Array.isArray(p._files) ? p._files.slice() : [],
+      _files: files,
+
+
+
+      _preview_items: previewItems,
 
 
           });
@@ -11178,9 +11376,6 @@ endif %}
 
         updateLocalStatus(pending);
 
-        flushOcrResultsWhenModalHidden('local_ocr_completed');
-
-
         btn.disabled = false;
 
         document.getElementById('ocr-btn-text-local').innerHTML = '<i class="bi bi-cpu me-1"></i>Local OCR (Miễn phí)';
@@ -11219,9 +11414,9 @@ endif %}
 
         const persons = ocrResults.filter(r => r.type === 'person');
 
-        const properties = ocrResults.filter(r => r.type === 'property');
+        const properties = [];
 
-        const marriages = ocrResults.filter(r => r.type === 'marriage');
+        const marriages = [];
 
 
         let html = '';
@@ -11362,6 +11557,39 @@ endif %}
       }
 
 
+      function normalizePreviewItemKey(item) {
+
+        const idKey = String(item?.id || '').trim();
+
+        if (idKey) return `id:${idKey}`;
+
+        const nameKey = normalizePreviewFileName(item?.name);
+
+        if (nameKey) return `name:${nameKey}`;
+
+        const dataKey = String(item?.dataUrl || item?.qrDataUrl || '').trim();
+
+        return dataKey ? `data:${dataKey}` : '';
+
+      }
+
+
+      function snapshotPreviewItem(item) {
+
+        if (!item || !(item.dataUrl || item.qrDataUrl)) return null;
+
+        return {
+          id: item.id || '',
+          name: item.name || '',
+          dataUrl: item.dataUrl || '',
+          qrDataUrl: item.qrDataUrl || '',
+          status: item.status || '',
+          _errorMsg: item._errorMsg || '',
+        };
+
+      }
+
+
       function findPreviewItemsForCard(result, data) {
 
         const fileNames = [];
@@ -11384,6 +11612,27 @@ endif %}
 
 
         const matches = [];
+        const seen = new Set();
+        const pushPreview = (item) => {
+
+          const snapshot = snapshotPreviewItem(item);
+
+          if (!snapshot) return;
+
+          const key = normalizePreviewItemKey(snapshot);
+
+          if (!key || seen.has(key)) return;
+
+          seen.add(key);
+          matches.push(snapshot);
+
+        };
+
+        (Array.isArray(result?._preview_items) ? result._preview_items : []).forEach(pushPreview);
+
+        (Array.isArray(result?.data?._preview_items) ? result.data._preview_items : []).forEach(pushPreview);
+
+        (Array.isArray(data?._preview_items) ? data._preview_items : []).forEach(pushPreview);
 
         imageQueue.forEach((item) => {
 
@@ -11392,7 +11641,7 @@ endif %}
           if (fileNames.includes(normalizePreviewFileName(item.name))) {
 
 
-      matches.push(item);
+      pushPreview(item);
 
           }
 
@@ -11402,7 +11651,7 @@ endif %}
 
           const onlyItem = imageQueue[0];
 
-          if (onlyItem && (onlyItem.dataUrl || onlyItem.qrDataUrl)) matches.push(onlyItem);
+          if (onlyItem && (onlyItem.dataUrl || onlyItem.qrDataUrl)) pushPreview(onlyItem);
 
         }
 
@@ -11438,7 +11687,13 @@ endif %}
 
         const displayName = hasDiacritics(d.ho_ten) ? toTitleCase(d.ho_ten) : (d.ho_ten || '');
 
-        const sourceTagForRaw = String(result?.source_type || result?.source || d.source_type || '').toUpperCase();
+const sourceTagForRaw = String(result?.source_type || result?.source || d.source_type || '').toUpperCase() === 'QR' ? 'QR' : 'OCR';
+
+        const sourceBadgeHtml = sourceTagForRaw
+
+          ? `<span class="ocr-src-badge" style="display:inline-flex;align-items:center;justify-content:center;min-width:42px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;background:${sourceTagForRaw === 'QR' ? '#dcfce7' : '#dbeafe'};color:${sourceTagForRaw === 'QR' ? '#166534' : '#1d4ed8'};flex-shrink:0;" title="${sourceTagForRaw === 'QR' ? 'Card nay uu tien du lieu QR' : 'Card nay uu tien du lieu OCR'}">${sourceTagForRaw}</span>`
+
+          : '';
 
         const rawTextValue = sourceTagForRaw === 'OCR'
 
@@ -11573,9 +11828,11 @@ endif %}
 
          style="border:1px solid #e2e8f0;border-radius:7px;padding:8px 10px;margin-bottom:6px;background:#fff;">
 
-      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
 
         <i class="bi bi-person" style="color:#2563eb;font-size:16px;flex-shrink:0;"></i>
+
+        ${sourceBadgeHtml}
 
         ${inp('ho_ten', displayName, 'H tên', 'flex:2;min-width:110px;')}
 
@@ -11713,8 +11970,6 @@ endif %}
 
           <i class="bi bi-house-add me-1"></i>in vào form tài sản
 
-        </button>
-
       </div>
     </div>`;
 
@@ -11762,44 +12017,35 @@ endif %}
 
         if (modalIsOpen) return false;
 
-        if (!ocrResults.some(r => r.type === 'person' && !r._staged)) return false;
-
-        autoStageOcrResults();
-
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
-          window.__pushCaseDebugEvent__('OCR_RESULTS_FLUSHED_WHILE_HIDDEN', {
+          window.__pushCaseDebugEvent__('OCR_RESULTS_HIDDEN_PASSIVE', {
 
 
       reason,
 
 
-      personCount: ocrResults.filter(r => r.type === 'person').length
+      personCount: ocrResults.filter(r => r.type === 'person').length,
+
+
+      queueCount: Array.isArray(imageQueue) ? imageQueue.length : 0
 
           });
 
         }
 
-        ocrResults = [];
-
-        imageQueue = [];
-
-        const st = document.getElementById('ocr-local-status');
-
-        if (st) st.textContent = '';
-
-        renderQueue();
-
-        renderResults();
-
-        return true;
+        return false;
 
       }
 
 
-      async function autoStageOcrResults() {
+      function autoStageOcrResults(options = {}) {
 
-        const persons = ocrResults.filter(r => r.type === 'person' && !r._staged);
+        const allowMissingSides = options.allowMissingSides !== false;
+
+        const allowDuplicates = options.allowDuplicates !== false;
+
+        const persons = ocrResults.filter(r => r.type === 'person');
 
         let stagedCount = 0;
 
@@ -11822,24 +12068,19 @@ endif %}
 
           }
 
-          if (hasBlockingPersonWarnings(r)) {
+          const hasBlockingWarnings = hasBlockingPersonWarnings(r);
+
+          if (card && hasBlockingWarnings) {
 
 
-      if (card) {
+      card.style.borderColor = '#f59e0b';
 
 
-        card.style.borderColor = '#f59e0b';
-
-
-        card.style.background = '#fffbeb';
-
-
-      }
-
-
-      continue;
+      card.style.background = '#fffbeb';
 
           }
+
+          if (!allowMissingSides && hasBlockingWarnings) continue;
 
           if (!d.ho_ten) continue;  // B qua nếu không có tên
 
@@ -11847,7 +12088,7 @@ endif %}
 
           const docKey = normalizeDocKey(d.so_giay_to);
 
-          if (docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) {
+          if (!allowDuplicates && docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) {
 
 
       r._added = true;
@@ -11872,7 +12113,9 @@ endif %}
 
           }
 
-          const added = window.addToOcrStaging ? window.addToOcrStaging(d, { source: 'ocr' }) : false;
+          const added = window.addToOcrStaging
+            ? window.addToOcrStaging(d, { source: 'ocr', skipDuplicateGuard: allowDuplicates })
+            : false;
 
           if (added) {
 
@@ -11906,6 +12149,8 @@ endif %}
 
         }
 
+        return { stagedCount, duplicateCount, rowCount: persons.length };
+
       }
 
 
@@ -11918,6 +12163,21 @@ endif %}
         if (docKey && (isDocAlreadyInCase(docKey) || isDocAlreadyInStaging(docKey))) return;
 
         if (window.addToOcrStaging) window.addToOcrStaging(c);
+
+      }
+
+
+      function saveOcrResultsToStage() {
+
+        const result = autoStageOcrResults({ allowMissingSides: true, allowDuplicates: true });
+
+        if ((result?.stagedCount || 0) > 0) {
+          showToast(`Da day ${result.stagedCount} dong OCR xuong stage`, 'success');
+        } else {
+          showToast('Chua co dong OCR nguoi nao de luu', 'warning');
+        }
+
+        return result;
 
       }
 
@@ -11965,13 +12225,13 @@ endif %}
 
       </select>
 
-      <input class="form-control" data-key="ngay_sinh" value="${escVal(_fmtDate(c.ngay_sinh))}" placeholder="Ngày sinh">
+      <input class="form-control" data-key="ngay_sinh" value="${escVal(_fmtDate(c.ngay_sinh))}" placeholder="dd/mm/yyyy">
 
-      <input class="form-control" data-key="ngay_chet" value="${escVal(_fmtDate(c.ngay_chet))}" placeholder="Ngày chết">
+      <input class="form-control" data-key="ngay_chet" value="${escVal(_fmtDate(c.ngay_chet))}" placeholder="dd/mm/yyyy">
 
       <input class="form-control" data-key="so_giay_to" value="${escVal(c.so_giay_to)}" placeholder="CCCD/CMND">
 
-      <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(c.ngay_cap))}"  placeholder="Ngày cấp">
+      <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(c.ngay_cap))}"  placeholder="dd/mm/yyyy">
 
       <input class="form-control" data-key="dia_chi" value="${escVal(c.dia_chi)}" placeholder="ịa chỉ thưng trú">
 
@@ -11979,14 +12239,8 @@ endif %}
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
-        <button type="button" class="btn btn-xs btn-outline-danger staged-remove-btn" title="Xóa khi danh sách">✕</button>
-
       </div>`;
 
-
-        // Auto-save debounce
-
-        let saveTimer;
 
         row.querySelectorAll('input,select').forEach(el => {
 
@@ -11996,28 +12250,9 @@ endif %}
       const status = row.querySelector('.staged-save-status');
 
 
-      status.textContent = '…';
-
-
-      clearTimeout(saveTimer);
-
-
-      saveTimer = setTimeout(() => _saveStagingRow(row, c.id, status), 800);
+      if (status) status.textContent = '';
 
           });
-
-        });
-
-
-        row.querySelector('.staged-remove-btn').addEventListener('click', () => {
-
-          row.remove();
-
-          removeStagingFromStorage(c.id);
-
-          document.querySelector(`#people-pool [data-id="${c.id}"]`)?.remove();
-
-          _updateStagingCount();
 
         });
 
@@ -12159,7 +12394,7 @@ endif %}
       };
 
 
-      function addPersonRowToPool(c) {
+      function disabledAddPersonRowToPool(c) {
 
         const pool = document.getElementById('people-pool');
 
@@ -12388,13 +12623,13 @@ endif %}
 
       </select>
 
-      <input class="form-control" data-key="ngay_sinh" value="${escVal(record.ngay_sinh)}" placeholder="Ngày sinh">
+      <input class="form-control" data-key="ngay_sinh" value="${escVal(_fmtDate(record.ngay_sinh))}" placeholder="dd/mm/yyyy">
 
-      <input class="form-control" data-key="ngay_chet" value="${escVal(record.ngay_chet)}" placeholder="Ngày chết">
+      <input class="form-control" data-key="ngay_chet" value="${escVal(_fmtDate(record.ngay_chet))}" placeholder="dd/mm/yyyy">
 
       <input class="form-control" data-key="so_giay_to" value="${escVal(record.so_giay_to)}" placeholder="CCCD/CMND">
 
-      <input class="form-control" data-key="ngay_cap"  value="${escVal(record.ngay_cap)}"  placeholder="Ngày cấp">
+      <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(record.ngay_cap))}"  placeholder="dd/mm/yyyy">
 
       <input class="form-control" data-key="dia_chi" value="${escVal(record.dia_chi)}" placeholder="ịa chỉ thưng trú">
 
@@ -12402,9 +12637,7 @@ endif %}
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
-        <button type="button" class="btn btn-xs btn-primary staged-pool-btn" title="ưa vào pool">⊕</button>
-
-        <button type="button" class="btn btn-xs btn-outline-danger staged-remove-btn" title="Xóa khi workflow">✕</button>
+        <button type="button" class="btn btn-xs btn-primary stage-pool-disabled d-none" title="disabled legacy pool action" tabindex="-1" aria-hidden="true">+</button>
 
       </div>`;
 
@@ -12444,8 +12677,6 @@ endif %}
         };
 
 
-        let saveTimer;
-
         row.querySelectorAll('input,select').forEach(el => {
 
           el.addEventListener('input', () => {
@@ -12454,64 +12685,30 @@ endif %}
       const status = row.querySelector('.staged-save-status');
 
 
-      status.textContent = 'â€¦';
+      if (status) status.textContent = '';
 
 
       const snapshot = toSnapshot();
 
 
-      saveStagingToStorage(snapshot);
-
-
-      clearTimeout(saveTimer);
-
-
-      _queueDraftRowSave(row, record.id, status);
+      void snapshot;
 
           });
 
         });
 
 
-        row.querySelector('.staged-pool-btn').addEventListener('click', () => {
+        const disabledStagePoolBtn = row.querySelector('.stage-pool-disabled');
+        if (disabledStagePoolBtn) disabledStagePoolBtn.addEventListener('click', () => {
 
           const snapshot = toSnapshot();
 
           saveStagingToStorage(snapshot);
 
-          addPersonRowToPool(snapshot);
-          commitCustomerToPool(snapshot, { highlight: false });
+          void snapshot;
           _syncDraftRowState(row);
 
         });
-
-
-        row.querySelector('.staged-remove-btn').addEventListener('click', () => {
-
-          const snapshot = toSnapshot();
-
-          upsertCustomerRecord(snapshot);
-
-          row.remove();
-
-          removeStagingFromStorage(record.id);
-
-          updateCustomerWorkflow(record.id, {
-
-
-      inStaging: false,
-
-
-      __allowClearStaging: true
-
-          });
-
-          _updateStagingCount();
-
-          loadPool();
-
-        });
-
 
         const header = area.querySelector('.ocr-staging-header');
 
@@ -12719,9 +12916,9 @@ endif %}
       }
 
 
-      addPersonRowToPool = function (c) {
+      disabledAddPersonRowToPool = function (c) {
 
-        return commitCustomerToPool(c);
+        return null;
 
       };
 
@@ -13147,11 +13344,9 @@ endif %}
 
       document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal', () => {
 
-        autoStageOcrResults();
-
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
-          window.__pushCaseDebugEvent__('OCR_MODAL_CLOSED', {
+          window.__pushCaseDebugEvent__('OCR_MODAL_HIDDEN_PASSIVE', {
 
 
       queueCount: Array.isArray(imageQueue) ? imageQueue.length : 0,
@@ -13162,18 +13357,6 @@ endif %}
           });
 
         }
-
-        ocrResults = []; imageQueue = [];
-
-        const input = document.getElementById('ocr-file-input');
-
-        const st = document.getElementById('ocr-local-status');
-
-        if (input) input.value = '';
-
-        if (st) st.textContent = '';
-
-        renderQueue(); renderResults();
 
       });
 
@@ -13426,28 +13609,24 @@ endif %}
 
           && treeState.participants.some((participant) => String(participant?.id || '').trim() === String(record.id));
 
-        const hasPlacement = !!(currentState?.inDiagram || currentState?.inPool || isPlacedInTree);
-
-        if (!hasPlacement) {
-
-          commitCustomerToPool(record, { highlight: false });
-
-        } else {
-
-          updateCustomerWorkflow(record.id, {
+        updateCustomerWorkflow(record.id, {
 
 
       deleted: false,
 
 
+      inStaging: true,
+
+
       inTree: isPlacedInTree,
+
+
+      inDiagram: !!currentState?.inDiagram || isPlacedInTree,
 
 
       inPool: !!currentState?.inPool && !isPlacedInTree
 
-          }, { refreshPool: false });
-
-        }
+        }, { refreshPool: false });
 
         window.dispatchEvent(new CustomEvent('caseParticipantRecordUpdated', {
 
@@ -13523,21 +13702,19 @@ endif %}
 
       </select>
 
-      <input type="text" class="form-control" value="${_escHtml(data.ngay_sinh)}" data-key="ngay_sinh" placeholder="dd/mm/yyyy">
+      <input type="text" class="form-control" value="${_escHtml(_fmtDate(data.ngay_sinh))}" data-key="ngay_sinh" placeholder="dd/mm/yyyy">
 
-      <input type="text" class="form-control" value="${_escHtml(data.ngay_chet)}" data-key="ngay_chet" placeholder="Ngày chết">
+      <input type="text" class="form-control" value="${_escHtml(_fmtDate(data.ngay_chet))}" data-key="ngay_chet" placeholder="dd/mm/yyyy">
 
       <input type="text" class="form-control" value="${_escHtml(data.so_giay_to)}" data-key="so_giay_to" placeholder="CCCD">
 
-      <input type="text" class="form-control" value="${_escHtml(data.ngay_cap)}" data-key="ngay_cap" placeholder="Ngày cấp">
+      <input type="text" class="form-control" value="${_escHtml(_fmtDate(data.ngay_cap))}" data-key="ngay_cap" placeholder="dd/mm/yyyy">
 
       <input type="text" class="form-control" value="${_escHtml(data.dia_chi)}" data-key="dia_chi" placeholder="ịa chỉ">
 
       <div class="row-actions">
 
         <span class="draft-row-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
-
-        <button type="button" class="btn btn-xs btn-outline-danger" title="Xoá khi danh sách">✕</button>
 
       </div>
     `;
@@ -13557,66 +13734,11 @@ endif %}
       _syncDraftRowState(row);
 
 
-      const snapshot = _collectDraftSnapshot(row);
-
-
-      if (row.dataset.cid) {
-
-
-        saveStagingToStorage({ id: row.dataset.cid, ...snapshot });
-
-
-        _setDraftRowStatus(row, '…');
-
-
-        _queueDraftRowSave(row, row.dataset.cid, _getDraftStatusElement(row));
-
-
-      }
+      _collectDraftSnapshot(row);
 
           });
 
         });
-
-
-        row.querySelector('.btn-outline-danger').addEventListener('click', () => {
-
-          if (typeof window.__pushCaseDebugEvent__ === 'function') {
-
-
-      window.__pushCaseDebugEvent__('DRAFT_ROW_REMOVED', {
-
-
-        source: row.dataset.source || '',
-
-
-        cid: String(row.dataset.cid || '').trim(),
-
-
-        ..._collectDraftSnapshot(row)
-
-
-      });
-
-          }
-
-          if (row.dataset.cid) {
-
-
-      removeStagingFromStorage(row.dataset.cid);
-
-      updateCustomerWorkflow(row.dataset.cid, { inStaging: false, __allowClearStaging: true }, { refreshPool: false });
-
-          }
-
-          row.remove();
-
-          _updateStagingCount();
-
-          loadPool();
-
-        });
-
 
         area.appendChild(row);
 
@@ -13920,7 +14042,7 @@ endif %}
       if (customer?.id) {
 
 
-        const synced = _syncCustomerAfterSave(customer, { refreshPool: !silentSuccess }) || customer;
+        const synced = _syncCustomerAfterSave(customer, { refreshPool: false }) || customer;
 
 
         saveStagingToStorage(synced);
@@ -14022,6 +14144,42 @@ endif %}
 
         _syncAllDraftRowStates();
 
+        if (failedCount === 0) {
+
+          try {
+
+            const treeState = typeof getFamilyTreeState === 'function' ? getFamilyTreeState() : null;
+
+            const latestEngineState = treeState?.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
+
+            if (typeof window.persistCommittedStageSnapshot === 'function') {
+
+              await window.persistCommittedStageSnapshot({ latestEngineState, treeState });
+
+            }
+
+            clearOcrTempAfterStageCommit();
+
+          } catch (e) {
+
+            failedCount += 1;
+
+            showToast('Khong the cap nhat Stage. OCR tam van duoc giu lai de doi chieu.', 'warning');
+
+            if (typeof window.__pushCaseDebugEvent__ === 'function') {
+
+              window.__pushCaseDebugEvent__('PARTICIPANTS_STAGE_COMMIT_FAILED', {
+
+                reason: String(e?.message || e || '')
+
+              });
+
+            }
+
+          }
+
+        }
+
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
           window.__pushCaseDebugEvent__('PARTICIPANTS_SAVE_FINISHED', {
@@ -14039,11 +14197,11 @@ endif %}
 
         }
 
-        if (savedCount && !silentSuccess) {
+        if (savedCount && !silentSuccess && failedCount === 0) {
 
           loadPool();
 
-          showToast(`ã lưu ${savedCount} ngưi vào pool`, 'success');
+          showToast(`Da cap nhat ${savedCount} nguoi tu Stage`, 'success');
 
         }
 
@@ -14066,7 +14224,7 @@ endif %}
 
           saveBtn.disabled = n === 0;
 
-          saveBtn.innerHTML = `<i class="bi bi-check2-circle me-1"></i>Lưu${n ? ` (${n})` : ''}`;
+          saveBtn.innerHTML = `<i class="bi bi-check2-circle me-1"></i>Cap nhat${n ? ` (${n})` : ''}`;
 
         }
 
@@ -14077,15 +14235,24 @@ endif %}
       }
 
 
-      document.querySelectorAll('#ocr-staging-area .staged-pool-btn').forEach((btn) => btn.remove());
+      document.querySelectorAll('#ocr-staging-area .stage-pool-disabled').forEach((btn) => btn.remove());
 
       hydrateDraftRowsFromExistingParticipants();
+
+      if (typeof window.getCommittedStageSnapshot === 'function'
+        && typeof window.setCommittedStageSnapshot === 'function'
+        && typeof window.collectDraftStageSnapshot === 'function'
+        && !window.getCommittedStageSnapshot().length) {
+        window.setCommittedStageSnapshot(window.collectDraftStageSnapshot());
+      }
 
       _updateStagingCount();
 
       _syncAllDraftRowStates();
 
       window.saveParticipantDraftRows = saveParticipantDraftRows;
+
+      document.getElementById('ocr-btn-save-results')?.addEventListener('click', saveOcrResultsToStage);
 
       document.getElementById('btn-save-participants')?.addEventListener('click', saveParticipantDraftRows);
 

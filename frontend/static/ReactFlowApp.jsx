@@ -170,6 +170,9 @@ function createLogicalNode(overrides) {
     parentPersonId: overrides.parentPersonId || "",
     familyGroupId: overrides.familyGroupId || "",
     sourceId: overrides.sourceId || null,
+    flowFrom: Array.isArray(overrides.flowFrom)
+      ? overrides.flowFrom.map((item) => String(item || "").trim()).filter((item) => item)
+      : [],
     disabledReason: overrides.disabledReason || "",
     deathComparison: overrides.deathComparison || "unknown",
     insightLines: overrides.insightLines || [],
@@ -234,6 +237,9 @@ function validateAssignment(logicalNodes, nodeId, person, targetNodes = logicalN
     (targetNode.kind === "ghost" && !!targetNode.ghostAction)
   );
   if (!isValidTarget) return { ok: false, reason: "Ô nhận không hợp lệ." };
+  if (targetNode.kind === "person" && targetNode.person && String(targetNode.person.id) !== String(candidate.id)) {
+    return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
+  }
   const duplicate = logicalNodes.find(
     (node) => node.id !== nodeId && node.kind === "person" && node.person && String(node.person.id) === String(candidate.id)
   );
@@ -335,21 +341,28 @@ function collectPrunableNodeIds(nodes, targetId) {
     changed = false;
     nodes.forEach((node) => {
       if (toRemove.has(node.id)) return;
-      if (node.parentSlotId && toRemove.has(node.parentSlotId)) { toRemove.add(node.id); changed = true; return; }
-      if (node.relationType === "sibling" && node.sourceId && toRemove.has(node.sourceId)) { toRemove.add(node.id); changed = true; }
+      if (node.id !== targetId && node.parentSlotId && toRemove.has(node.parentSlotId)) { toRemove.add(node.id); changed = true; return; }
+      if (node.id !== targetId && node.relationType === "sibling" && node.sourceId && toRemove.has(node.sourceId)) { toRemove.add(node.id); changed = true; }
     });
   }
   return toRemove;
 }
 
 function collectRemovedPeople(nodes, targetId) {
-  const target = nodes.find((node) => node.id === targetId);
-  if (!target) return [];
-  if (!target.removable) return target.person ? [normalizePersonPayload(target.person)] : [];
   const ids = collectPrunableNodeIds(nodes, targetId);
   return nodes
     .filter((node) => ids.has(node.id) && node.person)
     .map((node) => normalizePersonPayload(node.person));
+}
+
+function clearAssignedNode(node) {
+  return {
+    ...node,
+    person: null,
+    isLandOwner: false,
+    willReceive: node.allowsShare !== false,
+    sharePercent: "0.00",
+  };
 }
 
 function bridgeWorkflowUpdates(transitions) {
@@ -411,6 +424,7 @@ function hydrateEngineStateNodes() {
     return null;
   }
   const nodes = initialEngineState.nodes.map((saved) => {
+    if (saved.hidden || saved.deleted) return null;
     const personId = String(saved.personId || saved.person?.id || "").trim();
     const resolvedPerson = personId ? normalizePersonPayload(findCustomerById(personId) || saved.person || { id: personId }) : null;
     return createLogicalNode({
@@ -423,6 +437,9 @@ function hydrateEngineStateNodes() {
       allowsShare: saved.allowsShare !== false,
       removable: saved.removable !== false,
       sourceId: saved.sourceId || null,
+      flowFrom: Array.isArray(saved.flowFrom)
+        ? saved.flowFrom.map((item) => String(item || "").trim()).filter((item) => item)
+        : [],
       parentSlotId: saved.parentSlotId || "",
       parentPersonId: saved.parentPersonId || saved.parentId || "",
       familyGroupId: saved.familyGroupId || "",
@@ -430,7 +447,7 @@ function hydrateEngineStateNodes() {
       willReceive: saved.willReceive !== false,
       isLandOwner: !!saved.isLandOwner || (Array.isArray(initialEngineState.assetOwnerIds) && initialEngineState.assetOwnerIds.map(String).includes(personId)),
     });
-  });
+  }).filter((node) => Boolean(node));
   return ensureSpareChildNode(nodes);
 }
 
@@ -674,10 +691,14 @@ function buildEngineInput(models) {
     label: node.label,
     role: node.role,
     relationType: node.relationType,
+    bucket: node.bucket,
+    allowsShare: node.allowsShare !== false,
+    removable: node.removable !== false,
     parentPersonId: node.parentPersonId || "",
     parentSlotId: node.parentSlotId || "",
     familyGroupId: node.familyGroupId || "",
     sourceId: node.sourceId || "",
+    flowFrom: Array.isArray(node.flowFrom) ? node.flowFrom.map((item) => String(item || "").trim()).filter((item) => item) : [],
     isLandOwner: !!node.isLandOwner,
     willReceive: node.willReceive !== false,
   }));
@@ -726,31 +747,42 @@ function applyEngineResult(models, engineResult) {
 }
 
 function runDiagramEngine(models) {
+  const engineInput = buildEngineInput(models);
+  const persistedNodes = models
+    .filter((node) => node.kind === "person")
+    .map((node) => ({
+      id: node.id,
+      personId: node.person ? String(node.person.id || "").trim() : "",
+      label: node.label,
+      role: node.role,
+      relationType: node.relationType,
+      bucket: node.bucket,
+      allowsShare: node.allowsShare,
+      removable: node.removable,
+      parentPersonId: node.parentPersonId,
+      parentSlotId: node.parentSlotId,
+      familyGroupId: node.familyGroupId,
+      sourceId: node.sourceId,
+      flowFrom: node.flowFrom,
+      isLandOwner: node.isLandOwner,
+      willReceive: node.willReceive,
+    }));
   if (!inheritanceEngine?.runInheritanceCase) {
     return {
       nodes: models.map((node) => ({ ...node, sharePercent: "0.00" })),
-      engineState: { schemaVersion: 1, warnings: [{ code: "engine_missing", message: "Chưa tải được inheritance_engine.js." }] },
+      engineState: {
+        schemaVersion: 1,
+        nodes: persistedNodes,
+        warnings: [{ code: "engine_missing", message: "Chua tai duoc inheritance_engine.js." }],
+      },
     };
   }
-  const engineInput = buildEngineInput(models);
   const engineResult = inheritanceEngine.runInheritanceCase(engineInput);
   return {
     nodes: applyEngineResult(models, engineResult),
     engineState: {
       ...engineResult,
-      nodes: engineInput.nodes.map((node) => ({
-        id: node.id,
-        personId: node.personId,
-        label: node.label,
-        role: node.role,
-        relationType: node.relationType,
-        parentPersonId: node.parentPersonId,
-        parentSlotId: node.parentSlotId,
-        familyGroupId: node.familyGroupId,
-        sourceId: node.sourceId,
-        isLandOwner: node.isLandOwner,
-        willReceive: node.willReceive,
-      })),
+      nodes: persistedNodes,
     },
   };
 }
@@ -1177,7 +1209,7 @@ const BrickCard = React.forwardRef(function BrickCard(
         const result = onAssign(node.id, validation.person);
         if (!result?.ok) return;
         bridgeWorkflowUpdates([
-          { id: result.person.id, patch: { deleted: false, inPool: false, inDiagram: true } },
+          { id: result.person.id, patch: { inPool: false, inDiagram: true } },
           ...((result.displacedPersons || []).map((displaced) => ({
             id: displaced.id,
             patch: { inDiagram: false, inTree: false, inPool: true },
@@ -1948,10 +1980,16 @@ function FamilyTreeApp() {
     return nextNodes;
   }, [applyCommittedState, shareMode]);
 
-  const pruneLinkedNodes = useCallback((nodes, targetId) => {
+  const pruneLinkedNodes = useCallback((nodes, targetId, options = {}) => {
     if (targetId === "__noop__") return nodes.slice();
     const toRemove = collectPrunableNodeIds(nodes, targetId);
-    return nodes.filter((node) => !toRemove.has(node.id));
+    const keepTarget = options.keepTarget === true;
+    return nodes
+      .filter((node) => {
+        if (node.id === targetId) return keepTarget;
+        return !toRemove.has(node.id);
+      })
+      .map((node) => (node.id === targetId ? clearAssignedNode(node) : node));
   }, []);
 
   const materializeGhostNode = useCallback((node, prevNodes, person, idOverride = "") => {
@@ -2017,9 +2055,7 @@ function FamilyTreeApp() {
       const target = prevNodes.find((node) => node.id === nodeId);
       if (!target) return prevNodes;
       if (!target.removable) {
-        return prevNodes.map((node) =>
-          node.id === nodeId ? { ...node, person: null, willReceive: false, sharePercent: "0.00" } : node
-        );
+        return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId, { keepTarget: true }));
       }
       return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId));
     });
@@ -2077,13 +2113,12 @@ function FamilyTreeApp() {
       });
       return { ok: true, person: validation.person, displacedPersons: [] };
     }
-    const preview = assignPersonToNode(currentNodes, nodeId, validation.person);
     commitLogicalNodes((prevNodes) => {
       const recheck = validateAssignment(prevNodes, nodeId, validation.person);
       if (!recheck.ok) return prevNodes;
       return assignPersonToNode(prevNodes, nodeId, validation.person).nodes;
     });
-    return { ok: true, person: validation.person, displacedPersons: preview.displacedPersons };
+    return { ok: true, person: validation.person, displacedPersons: [] };
   }, [commitLogicalNodes, materializeGhostNode, nextId, shareMode]);
 
   const removeWithWorkflow = useCallback((nodeId) => {
@@ -2091,38 +2126,53 @@ function FamilyTreeApp() {
     onRemove(nodeId);
     bridgeWorkflowUpdates(affectedPeople.map((person) => ({
       id: person.id,
-      patch: { inDiagram: false, inTree: false, inPool: true, deleted: false },
+      patch: { inDiagram: false, inTree: false, inPool: true },
     })));
   }, [onRemove]);
 
   const moveWithinDiagram = useCallback((sourceNodeId, targetNodeId) => {
+    if (sourceNodeId === targetNodeId) return;
+    const currentNodes = logicalNodesRef.current;
+    const currentSource = currentNodes.find((node) => node.id === sourceNodeId);
+    const currentSourcePerson = normalizePersonPayload(currentSource?.person);
+    const currentResolved = resolveSubRelations(currentNodes, shareMode).nodes;
+    const currentTarget = currentResolved.find((node) => node.id === targetNodeId);
+    if (currentTarget?.person && String(currentTarget.person.id) !== String(currentSourcePerson?.id || "")) {
+      window.alert("Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao.");
+      return;
+    }
+    const affectedPeople = collectRemovedPeople(logicalNodesRef.current, sourceNodeId);
+    const sourcePerson = logicalNodesRef.current.find((node) => node.id === sourceNodeId)?.person;
+    const dependentPeople = affectedPeople.filter((person) => String(person.id) !== String(sourcePerson?.id || ""));
     commitLogicalNodes((prev) => {
       const source = prev.find((n) => n.id === sourceNodeId);
       if (!source?.person) return prev;
       const sourcePerson = normalizePersonPayload(source.person);
       const resolved = resolveSubRelations(prev, shareMode).nodes;
       const target = resolved.find((n) => n.id === targetNodeId);
+      if (target?.person && String(target.person.id) !== String(sourcePerson?.id || "")) {
+        window.alert("Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao.");
+        return prev;
+      }
+      const baseNodes = pruneLinkedNodes(prev, sourceNodeId, { keepTarget: true });
       if (target?.kind === "ghost") {
         return ensureSpareChildNode([
-          ...prev.map((node) =>
-            node.id === sourceNodeId ? { ...node, person: null, willReceive: false, sharePercent: "0.00" } : node
-          ),
-          materializeGhostNode(target, prev, sourcePerson, nextId(ghostMaterializedIdPrefix(target))),
+          ...baseNodes,
+          materializeGhostNode(target, baseNodes, sourcePerson, nextId(ghostMaterializedIdPrefix(target))),
         ]);
       }
-      const targetPerson = target?.person ? normalizePersonPayload(target.person) : null;
       return ensureSpareChildNode(
-        prev.map((node) => {
-          if (node.id === sourceNodeId) {
-            if (!targetPerson) return { ...node, person: null, willReceive: false, sharePercent: "0.00" };
-            return buildAssignedNode(node, prev, targetPerson);
-          }
-          if (node.id === targetNodeId) return buildAssignedNode(node, prev, sourcePerson);
+        baseNodes.map((node) => {
+          if (node.id === targetNodeId) return buildAssignedNode(node, baseNodes, sourcePerson);
           return node;
         })
       );
     });
-  }, [commitLogicalNodes, materializeGhostNode, nextId, shareMode]);
+    bridgeWorkflowUpdates(dependentPeople.map((person) => ({
+      id: person.id,
+      patch: { inDiagram: false, inTree: false, inPool: true },
+    })));
+  }, [commitLogicalNodes, materializeGhostNode, nextId, pruneLinkedNodes, shareMode]);
 
   const onToggleReceive = useCallback((nodeId) => {
     commitLogicalNodes((prevNodes) =>
@@ -2158,6 +2208,44 @@ function FamilyTreeApp() {
     window.addEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
     return () => window.removeEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
   }, [commitLogicalNodes]);
+
+  useEffect(() => {
+    const handleStagePersonsCommitted = (evt) => {
+      const stageIds = new Set((evt?.detail?.stageIds || []).map((id) => String(id)));
+      const removedIds = new Set((evt?.detail?.removedIds || []).map((id) => String(id)).filter(Boolean));
+      const returnedPeopleById = new Map();
+      commitLogicalNodes((prevNodes) => {
+        let nextNodes = prevNodes;
+        removedIds.forEach((removedId) => {
+          const anchor = nextNodes.find((node) => {
+            const personId = String(node.person?.id || node.personId || "").trim();
+            return personId === removedId;
+          });
+          if (!anchor) return;
+          collectRemovedPeople(nextNodes, anchor.id).forEach((person) => {
+            if (person?.id && stageIds.has(String(person.id))) returnedPeopleById.set(String(person.id), person);
+          });
+          nextNodes = pruneLinkedNodes(nextNodes, anchor.id, { keepTarget: anchor.removable === false });
+        });
+        return nextNodes
+          .map((node) => {
+            const personId = String(node.person?.id || node.personId || "").trim();
+            if (!personId || stageIds.has(personId)) return node;
+            if (node.removable === false) {
+              return clearAssignedNode(node);
+            }
+            return null;
+          })
+          .filter((node) => Boolean(node));
+      });
+      bridgeWorkflowUpdates(Array.from(returnedPeopleById.values()).map((person) => ({
+        id: person.id,
+        patch: { inDiagram: false, inTree: false, inPool: true },
+      })));
+    };
+    window.addEventListener("caseStagePersonsCommitted", handleStagePersonsCommitted);
+    return () => window.removeEventListener("caseStagePersonsCommitted", handleStagePersonsCommitted);
+  }, [commitLogicalNodes, pruneLinkedNodes]);
 
   const onGhostExpand = useCallback((nodeId) => {
     commitLogicalNodes((prevNodes) => {
