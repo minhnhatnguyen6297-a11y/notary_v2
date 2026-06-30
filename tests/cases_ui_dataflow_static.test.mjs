@@ -292,9 +292,10 @@ test("legacy staged pool button is removed so only Cap nhat pushes stage to pool
   assert.equal(formHtml.includes("addPersonRowToPool = function"), false);
 });
 
-test("stage draft rows do not expose a direct remove button", () => {
-  assert.equal(formHtml.includes("staged-remove-btn"), false);
-  assert.equal(formHtml.includes("DRAFT_ROW_REMOVED"), false);
+test("stage draft rows expose a direct remove button scoped to stage only", () => {
+  assert.ok(formHtml.includes("stage-remove-btn"), "stage rows must have a remove button");
+  assert.equal(formHtml.includes("staged-remove-btn"), false, "old staged-remove-btn class must not exist");
+  assert.equal(formHtml.includes("DRAFT_ROW_REMOVED"), false, "no legacy DRAFT_ROW_REMOVED event");
   assert.equal(formHtml.includes('title="XÃ³a khi workflow"'), false);
   assert.equal(formHtml.includes('title="XÃ³a khi danh sÃ¡ch"'), false);
   assert.equal(formHtml.includes('title="XoÃ¡ khi danh sÃ¡ch"'), false);

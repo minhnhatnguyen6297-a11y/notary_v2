@@ -326,11 +326,11 @@ Mac dinh trong phase OCR CCCD nguoi:
 - Neu co nut thung rac/xoa tat ca anh, agent phai coi day la nut xoa ro rang va khong gan hanh vi xoa nay cho nut khac.
 
 Mac dinh trong phase stage:
-- Tam thoi khong con nut xoa/thung rac truc tiep tren tung dong stage.
-- Agent khong duoc tu gan them duong xoa row stage moi neu chua co task/spec rieng.
+- Moi dong stage co nut xoa `.stage-remove-btn` o cuoi dong.
+- Bam nut xoa: xoa row khoi DOM ngay, khong canh bao, khong confirm.
+- Xoa row chi la UI draft; cascade pool/diagram chi xay ra sau khi user bam `Cap nhat`.
 - Nut `Cap nhat` khong xoa stage.
 - Nut `Cap nhat` duoc phep clear du lieu/anh tam trong cua so OCR sau khi da day du lieu stage sang cac vung lien quan.
-- Neu sau nay thiet ke lai thao tac xoa dong stage, cascade pool/diagram van chi duoc xay ra sau khi Stage thay doi va user bam `Cap nhat`.
 
 Mac dinh trong phase pool/diagram:
 - Drop tu pool sang diagram chi xoa the khoi pool, khong xoa nguoi khoi stage.
@@ -403,7 +403,7 @@ Open issues trai spec:
 - `STAGE-3`: resolved 2026-06-22. Pool chi tinh tu committed Stage snapshot tru diagram assignments; da bo fallback legacy theo workflow flag `inPool` trong `derivePoolVisibility()`. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`.
 - `STAGE-4`: resolved 2026-06-18. Submit ho so khong con tu goi `saveParticipantDraftRows`; `case_state_json` khi submit lay tu committed stage snapshot, khong lay draft DOM chua `Cap nhat`. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`.
 - `STAGE-5`: resolved 2026-06-22. Khi `Cap nhat`, person bi xoa khoi stage bi mark deleted khoi pool/workflow; React diagram dung `removedIds` de prune nhanh phu thuoc, xoa card khong con trong Stage, va tra dependent people con trong Stage ve pool. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`.
-- `STAGE-6`: resolved 2026-06-23. Bo han nut xoa/thung rac tren tung dong Stage draft de khong con duong xoa truc tiep ngoai `Cap nhat`; code khong con render `staged-remove-btn` hay debug event `DRAFT_ROW_REMOVED`. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`, `.\verify.bat`.
+- `STAGE-6`: superseded 2026-06-26. Them lai nut xoa `.stage-remove-btn` tren tung dong Stage draft; bam xoa row khoi DOM ngay, khong canh bao. Cascade pool/diagram chi xay ra sau khi user bam `Cap nhat` (via `removedIds` trong `persistCommittedStageSnapshot`). Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`.
 - `STAGE-7`: resolved 2026-06-23. Legacy pool/tree workflow khong con duoc tu set `inStaging: false` khi keo tha, restore participant, hay tra nguoi ve pool; membership Stage chi doi tai Stage commit/xoa hop le. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`, `.\verify.bat`.
 - `STAGE-8`: resolved 2026-06-23. Workflow flag `deleted: true` chi duoc dat trong duong Stage commit khi `removedIds` roi khoi committed Stage; pool/tree/diagram khong co quyen tu danh dau xoa nguoi khoi ho so. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`, `.\verify.bat`.
 - `STAGE-9`: resolved 2026-06-23. Workflow patch `deleted: false` chi hop le khi nguoi dang duoc dua vao Stage (`inStaging: true`); pool/tree/diagram khong duoc tu revive nguoi da bi loai khoi Stage. Tang guard `setCustomerWorkflowState()` se giu `deleted: true` neu patch undelete khong di kem Stage flow hop le. Verify: `node --test tests/cases_ui_dataflow_static.test.mjs`, `.\verify.bat`.

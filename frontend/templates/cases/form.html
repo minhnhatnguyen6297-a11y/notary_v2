@@ -12239,6 +12239,8 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
+
       </div>`;
 
 
@@ -12636,6 +12638,8 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       <div class="row-actions">
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
+
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
 
         <button type="button" class="btn btn-xs btn-primary stage-pool-disabled d-none" title="disabled legacy pool action" tabindex="-1" aria-hidden="true">+</button>
 
@@ -14255,6 +14259,16 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       document.getElementById('ocr-btn-save-results')?.addEventListener('click', saveOcrResultsToStage);
 
       document.getElementById('btn-save-participants')?.addEventListener('click', saveParticipantDraftRows);
+
+      document.getElementById('ocr-staging-area')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.stage-remove-btn');
+        if (!btn) return;
+        const row = btn.closest('.ocr-staged-row');
+        if (!row) return;
+        row.remove();
+        _updateStagingCount();
+        _syncAllDraftRowStates();
+      });
 
     })(); // end OCR module
   </script>
