@@ -18,7 +18,7 @@ let bootstrapSeed = 1;
 const BASE_NODE_DEFS = [
   {
     id: "father",
-    label: "Cha ruột",
+    label: "",
     role: "Cha",
     relationType: "parent",
     bucket: 0,
@@ -28,7 +28,7 @@ const BASE_NODE_DEFS = [
   },
   {
     id: "mother",
-    label: "Mẹ ruột",
+    label: "",
     role: "Mẹ",
     relationType: "parent",
     bucket: 0,
@@ -38,7 +38,7 @@ const BASE_NODE_DEFS = [
   },
   {
     id: "spouse_father",
-    label: "Cha vợ/chồng",
+    label: "",
     role: "Cha_vc",
     relationType: "spouseParent",
     bucket: 0,
@@ -48,7 +48,7 @@ const BASE_NODE_DEFS = [
   },
   {
     id: "spouse_mother",
-    label: "Mẹ vợ/chồng",
+    label: "",
     role: "Me_vc",
     relationType: "spouseParent",
     bucket: 0,
@@ -58,7 +58,7 @@ const BASE_NODE_DEFS = [
   },
   {
     id: "owner",
-    label: "Chủ đất",
+    label: "",
     role: "Owner",
     relationType: "owner",
     bucket: 1,
@@ -69,13 +69,14 @@ const BASE_NODE_DEFS = [
   },
   {
     id: "spouse",
-    label: "Vợ/Chồng",
+    label: "",
     role: "Vợ/Chồng",
     relationType: "spouse",
     bucket: 1,
     allowsShare: true,
     removable: false,
     sourceId: "owner",
+    spouseOf: "owner",
   },
 ];
 
@@ -170,6 +171,7 @@ function createLogicalNode(overrides) {
     parentPersonId: overrides.parentPersonId || "",
     familyGroupId: overrides.familyGroupId || "",
     sourceId: overrides.sourceId || null,
+    spouseOf: overrides.spouseOf || "",
     flowFrom: Array.isArray(overrides.flowFrom)
       ? overrides.flowFrom.map((item) => String(item || "").trim()).filter((item) => item)
       : [],
@@ -195,7 +197,7 @@ function createBaseNodes() {
   base.push(
     createLogicalNode({
       id: "child_1",
-      label: "Con ruột",
+      label: "",
       role: "Con",
       relationType: "child",
       bucket: 2,
@@ -238,7 +240,20 @@ function validateAssignment(logicalNodes, nodeId, person, targetNodes = logicalN
   );
   if (!isValidTarget) return { ok: false, reason: "Ô nhận không hợp lệ." };
   if (targetNode.kind === "person" && targetNode.person && String(targetNode.person.id) !== String(candidate.id)) {
-    return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
+    const hasPending = targetNodes.some((n) => n.kind === "pendingSpouse" && n.parentSlotId === nodeId);
+    if (hasPending) {
+      return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
+    }
+    const hasRealSpouse = targetNodes.some((n) =>
+      n.kind === "person" &&
+      (n.relationType === "spouse" || n.relationType === "branchSpouse") &&
+      (n.spouseOf === nodeId || (nodeId === "owner" && n.id === "spouse" && !n.spouseOf)) &&
+      n.person
+    );
+    if (hasRealSpouse) {
+      return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
+    }
+    return { ok: true, person: candidate, targetNode, createPending: true };
   }
   const duplicate = logicalNodes.find(
     (node) => node.id !== nodeId && node.kind === "person" && node.person && String(node.person.id) === String(candidate.id)
@@ -384,7 +399,7 @@ function ensureSpareChildNode(nodes) {
   return [
     ...nodes,
     createDynamicNode("child", {
-      label: "Con ruột",
+      label: "",
       role: "Con",
       relationType: "child",
       bucket: 2,
@@ -437,6 +452,7 @@ function hydrateEngineStateNodes() {
       allowsShare: saved.allowsShare !== false,
       removable: saved.removable !== false,
       sourceId: saved.sourceId || null,
+      spouseOf: saved.spouseOf || (saved.id === "spouse" ? "owner" : ""),
       flowFrom: Array.isArray(saved.flowFrom)
         ? saved.flowFrom.map((item) => String(item || "").trim()).filter((item) => item)
         : [],
@@ -505,7 +521,7 @@ function hydrateInitialNodes() {
     }
     if (participant.role === "Vợ/Chồng") {
       nodes = nodes.map((node) =>
-        node.id === "spouse" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive } : node
+        node.id === "spouse" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, spouseOf: "owner" } : node
       );
       return;
     }
@@ -520,8 +536,8 @@ function hydrateInitialNodes() {
       } else {
         nodes = [
           ...nodes,
-          createDynamicNode("child", {
-            label: "Con ruột", role: "Con", relationType: "child", bucket: 2,
+            createDynamicNode("child", {
+            label: "", role: "Con", relationType: "child", bucket: 2,
             allowsShare: true, removable: true, sourceId: "owner", parentSlotId: "owner",
             familyGroupId: "ownerSpouse",
             parentPersonId: buildOwnerPayload()?.id || "",
@@ -956,13 +972,18 @@ function createFallbackDiagramStore(initialSnapshot, onPublish) {
 // ─── Brick-Wall Render Components ────────────────────────────────────────────
 
 const CARD_WIDTH = 140;
+const CARD_MIN_WIDTH = 100;
+const CARD_CONNECTOR_WIDTH = 28;
+const TIER_UNIT_GAP = 12;
 
 const S = {
-  card: (isDragOver, isOccupied, isDead, isGhost) => ({
-    width: CARD_WIDTH,
-    minHeight: isGhost ? 52 : isOccupied ? 90 : 60,
+  card: (isDragOver, isOccupied, isDead, isGhost, isPending) => ({
+    width: "100%",
+    minHeight: isGhost ? 52 : isOccupied ? 86 : 56,
     border: isGhost
       ? "2px dashed #c084fc"
+      : isPending
+      ? "2px solid #f59e0b"
       : isDragOver
       ? "2px solid #2563eb"
       : isOccupied
@@ -971,6 +992,8 @@ const S = {
     borderRadius: 12,
     background: isGhost
       ? "rgba(245,243,255,.7)"
+      : isPending
+      ? "linear-gradient(180deg,#fffbeb,#fef3c7)"
       : isDragOver
       ? "linear-gradient(180deg,#eff6ff,#dbeafe)"
       : isOccupied
@@ -978,24 +1001,27 @@ const S = {
         ? "linear-gradient(180deg,#f8fafc,#eef2f7)"
         : "linear-gradient(180deg,#fff7ed,#fffdf7)"
       : "#f8fafc",
-    boxShadow: isDragOver
+    boxShadow: isPending
+      ? "0 0 0 3px rgba(245,158,11,.25), 0 4px 12px rgba(15,23,42,.08)"
+      : isDragOver
       ? "0 0 0 3px rgba(37,99,235,.2), 0 4px 12px rgba(15,23,42,.08)"
       : "0 2px 8px rgba(15,23,42,.07)",
-    padding: "6px 8px",
+    padding: isPending ? "6px 8px 8px" : "6px 8px",
     position: "relative",
-    cursor: isGhost ? "pointer" : "default",
+    cursor: isGhost ? "pointer" : isPending ? "default" : "default",
     transition: "border .12s, background .12s, box-shadow .12s",
     flexShrink: 0,
-    opacity: isDead ? 0.88 : 1,
-    filter: isDead ? "grayscale(.18)" : "none",
+    opacity: isDead && !isPending ? 0.88 : 1,
+    filter: isDead && !isPending ? "grayscale(.18)" : "none",
     boxSizing: "border-box",
+    overflow: "hidden",
   }),
   label: {
     fontSize: 8, fontWeight: 700, color: "#94a3b8", marginBottom: 4,
     whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
   },
-  name: { fontSize: 12, fontWeight: 800, color: "#0f172a", lineHeight: 1.25, wordBreak: "break-word" },
-  meta: { fontSize: 11, color: "#64748b", marginTop: 2 },
+  name: { fontSize: 14, fontWeight: 800, color: "#0f172a", lineHeight: 1.25, wordBreak: "break-word" },
+  meta: { fontSize: 12, color: "#64748b", marginTop: 3 },
   placeholder: { fontSize: 10, color: "#9ca3af", textAlign: "center", padding: "4px 0" },
   insightChip: (color) => ({
     fontSize: 9, color, background: color + "18",
@@ -1144,41 +1170,38 @@ function getSlottedCardPoint(box, side, slotIndex, slotCount, mode) {
   return { x, y };
 }
 
+function buildOrthogonalPath(points) {
+  if (!points || points.length < 2) return "";
+  const [first, ...rest] = points;
+  return `M ${first.x} ${first.y}` + rest.map((p) => ` L ${p.x} ${p.y}`).join("");
+}
+
 function buildSoftCurve(source, target) {
-  const dx = target.x - source.x;
-  const dy = target.y - source.y;
-  const verticalBias = Math.max(28, Math.min(120, Math.abs(dy) * 0.55));
-  const horizontalBias = Math.max(24, Math.min(120, Math.abs(dx) * 0.45));
-  if (Math.abs(dx) > Math.abs(dy)) {
-    const c1 = { x: source.x + (dx > 0 ? horizontalBias : -horizontalBias), y: source.y };
-    const c2 = { x: target.x - (dx > 0 ? horizontalBias : -horizontalBias), y: target.y };
-    return `M ${source.x} ${source.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`;
-  }
-  const c1 = { x: source.x, y: source.y + (dy > 0 ? verticalBias : -verticalBias) };
-  const c2 = { x: target.x, y: target.y - (dy > 0 ? verticalBias : -verticalBias) };
-  return `M ${source.x} ${source.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`;
+  // Kept for any legacy call sites; diagram now uses buildOrthogonalPath.
+  return buildOrthogonalPath([source, target]);
 }
 
 const BrickCard = React.forwardRef(function BrickCard(
-  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onGhostExpand, onValidateAssign, shareMode },
+  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onGhostExpand, onValidateAssign, shareMode, onPendingDecision, width },
   ref
 ) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isOccupied = !!node.person;
   const isDead = !!node.person?.death;
   const isGhost = node.kind === "ghost";
-  const canToggleReceive = isOccupied && node.showReceiveControl && !node.disabledReason && !isDead;
-  const showShareSummary = isOccupied && node.showShareSummary;
-  const showReceiveCheckbox = canToggleReceive || (isOccupied && node.hasInflow && !isDead);
+  const isPending = node.kind === "pendingSpouse";
+  const canToggleReceive = isOccupied && node.showReceiveControl && !node.disabledReason && !isDead && !isPending;
+  const showShareSummary = isOccupied && node.showShareSummary && !isPending;
+  const showReceiveCheckbox = (canToggleReceive || (isOccupied && node.hasInflow && !isDead)) && !isPending;
   const displayLabel = isGhost
     ? (node.ghostAction === "addGrandchild"
-      ? "Con the vi"
+      ? "Con thế vị"
       : node.ghostAction === "addBranchSpouse"
-      ? "Vo/Chong cua nhanh"
+      ? "Vợ/Chồng của nhánh"
       : node.ghostAction === "addSibling"
-      ? "Anh/Chi/Em"
+      ? "Anh/Chị/Em"
       : node.label)
-    : node.label;
+    : "";
 
   const handleDragOver = (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -1219,45 +1242,60 @@ const BrickCard = React.forwardRef(function BrickCard(
     } catch (err) { console.error("BrickCard drop error", err); }
   };
   const handleDragStart = (e) => {
-    if (!isOccupied) return;
+    if (!isOccupied || isPending) return;
     e.dataTransfer.setData("application/json", JSON.stringify({ ...node.person, sourceNodeId: node.id }));
     e.dataTransfer.effectAllowed = "all";
   };
 
+  const cardStyle = S.card(isDragOver, isOccupied, isDead, isGhost, isPending);
+  const finalStyle = width !== undefined ? { ...cardStyle, width, minWidth: width, maxWidth: width } : cardStyle;
+
   return (
     <div
       ref={ref}
-      style={S.card(isDragOver, isOccupied, isDead, isGhost)}
-      draggable={isOccupied}
+      style={finalStyle}
+      draggable={isOccupied && !isPending}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Label row */}
-      <div style={S.label}>{displayLabel}</div>
+      {/* Label row (ghosts only) */}
+      {isGhost && <div style={S.label}>{displayLabel}</div>}
+
+      {/* Pending banner */}
+      {isPending && (
+        <div style={{
+          fontSize: 9, fontWeight: 800, color: "#92400e", background: "#fde68a",
+          borderRadius: 6, padding: "2px 6px", marginBottom: 5, textAlign: "center",
+        }}>
+          Chèn vợ/chồng?
+        </div>
+      )}
 
       {/* Land owner badge */}
-      <span
-        style={{ ...S.landBadge(!!node.isLandOwner), opacity: isOccupied ? 1 : 0.35 }}
-        title="Đánh dấu chủ sở hữu tài sản"
-        draggable={false}
-        onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!isOccupied) return;
-          onToggleLandOwner?.(node.id);
-        }}
-      >★</span>
+      {!isPending && (
+        <span
+          style={{ ...S.landBadge(!!node.isLandOwner), opacity: isOccupied ? 1 : 0.35 }}
+          title="Đánh dấu chủ sở hữu tài sản"
+          draggable={false}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isOccupied || isPending) return;
+            onToggleLandOwner?.(node.id);
+          }}
+        >★</span>
+      )}
 
       {/* Remove button */}
-      {isOccupied && (
+      {isOccupied && !isPending && (
         <button type="button" style={S.removeBtn} onClick={() => onRemove(node.id)} title="Xoá">×</button>
       )}
 
       {/* Person content */}
-      {!isOccupied ? (
-        <div style={S.placeholder}>Thả người<br />vào đây...</div>
+      {!isOccupied && !isPending ? (
+        <div style={S.placeholder}>Thả ngườii<br />vào đây...</div>
       ) : (
         <>
           <div style={S.name}>{node.person.name}</div>
@@ -1265,7 +1303,7 @@ const BrickCard = React.forwardRef(function BrickCard(
             {formatYear(node.person.birth) || "?"}{isDead ? ` · ✝${formatYear(node.person.death)}` : ""}
           </div>
 
-          {node.disabledReason ? (
+          {node.disabledReason && !isPending ? (
             <div style={S.insightChip("#92400e")}>{node.disabledReason}</div>
           ) : null}
 
@@ -1288,9 +1326,30 @@ const BrickCard = React.forwardRef(function BrickCard(
             </div>
           )}
 
-          {node.traceLabel && isDead ? (
+          {node.traceLabel && isDead && !isPending ? (
             <div style={S.insightChip("#475569")}>{node.traceLabel}</div>
           ) : null}
+
+          {isPending && (
+            <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+              <button
+                type="button"
+                style={{
+                  flex: 1, fontSize: 10, fontWeight: 700, color: "#14532d", background: "#86efac",
+                  border: "none", borderRadius: 6, padding: "3px 0", cursor: "pointer",
+                }}
+                onClick={(e) => { e.stopPropagation(); onPendingDecision?.(node.id, true); }}
+              >Có</button>
+              <button
+                type="button"
+                style={{
+                  flex: 1, fontSize: 10, fontWeight: 700, color: "#7f1d1d", background: "#fecaca",
+                  border: "none", borderRadius: 6, padding: "3px 0", cursor: "pointer",
+                }}
+                onClick={(e) => { e.stopPropagation(); onPendingDecision?.(node.id, false); }}
+              >Không</button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -1309,37 +1368,36 @@ function PairConnector({ show }) {
   );
 }
 
-function SvgPairConnector({ show }) {
-  if (!show) return <div style={{ width: 20, flexShrink: 0 }} />;
+function SvgPairConnector({ show, style }) {
+  if (!show) return <div style={{ width: 20, flexShrink: 0, ...style }} />;
   return (
-    <div style={{ width: 28, height: 24, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ width: CARD_CONNECTOR_WIDTH, height: 24, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", ...style }}>
       <svg width="28" height="16" viewBox="0 0 28 16" aria-hidden="true">
-        <line x1="5" y1="8" x2="23" y2="8" stroke="#94a3b8" strokeWidth="1.35" strokeDasharray="4 4" strokeLinecap="round" opacity="0.55" />
-        <polyline points="7,5 3,8 7,11" fill="none" stroke="#94a3b8" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
-        <polyline points="21,5 25,8 21,11" fill="none" stroke="#94a3b8" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" opacity="0.55" />
+        <line x1="2" y1="8" x2="26" y2="8" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" opacity="0.65" />
+        <text x="14" y="11" textAnchor="middle" fontSize="9" fill="#64748b" opacity="0.75">♡</text>
       </svg>
     </div>
   );
 }
 
 // A pair of nodes (primary + optional spouse/partner node)
-function PairUnit({ primaryNode, spouseNode, handlers, shareMode }) {
+function PairUnit({ primaryNode, spouseNode, handlers, shareMode, cardWidth }) {
   const showConnector = !!spouseNode;
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-      <BrickCard node={primaryNode} {...handlers} shareMode={shareMode} />
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 0, flexShrink: 0 }}>
+      <BrickCard node={primaryNode} {...handlers} shareMode={shareMode} width={cardWidth} />
       <SvgPairConnector show={showConnector} />
-      {spouseNode && <BrickCard node={spouseNode} {...handlers} shareMode={shareMode} />}
+      {spouseNode && <BrickCard node={spouseNode} {...handlers} shareMode={shareMode} width={cardWidth} />}
     </div>
   );
 }
 
 // Ghost button for tier
-function GhostButton({ node, onGhostExpand }) {
+function GhostButton({ node, onGhostExpand, width }) {
   return (
     <div
       style={{
-        width: 120, minHeight: 52, border: "2px dashed #c084fc",
+        width: width ?? 120, minHeight: 52, border: "2px dashed #c084fc",
         borderRadius: 12, background: "rgba(245,243,255,.7)",
         display: "flex", alignItems: "center", justifyContent: "center",
         cursor: "pointer", flexShrink: 0,
@@ -1569,7 +1627,8 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
   const nodeRefs = useRef({});
   const groupRefs = useRef({});
   const drawFrameRef = useRef(0);
-  const [connectorModel, setConnectorModel] = useState({ width: 0, height: 0, kinshipPaths: [], flowPaths: [] });
+  const [connectorModel, setConnectorModel] = useState({ width: 0, height: 0, kinshipPaths: [] });
+  const [cardWidth, setCardWidth] = useState(CARD_WIDTH);
 
   const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; };
   const handleDrop = (e) => e.preventDefault();
@@ -1586,12 +1645,13 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
 
   const personNodes = resolvedNodes.filter((n) => n.kind === "person");
   const ghostNodes = resolvedNodes.filter((n) => n.kind === "ghost");
+  const pendingNodes = resolvedNodes.filter((n) => n.kind === "pendingSpouse");
   const father = personNodes.find((n) => n.id === "father");
   const mother = personNodes.find((n) => n.id === "mother");
   const spFather = personNodes.find((n) => n.id === "spouse_father");
   const spMother = personNodes.find((n) => n.id === "spouse_mother");
   const owner = personNodes.find((n) => n.id === "owner");
-  const spouse = personNodes.find((n) => n.id === "spouse");
+  const spouse = personNodes.find((n) => n.relationType === "spouse" && (n.spouseOf === "owner" || n.id === "spouse"));
   const siblings = personNodes.filter((n) => n.relationType === "sibling");
   const ghostSiblings = ghostNodes.filter((n) => n.relationType === "ghostSibling");
   const kinshipFamilyOf = (node) => diagramEdges?.getKinshipFamilyKey ? diagramEdges.getKinshipFamilyKey(node, resolvedNodes) : "";
@@ -1617,72 +1677,118 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
     personNodeById.get(parentId)?.relationType !== "sibling"
   );
 
+  function getPendingFor(nodeId) {
+    return pendingNodes.find((p) => p.parentSlotId === nodeId);
+  }
+
+  function getBranchSpouseFor(childId) {
+    return (
+      personNodes.find((n) => n.relationType === "branchSpouse" && n.parentSlotId === childId) ||
+      pendingNodes.find((p) => p.parentSlotId === childId) ||
+      ghostNodes.find((n) => n.relationType === "ghostBranchSpouse" && n.parentSlotId === childId)
+    );
+  }
+
+  const computeCardWidth = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return CARD_WIDTH;
+    const availableWidth = Math.max(320, container.clientWidth - 48);
+    const counts = [];
+    if (father || mother) counts.push((father ? 1 : 0) + (mother ? 1 : 0));
+    if (spFather || spMother) counts.push((spFather ? 1 : 0) + (spMother ? 1 : 0));
+    const tier1Count = (owner ? 1 : 0) +
+      birthSiblings.length + birthGhostSiblings.length +
+      spouseSiblings.length + spouseGhostSiblings.length +
+      ambiguousSiblings.length + ambiguousGhostSiblings.length;
+    if (tier1Count > 0) counts.push(tier1Count);
+    const tier2Count = children.length + ghostChildren.length + siblingGrandchildParentIds.length;
+    if (tier2Count > 0) counts.push(tier2Count);
+    let tier3Count = 0;
+    deeperGrandchildParentIds.forEach((parentId) => {
+      tier3Count += grandchildren.filter((n) => n.parentSlotId === parentId).length;
+      tier3Count += ghostGrandchildren.filter((n) => n.parentSlotId === parentId).length;
+    });
+    if (tier3Count > 0) counts.push(tier3Count);
+    const maxUnits = Math.max(1, ...counts);
+    const raw = Math.floor(availableWidth / maxUnits);
+    return Math.max(CARD_MIN_WIDTH, Math.min(CARD_WIDTH, raw));
+  }, [father, mother, spFather, spMother, owner, birthSiblings, birthGhostSiblings, spouseSiblings, spouseGhostSiblings, ambiguousSiblings, ambiguousGhostSiblings, children, ghostChildren, siblingGrandchildParentIds, grandchildren, ghostGrandchildren, deeperGrandchildParentIds]);
+
+  useEffect(() => {
+    const updateWidth = () => setCardWidth(computeCardWidth());
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    let observer = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      observer = new ResizeObserver(updateWidth);
+      observer.observe(containerRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", updateWidth);
+      if (observer) observer.disconnect();
+    };
+  }, [computeCardWidth]);
+
   const drawConnectors = useCallback(() => {
     const contentElement = contentRef.current;
     if (!contentElement) return;
 
     const getNodeBox = (nodeId) => getRelativeBox(nodeRefs.current[nodeId], contentElement);
+
     const edgeModel = diagramEdges?.buildDiagramEdges
       ? diagramEdges.buildDiagramEdges(resolvedNodes, engineState)
-      : { kinshipEdges: [], flowEdges: [] };
+      : { kinshipEdges: [] };
 
-    const getSourceBox = (edge) => {
-      if (edge.sourceNodeIds?.length) return getCombinedBox(edge.sourceNodeIds.map((nodeId) => getNodeBox(nodeId)));
-      return getNodeBox(edge.sourceNodeId);
-    };
+    const paths = [];
 
-    const kinshipPaths = (edgeModel.kinshipEdges || []).map((edge) => {
-      const sourceBox = getSourceBox(edge);
-      const targetBox = getNodeBox(edge.targetNodeId);
-      if (!sourceBox || !targetBox) return null;
-      const source = getKinshipSourcePoint(sourceBox, targetBox);
-      if (!source) return null;
-      const targetIsBelow = getBoxCenterY(targetBox) >= getBoxCenterY(sourceBox);
-      const target = {
-        x: getBoxCenterX(targetBox),
-        y: targetIsBelow ? targetBox.top - 4 : targetBox.bottom + 4,
-      };
-      return { key: edge.id, d: buildSoftCurve(source, target) };
-    }).filter(Boolean);
+    // Group kinship edges by source pair/single for T-junctions.
+    const edgeGroups = new Map();
+    (edgeModel.kinshipEdges || []).forEach((edge) => {
+      const sourceKey = (edge.sourceNodeIds || [edge.sourceNodeId]).filter(Boolean).sort().join("+");
+      if (!edgeGroups.has(sourceKey)) edgeGroups.set(sourceKey, []);
+      edgeGroups.get(sourceKey).push(edge);
+    });
 
-    const measuredFlowEdges = (edgeModel.flowEdges || []).map((edge) => {
-      const sourceBox = getNodeBox(edge.sourceNodeId);
-      const targetBox = getNodeBox(edge.targetNodeId);
-      const orientation = getFlowOrientation(sourceBox, targetBox);
-      if (!sourceBox || !targetBox || !orientation) return null;
-      return { ...edge, sourceBox, targetBox, orientation };
-    }).filter(Boolean);
+    edgeGroups.forEach((edges, sourceKey) => {
+      const sourceNodeIds = sourceKey.split("+").filter(Boolean);
+      const sourceBoxes = sourceNodeIds.map(getNodeBox).filter(Boolean);
+      if (!sourceBoxes.length) return;
+      const sourceBox = sourceBoxes.length > 1 ? getCombinedBox(sourceBoxes) : sourceBoxes[0];
+      const sourceCenterX = getBoxCenterX(sourceBox);
+      const sourceBottomY = getBoxBottomY(sourceBox);
 
-    const sourceSlotMap = buildEdgeSlotMap(
-      measuredFlowEdges,
-      (edge) => `${edge.sourceNodeId}:${edge.orientation.sourceSide}`,
-      (edge) => slotSortValue(edge.targetBox, edge.orientation.sourceSide)
-    );
-    const targetSlotMap = buildEdgeSlotMap(
-      measuredFlowEdges,
-      (edge) => `${edge.targetNodeId}:${edge.orientation.targetSide}`,
-      (edge) => slotSortValue(edge.sourceBox, edge.orientation.targetSide)
-    );
+      const targetBoxes = edges.map((edge) => ({ edge, box: getNodeBox(edge.targetNodeId) })).filter((item) => item.box);
+      if (!targetBoxes.length) return;
 
-    const flowPaths = measuredFlowEdges.map((edge) => {
-      const sourceSlot = sourceSlotMap.get(edge.id) || { index: 0, count: 1 };
-      const targetSlot = targetSlotMap.get(edge.id) || { index: 0, count: 1 };
-      const source = getSlottedCardPoint(edge.sourceBox, edge.orientation.sourceSide, sourceSlot.index, sourceSlot.count, "source");
-      const target = getSlottedCardPoint(edge.targetBox, edge.orientation.targetSide, targetSlot.index, targetSlot.count, "target");
-      if (!source || !target) return null;
-      return {
-        key: edge.id,
-        d: buildSoftCurve(source, target),
-        fraction: edge.fraction,
-        eventDateKey: edge.eventDateKey || "",
-      };
-    }).filter(Boolean);
+      const targetXs = targetBoxes.map((item) => getBoxCenterX(item.box));
+      const minTargetTop = Math.min(...targetBoxes.map((item) => item.box.top));
+      const branchY = sourceBottomY + Math.max(14, (minTargetTop - sourceBottomY) * 0.42);
+
+      paths.push({
+        key: `kin-drop:${sourceKey}`,
+        d: buildOrthogonalPath([{ x: sourceCenterX, y: sourceBottomY + 2 }, { x: sourceCenterX, y: branchY }]),
+      });
+
+      const leftX = Math.min(sourceCenterX, ...targetXs);
+      const rightX = Math.max(sourceCenterX, ...targetXs);
+      paths.push({
+        key: `kin-branch:${sourceKey}`,
+        d: buildOrthogonalPath([{ x: leftX, y: branchY }, { x: rightX, y: branchY }]),
+      });
+
+      targetBoxes.forEach((item, index) => {
+        const targetCenterX = getBoxCenterX(item.box);
+        paths.push({
+          key: `kin-target:${sourceKey}:${index}:${item.edge.targetNodeId}`,
+          d: buildOrthogonalPath([{ x: targetCenterX, y: branchY }, { x: targetCenterX, y: item.box.top - 2 }]),
+        });
+      });
+    });
 
     setConnectorModel({
       width: Math.max(contentElement.scrollWidth, contentElement.clientWidth),
       height: Math.max(contentElement.scrollHeight, contentElement.clientHeight),
-      kinshipPaths,
-      flowPaths,
+      kinshipPaths: paths,
     });
   }, [resolvedNodes, engineState]);
 
@@ -1702,7 +1808,7 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
         drawFrameRef.current = 0;
       }
     };
-  }, [scheduleConnectorDraw, resolvedNodes]);
+  }, [scheduleConnectorDraw, resolvedNodes, cardWidth]);
 
   useEffect(() => {
     const contentElement = contentRef.current;
@@ -1721,130 +1827,174 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
     };
   }, [scheduleConnectorDraw]);
 
-  function renderTier0() {
-    if (!father && !mother && !spFather && !spMother) return null;
-    return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-        {(father || mother) && (
-          <div ref={setGroupRef("birthParentsPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-            {father && <BrickCard ref={setNodeRef(father.id)} node={father} {...handlers} shareMode={shareMode} />}
-            <SvgPairConnector show={!!(father && mother)} />
-            {mother && <BrickCard ref={setNodeRef(mother.id)} node={mother} {...handlers} shareMode={shareMode} />}
-          </div>
-        )}
-        {(spFather || spMother) && (
-          <>
-            <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
-            <div ref={setGroupRef("spouseParentsPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-              {spFather && <BrickCard ref={setNodeRef(spFather.id)} node={spFather} {...handlers} shareMode={shareMode} />}
-              <SvgPairConnector show={!!(spFather && spMother)} />
-              {spMother && <BrickCard ref={setNodeRef(spMother.id)} node={spMother} {...handlers} shareMode={shareMode} />}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  function renderTier1() {
-    const renderSiblingSet = (groupId, label, groupSiblings, groupGhosts) => {
-      if (!groupSiblings.length && !groupGhosts.length) return null;
+  function renderUnit(unit) {
+    if (unit.type === "pair") {
       return (
-        <>
-          <div style={{ width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 6px" }} />
-          <div ref={setGroupRef(groupId)} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-            {groupSiblings.map((sib) => (
-              <BrickCard key={sib.id} ref={setNodeRef(sib.id)} node={sib} {...handlers} shareMode={shareMode} />
-            ))}
-            {groupGhosts.map((g) => (
-              <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
-            ))}
-          </div>
-        </>
+        <div key={unit.key} ref={setGroupRef(unit.groupId)} style={{ display: "flex", alignItems: "flex-start", gap: 0, flexShrink: 0 }}>
+          <BrickCard ref={setNodeRef(unit.primary.id)} node={unit.primary} {...handlers} shareMode={shareMode} width={cardWidth} />
+          <SvgPairConnector show={!!unit.spouse} />
+          {unit.spouse && <BrickCard ref={setNodeRef(unit.spouse.id)} node={unit.spouse} {...handlers} shareMode={shareMode} width={cardWidth} />}
+        </div>
       );
-    };
-    return (
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-        {owner && (
-          <div ref={setGroupRef("ownerPair")} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-            <BrickCard ref={setNodeRef(owner.id)} node={owner} {...handlers} shareMode={shareMode} />
-            <SvgPairConnector show={!!spouse} />
-            {spouse && <BrickCard ref={setNodeRef(spouse.id)} node={spouse} {...handlers} shareMode={shareMode} />}
+    }
+    if (unit.type === "person") {
+      return <BrickCard key={unit.key} ref={setNodeRef(unit.node.id)} node={unit.node} {...handlers} shareMode={shareMode} width={cardWidth} />;
+    }
+    if (unit.type === "ghost") {
+      return <GhostButton key={unit.key} node={unit.node} onGhostExpand={handlers.onGhostExpand} width={cardWidth} />;
+    }
+    if (unit.type === "branch") {
+      return (
+        <div key={unit.key} ref={setGroupRef(unit.groupId)} style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+          <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, letterSpacing: ".04em", textAlign: "center", whiteSpace: "nowrap" }}>
+            {"Nhánh của "}{unit.label}:
           </div>
-        )}
-        {renderSiblingSet("birthSiblingsGroup", "birth", birthSiblings, birthGhostSiblings)}
-        {renderSiblingSet("spouseSiblingsGroup", "spouse", spouseSiblings, spouseGhostSiblings)}
-        {renderSiblingSet("ambiguousSiblingsGroup", "ambiguous", ambiguousSiblings, ambiguousGhostSiblings)}
-      </div>
-    );
+          <div style={{ display: "flex", gap: TIER_UNIT_GAP, flexShrink: 0 }}>
+            {unit.nodes.map((n) => (
+              <BrickCard key={n.id} ref={setNodeRef(n.id)} node={n} {...handlers} shareMode={shareMode} width={cardWidth} />
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return null;
   }
 
-  function renderGrandchildBranch(parentId) {
-    const parentNode = personNodeById.get(parentId);
-    const branchLabel = parentNode?.person?.name || parentId;
-    const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
-    const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
+  function renderTierRow(units, tierDef) {
+    if (!units.length) return null;
     return (
-      <div key={parentId} ref={setGroupRef(`grandchildBranch:${parentId}`)}>
-        <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 700, marginBottom: 6, letterSpacing: ".04em" }}>
-          {"Nh\u00E1nh c\u1EE7a "}{branchLabel}:
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
-          {branchGrandchildren.map((gc) => (
-            <BrickCard key={gc.id} ref={setNodeRef(gc.id)} node={gc} {...handlers} shareMode={shareMode} />
-          ))}
-          {branchGhosts.map((g) => (
-            <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
-          ))}
+      <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
+        <TierHeader def={tierDef} />
+        <div style={{ overflowX: "auto", width: "100%" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: TIER_UNIT_GAP, padding: "0 8px", minWidth: "max-content" }}>
+            {units.map((unit) => renderUnit(unit))}
+          </div>
         </div>
       </div>
     );
   }
 
-  function renderTier2() {
-    return (
-      <div ref={setGroupRef("childrenRow")} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start" }}>
-        {children.map((child) => {
-          const branchSpouseNode =
-            personNodes.find((n) => n.relationType === "branchSpouse" && n.parentSlotId === child.id) ||
-            ghostNodes.find((n) => n.relationType === "ghostBranchSpouse" && n.parentSlotId === child.id);
-          const hasBranchSpouseSlot = !!branchSpouseNode;
-          return (
-            <div key={child.id} ref={setGroupRef(`childPair:${child.id}`)} style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-              <BrickCard ref={setNodeRef(child.id)} node={child} {...handlers} shareMode={shareMode} />
-              {hasBranchSpouseSlot && (
-                <>
-                  <SvgPairConnector show />
-                  {branchSpouseNode.kind === "ghost"
-                    ? <BrickCard ref={setNodeRef(branchSpouseNode.id)} node={branchSpouseNode} {...handlers} shareMode={shareMode} />
-                    : <BrickCard ref={setNodeRef(branchSpouseNode.id)} node={branchSpouseNode} {...handlers} shareMode={shareMode} />
-                  }
-                </>
-              )}
-            </div>
-          );
-        })}
-        {ghostChildren.map((g) => (
-          <BrickCard key={g.id} ref={setNodeRef(g.id)} node={g} {...handlers} shareMode={shareMode} />
-        ))}
-        {siblingGrandchildParentIds.map((parentId) => renderGrandchildBranch(parentId))}
-      </div>
-    );
+  function buildTier0Units() {
+    const units = [];
+    if (father || mother) {
+      if (father && mother) {
+        units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: father, spouse: mother });
+      } else if (father) {
+        const pending = getPendingFor(father.id);
+        if (pending) {
+          units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: father, spouse: pending });
+        } else {
+          units.push({ type: "person", key: father.id, node: father });
+        }
+      } else if (mother) {
+        const pending = getPendingFor(mother.id);
+        if (pending) {
+          units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: mother, spouse: pending });
+        } else {
+          units.push({ type: "person", key: mother.id, node: mother });
+        }
+      }
+    }
+    if (spFather || spMother) {
+      if (spFather && spMother) {
+        units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spFather, spouse: spMother });
+      } else if (spFather) {
+        const pending = getPendingFor(spFather.id);
+        if (pending) {
+          units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spFather, spouse: pending });
+        } else {
+          units.push({ type: "person", key: spFather.id, node: spFather });
+        }
+      } else if (spMother) {
+        const pending = getPendingFor(spMother.id);
+        if (pending) {
+          units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spMother, spouse: pending });
+        } else {
+          units.push({ type: "person", key: spMother.id, node: spMother });
+        }
+      }
+    }
+    return units;
   }
 
-  function renderTier3() {
-    if (!deeperGrandchildParentIds.length) return null;
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {deeperGrandchildParentIds.map((parentId) => renderGrandchildBranch(parentId))}
-      </div>
-    );
+  function personUnit(node) {
+    const pending = getPendingFor(node.id);
+    if (pending) {
+      return { type: "pair", key: `pair:${node.id}`, groupId: `pair:${node.id}`, primary: node, spouse: pending };
+    }
+    return { type: "person", key: node.id, node };
   }
 
-  const tier0Content = renderTier0();
-  const tier1Content = renderTier1();
-  const tier2Content = renderTier2();
-  const tier3Content = renderTier3();
+  function buildTier1Units() {
+    const units = [];
+    const ownerPending = getPendingFor("owner");
+    const ownerSpouse = spouse || ownerPending;
+    if (owner && ownerSpouse) {
+      units.push({ type: "pair", key: "ownerPair", groupId: "ownerPair", primary: owner, spouse: ownerSpouse });
+    } else {
+      units.push({ type: "person", key: owner.id, node: owner });
+      if (ownerSpouse) units.push({ type: "person", key: ownerSpouse.id, node: ownerSpouse });
+    }
+    birthSiblings.forEach((sib) => units.push(personUnit(sib)));
+    birthGhostSiblings.forEach((g) => units.push({ type: "ghost", key: g.id, node: g }));
+    spouseSiblings.forEach((sib) => units.push(personUnit(sib)));
+    spouseGhostSiblings.forEach((g) => units.push({ type: "ghost", key: g.id, node: g }));
+    ambiguousSiblings.forEach((sib) => units.push(personUnit(sib)));
+    ambiguousGhostSiblings.forEach((g) => units.push({ type: "ghost", key: g.id, node: g }));
+    return units;
+  }
+
+  function buildTier2Units() {
+    const units = [];
+    children.forEach((child) => {
+      const branchSpouse = getBranchSpouseFor(child.id);
+      if (branchSpouse) {
+        units.push({ type: "pair", key: `childPair:${child.id}`, groupId: `childPair:${child.id}`, primary: child, spouse: branchSpouse });
+      } else {
+        units.push({ type: "person", key: child.id, node: child });
+      }
+    });
+    ghostChildren.forEach((g) => units.push({ type: "ghost", key: g.id, node: g }));
+    siblingGrandchildParentIds.forEach((parentId) => {
+      const parentNode = personNodeById.get(parentId);
+      const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
+      const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
+      if (branchGrandchildren.length || branchGhosts.length) {
+        units.push({
+          type: "branch",
+          key: `grandchildBranch:${parentId}`,
+          groupId: `grandchildBranch:${parentId}`,
+          label: parentNode?.person?.name || parentId,
+          nodes: [...branchGrandchildren, ...branchGhosts],
+        });
+      }
+    });
+    return units;
+  }
+
+  function buildTier3Units() {
+    const units = [];
+    deeperGrandchildParentIds.forEach((parentId) => {
+      const parentNode = personNodeById.get(parentId);
+      const branchGrandchildren = grandchildren.filter((n) => n.parentSlotId === parentId);
+      const branchGhosts = ghostGrandchildren.filter((n) => n.parentSlotId === parentId);
+      if (branchGrandchildren.length || branchGhosts.length) {
+        units.push({
+          type: "branch",
+          key: `grandchildBranch:${parentId}`,
+          groupId: `grandchildBranch:${parentId}`,
+          label: parentNode?.person?.name || parentId,
+          nodes: [...branchGrandchildren, ...branchGhosts],
+        });
+      }
+    });
+    return units;
+  }
+
+  const tier0Content = renderTierRow(buildTier0Units(), TIER_DEFS[0]);
+  const tier1Content = renderTierRow(buildTier1Units(), TIER_DEFS[1]);
+  const tier2Content = renderTierRow(buildTier2Units(), TIER_DEFS[2]);
+  const tier3Content = renderTierRow(buildTier3Units(), TIER_DEFS[3]);
 
   return (
     <div
@@ -1864,9 +2014,6 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
             <marker id="kinship-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" opacity="0.42" />
             </marker>
-            <marker id="flow-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c" />
-            </marker>
           </defs>
           {connectorModel.kinshipPaths.map((path) => (
             <path
@@ -1874,55 +2021,19 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
               d={path.d}
               fill="none"
               stroke="#94a3b8"
-              strokeWidth="1.2"
-              strokeDasharray="5 6"
+              strokeWidth="1.4"
               strokeLinecap="round"
-              opacity="0.42"
+              opacity="0.55"
               markerEnd="url(#kinship-arrow)"
-            />
-          ))}
-          {connectorModel.flowPaths.map((path) => (
-            <path
-              key={path.key}
-              d={path.d}
-              fill="none"
-              stroke="#ea580c"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              opacity="0.95"
-              markerEnd="url(#flow-arrow)"
             />
           ))}
         </svg>
 
         <div style={{ position: "relative", zIndex: 1 }}>
-          {tier0Content && (
-            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
-              <TierHeader def={TIER_DEFS[0]} />
-              {tier0Content}
-            </div>
-          )}
-
-          {tier1Content && (
-            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
-              <TierHeader def={TIER_DEFS[1]} />
-              {tier1Content}
-            </div>
-          )}
-
-          {tier2Content && (
-            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
-              <TierHeader def={TIER_DEFS[2]} />
-              {tier2Content}
-            </div>
-          )}
-
-          {tier3Content && (
-            <div style={{ borderTop: "2px solid #e2e8f0", padding: "12px 16px 16px" }}>
-              <TierHeader def={TIER_DEFS[3]} />
-              {tier3Content}
-            </div>
-          )}
+          {tier0Content}
+          {tier1Content}
+          {tier2Content}
+          {tier3Content}
         </div>
       </div>
     </div>
@@ -1961,6 +2072,11 @@ function FamilyTreeApp() {
     counterRef.current += 1;
     return `${prefix}_${counterRef.current}`;
   }, []);
+
+  function nextIdCounter() {
+    counterRef.current += 1;
+    return `pending_spouse_${counterRef.current}`;
+  }
 
   const applyCommittedState = useCallback((committed) => {
     setResolvedNodes(committed.resolvedNodes);
@@ -2092,12 +2208,40 @@ function FamilyTreeApp() {
     return validateAssignment(currentNodes, nodeId, normalizePersonPayload(rawPerson), resolved);
   }, [shareMode]);
 
+  function createPendingSpouseNode(anchorNode, person) {
+    return createLogicalNode({
+      id: nextIdCounter(),
+      kind: "pendingSpouse",
+      label: "",
+      role: "Vợ/Chồng",
+      relationType: "spouse",
+      bucket: anchorNode.bucket,
+      allowsShare: true,
+      removable: true,
+      person: normalizePersonPayload(person),
+      parentSlotId: anchorNode.id,
+      spouseOf: anchorNode.id,
+      willReceive: !person.death,
+      sharePercent: "0.00",
+    });
+  }
+
   const commitAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
     const currentNodes = logicalNodesRef.current;
     const resolved = resolveSubRelations(currentNodes, shareMode).nodes;
     const validation = validateAssignment(currentNodes, nodeId, person, resolved);
     if (!validation.ok) return validation;
+    if (validation.createPending && validation.targetNode.kind === "person") {
+      commitLogicalNodes((prevNodes) => {
+        const anchor = prevNodes.find((n) => n.id === nodeId);
+        if (!anchor || !anchor.person) return prevNodes;
+        const hasPending = prevNodes.some((n) => n.kind === "pendingSpouse" && n.parentSlotId === nodeId);
+        if (hasPending) return prevNodes;
+        return [...prevNodes, createPendingSpouseNode(anchor, person)];
+      });
+      return { ok: true, person: validation.person, displacedPersons: [] };
+    }
     if (validation.targetNode.kind === "ghost") {
       commitLogicalNodes((prevNodes) => {
         const prevResolved = resolveSubRelations(prevNodes, shareMode).nodes;
@@ -2188,6 +2332,35 @@ function FamilyTreeApp() {
     commitLogicalNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, isLandOwner: !n.isLandOwner } : n));
   }, [commitLogicalNodes]);
 
+  const onPendingDecision = useCallback((pendingNodeId, accepted) => {
+    const pending = logicalNodesRef.current.find((n) => n.id === pendingNodeId);
+    if (!pending || pending.kind !== "pendingSpouse") return;
+    if (accepted) {
+      commitLogicalNodes((prevNodes) => {
+        const anchor = prevNodes.find((n) => n.id === pending.parentSlotId);
+        const relationType = anchor?.relationType === "owner" ? "spouse" : "branchSpouse";
+        return prevNodes.map((n) =>
+          n.id === pendingNodeId
+            ? {
+                ...n,
+                kind: "person",
+                relationType,
+                spouseOf: pending.parentSlotId,
+                parentSlotId: pending.parentSlotId,
+                label: "",
+              }
+            : n
+        );
+      });
+    } else {
+      const person = normalizePersonPayload(pending.person);
+      commitLogicalNodes((prevNodes) => prevNodes.filter((n) => n.id !== pendingNodeId));
+      if (person?.id) {
+        bridgeWorkflowUpdates([{ id: person.id, patch: { inDiagram: false, inTree: false, inPool: true } }]);
+      }
+    }
+  }, [commitLogicalNodes]);
+
   useEffect(() => {
     const handleParticipantRecordUpdated = (evt) => {
       const person = normalizePersonPayload(evt?.detail?.customer || evt?.detail);
@@ -2270,19 +2443,20 @@ function FamilyTreeApp() {
           willReceive: true,
         })];
       }
-      if (ghostNode.ghostAction === "addBranchSpouse") {
-        const alreadyExists = prevNodes.some(
-          (node) => node.kind === "person" && node.parentSlotId === ghostNode.parentSlotId && node.relationType === "branchSpouse"
-        );
-        if (alreadyExists) return prevNodes;
-        return [...prevNodes, createLogicalNode({
-          id: nextId("branch_spouse"), label: "Vợ/Chồng của nhánh", role: "Con_dau_re",
-          relationType: "branchSpouse", bucket: 3, allowsShare: true, removable: true,
-          sourceId: ghostNode.sourceId, parentSlotId: ghostNode.parentSlotId,
-          parentPersonId: ghostNode.parentPersonId, familyGroupId: ghostNode.familyGroupId || "",
-          willReceive: true,
-        })];
-      }
+    if (ghostNode.ghostAction === "addBranchSpouse") {
+      const alreadyExists = prevNodes.some(
+        (node) => node.kind === "person" && node.parentSlotId === ghostNode.parentSlotId && node.relationType === "branchSpouse"
+      );
+      if (alreadyExists) return prevNodes;
+      return [...prevNodes, createLogicalNode({
+        id: nextId("branch_spouse"), label: "", role: "Con_dau_re",
+        relationType: "branchSpouse", bucket: 3, allowsShare: true, removable: true,
+        sourceId: ghostNode.sourceId, parentSlotId: ghostNode.parentSlotId,
+        spouseOf: ghostNode.parentSlotId,
+        parentPersonId: ghostNode.parentPersonId, familyGroupId: ghostNode.familyGroupId || "",
+        willReceive: true,
+      })];
+    }
       return prevNodes;
     });
   }, [commitLogicalNodes, nextId, shareMode]);
@@ -2292,7 +2466,7 @@ function FamilyTreeApp() {
       const hasEmptyChild = prevNodes.some((node) => node.kind === "person" && node.relationType === "child" && !node.person);
       if (hasEmptyChild) return prevNodes;
       return [...prevNodes, createLogicalNode({
-        id: nextId("child"), label: "Con ruột", role: "Con", relationType: "child", bucket: 2,
+        id: nextId("child"), label: "", role: "Con", relationType: "child", bucket: 2,
         allowsShare: true, removable: true, sourceId: "owner", parentSlotId: "owner",
         familyGroupId: "ownerSpouse",
         parentPersonId: prevNodes.find((node) => node.id === "owner")?.person?.id || "",
@@ -2312,6 +2486,7 @@ function FamilyTreeApp() {
       setSaving: (nextSaving) => store.setSaving(nextSaving),
       getBusyCount: () => store.getBusyCount(),
       isBusy: () => store.isBusy(),
+      pendingCount: () => logicalNodesRef.current.filter((n) => n.kind === "pendingSpouse").length,
     };
     window.__DIAGRAM_API__ = api;
     applyCommittedState(initialCommittedRef.current);
@@ -2331,6 +2506,7 @@ function FamilyTreeApp() {
     onToggleReceive,
     onToggleLandOwner,
     onGhostExpand,
+    onPendingDecision,
   };
 
   return (

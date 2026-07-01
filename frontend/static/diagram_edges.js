@@ -85,11 +85,17 @@
     edges.push({ ...edge, id: key, kind: "kinship" });
   }
 
+  function spouseAnchorId(node) {
+    let anchorId = idOf(node && node.spouseOf);
+    if (!anchorId && idOf(node && node.id) === "spouse") anchorId = "owner";
+    return anchorId;
+  }
+
   function buildKinshipEdges(nodes) {
     const index = createIndex(nodes || []);
     const edges = [];
     const seen = new Set();
-    const personNodes = (nodes || []).filter((node) => node && node.kind !== "ghost");
+    const personNodes = (nodes || []).filter((node) => node && node.kind !== "ghost" && node.kind !== "pendingSpouse");
     const siblingNodes = (nodes || []).filter((node) => ["sibling", "ghostSibling"].includes(idOf(node.relationType)));
     const childNodes = (nodes || []).filter((node) => ["child", "ghostChild"].includes(idOf(node.relationType)) || node.ghostAction === "addChild");
     const grandchildNodes = (nodes || []).filter((node) =>
@@ -98,7 +104,18 @@
 
     const birthSourceIds = ["father", "mother"].filter((nodeId) => hasSourcePerson(index, nodeId));
     const spouseParentSourceIds = ["spouse_father", "spouse_mother"].filter((nodeId) => hasSourcePerson(index, nodeId));
-    const ownerSourceIds = ["owner", "spouse"].filter((nodeId) => hasSourcePerson(index, nodeId));
+
+    // Dynamic spouse pairs keyed by anchor node id (backward compat: id "spouse" defaults to owner).
+    const spousePairs = new Map();
+    personNodes.forEach((node) => {
+      const relationType = idOf(node.relationType);
+      if (relationType !== "spouse" && relationType !== "branchSpouse") return;
+      const anchorId = spouseAnchorId(node);
+      if (!anchorId) return;
+      spousePairs.set(anchorId, node.id);
+    });
+    const ownerSpouseId = spousePairs.get("owner") || "spouse";
+    const ownerSourceIds = ["owner", ownerSpouseId].filter((nodeId) => hasSourcePerson(index, nodeId));
 
     if (birthSourceIds.length && hasSourcePerson(index, "owner")) {
       addKinship(edges, seen, { sourceNodeIds: birthSourceIds, targetNodeId: "owner", familyKey: FAMILY_BIRTH });
@@ -107,8 +124,8 @@
       .filter((node) => siblingFamilyKey(node, index) === FAMILY_BIRTH)
       .forEach((node) => addKinship(edges, seen, { sourceNodeIds: birthSourceIds, targetNodeId: node.id, familyKey: FAMILY_BIRTH }));
 
-    if (spouseParentSourceIds.length && hasSourcePerson(index, "spouse")) {
-      addKinship(edges, seen, { sourceNodeIds: spouseParentSourceIds, targetNodeId: "spouse", familyKey: FAMILY_SPOUSE });
+    if (spouseParentSourceIds.length && hasSourcePerson(index, ownerSpouseId)) {
+      addKinship(edges, seen, { sourceNodeIds: spouseParentSourceIds, targetNodeId: ownerSpouseId, familyKey: FAMILY_SPOUSE });
     }
     siblingNodes
       .filter((node) => siblingFamilyKey(node, index) === FAMILY_SPOUSE)

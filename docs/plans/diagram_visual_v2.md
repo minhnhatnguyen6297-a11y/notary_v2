@@ -1,6 +1,6 @@
 # Plan: Diagram Visual V2 (Sơ đồ thừa kế)
 
-**Trang thai:** PLANNED (26/06/2026)
+**Trang thai:** COMPLETED (30/06/2026)
 **Cap nhat:** 2026-06-26
 **Files lien quan:** `frontend/static/ReactFlowApp.jsx`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html`
 **Tier:** MAJOR

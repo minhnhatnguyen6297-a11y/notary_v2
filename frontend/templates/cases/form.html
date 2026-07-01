@@ -1875,9 +1875,9 @@ endif %}
     <div class="d-flex gap-2 flex-grow-1" style="min-height: 65vh;">
 
 
-      <!-- Pool (~22%) -->
+      <!-- Pool (~18%) -->
 
-      <div style="flex: 0 0 22%; min-width: 0; display: flex; flex-direction: column;">
+      <div style="flex: 0 0 18%; min-width: 0; display: flex; flex-direction: column;">
 
         <div class="pool-panel" style="min-height: 60vh;">
 
@@ -1916,7 +1916,7 @@ endif %}
       </div>
 
 
-      <!-- Sơ đồ (~78%) -->
+      <!-- Sơ đồ (~82%) -->
 
       <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
 
@@ -1992,6 +1992,15 @@ endif %}
 
 
         <ul id="tree-warnings-list"></ul>
+
+
+      </div>
+
+
+      <div id="pending-spouse-warning" class="alert alert-warning py-2 px-3 m-3 mb-0 d-none" style="font-size:12px;">
+
+
+        <i class="bi bi-exclamation-triangle-fill me-1"></i><span id="pending-spouse-text"></span>
 
 
       </div>
@@ -6325,6 +6334,23 @@ endif %}
 
       if (typeof _syncAllDraftRowStates === 'function') _syncAllDraftRowStates();
 
+      // Rule 3: lock workflow buttons when pending spouse exists.
+      const pendingWarning = document.getElementById('pending-spouse-warning');
+      const pendingText = document.getElementById('pending-spouse-text');
+      const saveBtn = document.getElementById('btn-submit-case') || document.getElementById('btn-create-case');
+      const exportBtn = document.getElementById('btn-open-export');
+      const pendingCount = api?.pendingCount ? api.pendingCount() : 0;
+      if (pendingWarning && pendingText) {
+        if (pendingCount > 0) {
+          pendingText.textContent = `⚠ ${pendingCount} thẻ chờ xác nhận vợ/chồng`;
+          pendingWarning.classList.remove('d-none');
+        } else {
+          pendingWarning.classList.add('d-none');
+        }
+      }
+      if (saveBtn) saveBtn.disabled = pendingCount > 0;
+      if (exportBtn) exportBtn.disabled = pendingCount > 0;
+
       renderFamilyTreeWarnings(Array.isArray(detail.warnings) ? detail.warnings : []);
     });
 
@@ -8776,7 +8802,7 @@ endif %}
   <script src="/static/inheritance_engine.js?v=20260430a"></script>
   <script src="/static/diagram_state.js?v=20260511a"></script>
   <script src="/static/diagram_edges.js?v=20260511a"></script>
-  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260518a"></script>
+  <script type="text/babel" data-presets="react" src="/static/ReactFlowApp.jsx?v=20260518b"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
