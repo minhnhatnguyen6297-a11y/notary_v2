@@ -59,9 +59,11 @@ def _read_env() -> dict[str, str]:
 
 def _get_model() -> str:
     configured = (os.getenv("OCR_MODEL", "") or _read_env().get("OCR_MODEL", "")).strip()
-    if configured.startswith("models/"):
+    if configured.lower().startswith("models/"):
         configured = configured.split("/", 1)[1]
     model = configured or DEFAULT_MODEL
+    if "qwen" in model.lower():
+        model = model.lower()
     return model
 
 
@@ -609,6 +611,8 @@ _ADDRESS_STOP_LABELS = [
     "ngay cap",
     "ngay het han",
     "co gia tri den",
+    "noi dang ky khai sinh",
+    "place of birth",
     "que quan",
 ]
 
@@ -633,6 +637,9 @@ def _strip_address_noise(value: str) -> str:
         r"\bngay\s+het\s+han\b",
         r"\bcó\s+giá\s+trị\s+đến\b",
         r"\bco\s+gia\s+tri\s+den\b",
+        r"\bnÆ¡i\s+Ä‘Äƒng\s+kÃ½\s+khai\s+sinh\b",
+        r"\bnoi\s+dang\s+ky\s+khai\s+sinh\b",
+        r"\bplace\s+of\s+birth\b",
     ]
     for pattern in noise_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -684,6 +691,10 @@ def _extract_address(lines: list[str]) -> str:
 
             # Stop at any known field label.
             if _looks_like_label(next_line, _ADDRESS_STOP_LABELS):
+                next_clean = _sanitize_address(next_line)
+                if next_clean and not _looks_like_label(next_clean, _ADDRESS_STOP_LABELS):
+                    parts.append(next_clean)
+                    collected += 1
                 break
 
             # "Không thời hạn" and similar values appear in the left column at the
@@ -2140,21 +2151,26 @@ def _append_qr_person(
     filename: str,
     qr_text: str,
     qr_data: dict[str, Any],
+    side_hint: str = "front",
 ) -> None:
     normalized = _normalize_person_data(qr_data)
+    side = _clean_text(side_hint).lower()
+    if side not in {"front", "back"}:
+        side = "front"
+    warnings = ["missing_front"] if side == "back" else ["missing_back"]
     person = {
         **normalized,
         "_source": "QR",
         "source_type": "QR",
-        "side": "front",
+        "side": side,
         "_files": [filename],
         "_qr": True,
         "field_sources": _field_sources(normalized, "qr"),
-        "warnings": ["missing_back"],
+        "warnings": warnings,
         "_qr_text": qr_text,
     }
     persons.append(person)
-    raw_results.append({"doc_type": "person", "side": "front", "data": normalized, "filename": filename, "source_type": "QR"})
+    raw_results.append({"doc_type": "person", "side": side, "data": normalized, "filename": filename, "source_type": "QR"})
 
 
 def _append_ai_doc(
@@ -2656,12 +2672,19 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             qr_hits += 1
             if item.get("ai_discarded_by_qr"):
                 ai_discarded += 1
+            qr_side_hint = "front"
+            ai_doc = item.get("ai_doc")
+            if isinstance(ai_doc, dict) and ai_doc.get("doc_type") == "person":
+                ai_side = _clean_text(ai_doc.get("side")).lower()
+                if ai_side in {"front", "back"}:
+                    qr_side_hint = ai_side
             _append_qr_person(
                 persons=persons,
                 raw_results=raw_results,
                 filename=filename,
                 qr_text=item.get("qr_text") or "",
                 qr_data=qr_data,
+                side_hint=qr_side_hint,
             )
             continue
 

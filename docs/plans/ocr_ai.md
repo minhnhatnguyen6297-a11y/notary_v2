@@ -155,6 +155,27 @@ Luu y:
 - Neu modal AI lai co hien tuong trong/trang chet JS, uu tien kiem tra lai cac helper fold
   trong `frontend/templates/cases/form.html` truoc khi nghi backend OCR bi hong.
 
+## Decision Notes 2026-06-23
+
+- DashScope/Qwen model code duoc gui lowercase tu backend. Neu `.env` nhap
+  `Qwen-VL-OCR-2025-11-20` hoac `models/Qwen-VL-OCR-2025-11-20`, `_get_model()`
+  normalize thanh `qwen-vl-ocr-2025-11-20` truoc khi goi provider.
+- Theo docs Alibaba hien tai, `qwen-vl-ocr-2025-11-20` van nam trong danh sach
+  Qwen-VL-OCR; `qwen3.5-ocr` la huong moi duoc khuyen nghi cho nang cap. Neu
+  model lowercase van bi `Model not exist`, tang nghi ngo tiep theo la
+  `QWEN_OCR_BASE_URL`/region/workspace API key, khong phai parse/pairing.
+- QR hit van uu tien QR cho data field, nhung neu Qwen doc cung anh cho thay
+  `side=back` thi router duoc dung side hint do de pairing/warning. Khong lay
+  text/field AI de ghi de QR; chi dung side hint de tranh case mat sau co QR bi
+  ep thanh front va sinh sai `missing_back`.
+- Parse dia chi AI dung lai truoc cac label chen cot nhu
+  `Noi dang ky khai sinh` / `Place of birth`, khong de field dia chi bi dinh
+  sang dong nhan than khac tren CCCD.
+- Phase 1 person OCR modal giu snapshot preview tren tung person result
+  (`_preview_items`) va render badge nguon `QR` / `OCR` tren card + queue.
+  `Xem anh` khong con phu thuoc hoan toan vao `imageQueue` dang song, nen van
+  mo lai duoc dung anh nguon cua card ngay ca khi queue UI bi rerender.
+
 ---
 
 ## Khi debug

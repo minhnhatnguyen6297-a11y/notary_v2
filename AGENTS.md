@@ -120,6 +120,9 @@ BAO CAO HOAN THANH:
   - `ReactFlowApp.jsx`: UI ReactFlow nhung van duoc embed tu `cases/form.html`.
 - `docs/plans/`
   - Noi giu decision record theo feature. Sua feature nao thi doc plan do truoc.
+- `docs/case_user_flow_spec.md`
+  - Spec thao tac user that cho flow ho so: OCR CCCD nguoi -> cua so OCR -> stage -> pool/diagram -> preview/export.
+  - Doc truoc khi lam task dai lien quan `cases/form.html`, dac biet khi sua hanh vi nut bam, giu/xoa du lieu, OCR modal, stage, hoac dong bo du lieu nhieu noi.
 
 ### Quan he goi nhau quan trong
 - App startup
@@ -145,7 +148,7 @@ BAO CAO HOAN THANH:
 - Bug Local OCR / pairing / front-back / merge
   - Doc `docs/plans/ocr_local.md` -> `routers/ocr_local.py` -> `tasks.py` -> `models.py` (`OCRJob`).
 - Bug OCR UI tren form ho so
-  - `frontend/templates/cases/form.html` -> `frontend/static/ocr_qr_worker.js` -> `routers/ocr_ai.py` hoac `routers/ocr_local.py` tuy endpoint.
+  - `docs/case_user_flow_spec.md` -> `frontend/templates/cases/form.html` -> `frontend/static/ocr_qr_worker.js` -> `routers/ocr_ai.py` hoac `routers/ocr_local.py` tuy endpoint.
 - Bug queue / pending job / worker
   - `tasks.py` -> `models.py` (`OCRJob`) -> `logs/worker.log`.
 - Bug startup / route khong mount / env khong load

@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 from unittest import mock
 
@@ -205,6 +206,13 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(ocr_ai._extract_address(lines), "Yên Tiến, Ý Yên, Nam Định")
 
+    def test_extract_address_stops_before_place_of_birth_label(self):
+        lines = [
+            "Noi thuong tru / Place of residence:",
+            "Yen Luong, Y Yen, Nam Dinh, Noi dang ky khai sinh /Place of birth",
+        ]
+        self.assertEqual(ocr_ai._extract_address(lines), "Yen Luong, Y Yen, Nam Dinh")
+
     def test_extract_native_ocr_lines_from_text_payload(self):
         payload = {
             "output": {
@@ -220,6 +228,13 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             }
         }
         self.assertEqual(ocr_ai._extract_native_ocr_lines(payload), ["LINE 1", "LINE 2"])
+
+    def test_get_model_normalizes_qwen_model_code_case(self):
+        with (
+            mock.patch.dict(os.environ, {"OCR_MODEL": "models/Qwen-VL-OCR-2025-11-20"}),
+            mock.patch.object(ocr_ai, "_read_env", return_value={}),
+        ):
+            self.assertEqual(ocr_ai._get_model(), "qwen-vl-ocr-2025-11-20")
 
     def test_normalize_native_doc_prefers_mrz_on_back(self):
         lines = [
@@ -317,6 +332,57 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(person["paired"])
         self.assertNotIn("missing_back", person["warnings"])
         self.assertEqual(person["ngay_cap"], "25/03/2021")
+
+    async def test_analyze_images_qr_back_uses_ai_side_hint_for_pairing(self):
+        front = make_upload("front.jpg", b"front-image")
+        back = make_upload("back-qr.jpg", b"back-image")
+        qr_data = {
+            "so_giay_to": "036065001407",
+            "ho_ten": "NGO VAN TAN",
+            "ngay_sinh": "17/06/1965",
+            "gioi_tinh": "Nam",
+            "dia_chi": "To dan pho so 8, TT. Lam, Y Yen, Nam Dinh",
+            "ngay_cap": "21/05/2025",
+            "ngay_het_han": "",
+        }
+
+        def fake_qr(file_bytes):
+            return "qr-text" if file_bytes == b"back-image" else None
+
+        async def fake_call(*args, **kwargs):
+            if kwargs["filename"] == "front.jpg":
+                return [
+                    "CAN CUOC",
+                    "So dinh danh ca nhan: 036065001407",
+                    "Ho va ten khai sinh / Full name: NGO VAN TAN",
+                    "Ngay, thang, nam sinh / Date of birth: 17/06/1965",
+                    "Gioi tinh / Sex: Nam",
+                ]
+            return [
+                "Noi cu tru / Place of residence: To dan pho so 8, TT. Lam, Y Yen, Nam Dinh",
+                "Ngay, thang, nam cap / Date of issue: 21/05/2025",
+                "IDVNM0650014079036065001407<<4",
+                "6506179M9912315VNM<<<<<<<<<<<8",
+                "NGO<<VAN<TAN<<<<<<<<<<<<<<<<<<",
+            ]
+
+        with (
+            mock.patch.object(ocr_ai, "try_decode_qr", side_effect=fake_qr),
+            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
+            mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
+            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+        ):
+            result = await ocr_ai.analyze_images([front, back])
+
+        self.assertEqual(result["summary"]["qr_hits"], 1)
+        self.assertEqual(result["summary"]["persons"], 1)
+        person = result["persons"][0]
+        self.assertEqual(person["source_type"], "QR")
+        self.assertEqual(person["side"], "front_back")
+        self.assertTrue(person["paired"])
+        self.assertNotIn("missing_back", person["warnings"])
+        self.assertNotIn("missing_front", person["warnings"])
+        self.assertEqual(person["_files"], ["front.jpg", "back-qr.jpg"])
 
     async def test_analyze_images_runs_native_ocr_for_non_qr_images(self):
         upload = make_upload("front.jpg")
