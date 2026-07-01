@@ -167,6 +167,7 @@ function createLogicalNode(overrides) {
     person: overrides.person || null,
     sharePercent: overrides.sharePercent || "0.00",
     willReceive: overrides.willReceive ?? (overrides.allowsShare !== false),
+    inheritanceDecision: overrides.inheritanceDecision || "unset",
     parentSlotId: overrides.parentSlotId || "",
     parentPersonId: overrides.parentPersonId || "",
     familyGroupId: overrides.familyGroupId || "",
@@ -240,20 +241,7 @@ function validateAssignment(logicalNodes, nodeId, person, targetNodes = logicalN
   );
   if (!isValidTarget) return { ok: false, reason: "Ô nhận không hợp lệ." };
   if (targetNode.kind === "person" && targetNode.person && String(targetNode.person.id) !== String(candidate.id)) {
-    const hasPending = targetNodes.some((n) => n.kind === "pendingSpouse" && n.parentSlotId === nodeId);
-    if (hasPending) {
-      return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
-    }
-    const hasRealSpouse = targetNodes.some((n) =>
-      n.kind === "person" &&
-      (n.relationType === "spouse" || n.relationType === "branchSpouse") &&
-      (n.spouseOf === nodeId || (nodeId === "owner" && n.id === "spouse" && !n.spouseOf)) &&
-      n.person
-    );
-    if (hasRealSpouse) {
-      return { ok: false, reason: "Node da co nguoi. Hay xoa node dich truoc khi keo the khac vao." };
-    }
-    return { ok: true, person: candidate, targetNode, createPending: true };
+    return { ok: false, reason: "Ô này đã có ngườ. Hãy thả vào ô trống." };
   }
   const duplicate = logicalNodes.find(
     (node) => node.id !== nodeId && node.kind === "person" && node.person && String(node.person.id) === String(candidate.id)
@@ -287,6 +275,7 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
+        inheritanceDecision: "unset",
         sharePercent: "0.00",
       };
     }
@@ -302,6 +291,7 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
+        inheritanceDecision: "unset",
         sharePercent: "0.00",
       };
     }
@@ -317,6 +307,7 @@ function buildAssignedNode(node, nodes, person) {
         person: candidate,
         parentPersonId: deriveParentPersonId(nodes, node),
         willReceive: !candidate?.death,
+        inheritanceDecision: "unset",
         sharePercent: "0.00",
       };
     }
@@ -326,6 +317,7 @@ function buildAssignedNode(node, nodes, person) {
     person: candidate,
     parentPersonId: deriveParentPersonId(nodes, node),
     willReceive: node.allowsShare && !candidate?.death ? true : false,
+    inheritanceDecision: "unset",
     sharePercent: "0.00",
   };
 }
@@ -376,6 +368,7 @@ function clearAssignedNode(node) {
     person: null,
     isLandOwner: false,
     willReceive: node.allowsShare !== false,
+    inheritanceDecision: "unset",
     sharePercent: "0.00",
   };
 }
@@ -461,6 +454,7 @@ function hydrateEngineStateNodes() {
       familyGroupId: saved.familyGroupId || "",
       person: resolvedPerson,
       willReceive: saved.willReceive !== false,
+      inheritanceDecision: saved.inheritanceDecision || (saved.willReceive === false ? "refuse" : "unset"),
       isLandOwner: !!saved.isLandOwner || (Array.isArray(initialEngineState.assetOwnerIds) && initialEngineState.assetOwnerIds.map(String).includes(personId)),
     });
   }).filter((node) => Boolean(node));
@@ -475,7 +469,7 @@ function hydrateInitialNodes() {
   const ownerPayload = buildOwnerPayload();
   if (ownerPayload) {
     nodes = nodes.map((node) =>
-      node.id === "owner" ? { ...node, person: ownerPayload, willReceive: !ownerPayload.death, isLandOwner: true } : node
+      node.id === "owner" ? { ...node, person: ownerPayload, willReceive: !ownerPayload.death, inheritanceDecision: "unset", isLandOwner: true } : node
     );
   }
 
@@ -487,41 +481,42 @@ function hydrateInitialNodes() {
 
     if (participant.role === "Owner") {
       nodes = nodes.map((node) =>
-        node.id === "owner" ? { ...node, person: participant, willReceive: !participant.death, isLandOwner: true } : node
+        node.id === "owner" ? { ...node, person: participant, willReceive: !participant.death, inheritanceDecision: "unset", isLandOwner: true } : node
       );
       return;
     }
 
     const sharePercent = participant.share && participant.share !== "None" ? String(participant.share) : "0.00";
     const defaultWillReceive = participant.receive !== "0" && !participant.death;
+    const defaultDecision = participant.receive === "0" ? "refuse" : "unset";
 
     if (participant.role === "Cha") {
       nodes = nodes.map((node) =>
-        node.id === "father" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive } : node
+        node.id === "father" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision } : node
       );
       return;
     }
     if (participant.role === "Mẹ") {
       nodes = nodes.map((node) =>
-        node.id === "mother" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive } : node
+        node.id === "mother" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision } : node
       );
       return;
     }
     if (participant.role === "Cha_vc") {
       nodes = nodes.map((node) =>
-        node.id === "spouse_father" ? { ...node, person: participant, willReceive: defaultWillReceive } : node
+        node.id === "spouse_father" ? { ...node, person: participant, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision } : node
       );
       return;
     }
     if (participant.role === "Me_vc") {
       nodes = nodes.map((node) =>
-        node.id === "spouse_mother" ? { ...node, person: participant, willReceive: defaultWillReceive } : node
+        node.id === "spouse_mother" ? { ...node, person: participant, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision } : node
       );
       return;
     }
     if (participant.role === "Vợ/Chồng") {
       nodes = nodes.map((node) =>
-        node.id === "spouse" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, spouseOf: "owner" } : node
+        node.id === "spouse" ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision, spouseOf: "owner" } : node
       );
       return;
     }
@@ -530,7 +525,7 @@ function hydrateInitialNodes() {
       if (target) {
         nodes = nodes.map((node) =>
           node.id === target.id
-            ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, parentPersonId: buildOwnerPayload()?.id || "", familyGroupId: "ownerSpouse" }
+            ? { ...node, person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision, parentPersonId: buildOwnerPayload()?.id || "", familyGroupId: "ownerSpouse" }
             : node
         );
       } else {
@@ -541,7 +536,7 @@ function hydrateInitialNodes() {
             allowsShare: true, removable: true, sourceId: "owner", parentSlotId: "owner",
             familyGroupId: "ownerSpouse",
             parentPersonId: buildOwnerPayload()?.id || "",
-            person: participant, sharePercent, willReceive: defaultWillReceive,
+            person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision,
           }),
         ];
       }
@@ -557,7 +552,7 @@ function hydrateInitialNodes() {
           sourceId: pickSiblingSource(nodes, participant),
           parentPersonId: participant.parentId || "",
           familyGroupId: participant.familyGroupId || "",
-          person: participant, sharePercent, willReceive: defaultWillReceive,
+          person: participant, sharePercent, willReceive: defaultWillReceive, inheritanceDecision: defaultDecision,
         }),
       ];
       return;
@@ -580,6 +575,7 @@ function hydrateInitialNodes() {
         familyGroupId: `spouse:${parentNode.id}`,
         person: participant, sharePercent: participant.share || "0.00",
         willReceive: participant.receive !== "0" && !participant.death,
+        inheritanceDecision: participant.receive === "0" ? "refuse" : "unset",
       }),
     ];
   });
@@ -603,6 +599,7 @@ function hydrateInitialNodes() {
         familyGroupId: `descendant:${parentNode.id}`,
         person: participant, sharePercent: participant.share || "0.00",
         willReceive: participant.receive !== "0" && !participant.death,
+        inheritanceDecision: participant.receive === "0" ? "refuse" : "unset",
       }),
     ];
   });
@@ -717,15 +714,21 @@ function buildEngineInput(models) {
     flowFrom: Array.isArray(node.flowFrom) ? node.flowFrom.map((item) => String(item || "").trim()).filter((item) => item) : [],
     isLandOwner: !!node.isLandOwner,
     willReceive: node.willReceive !== false,
+    inheritanceDecision: node.inheritanceDecision || "unset",
   }));
   const people = nodes.map((node) => node.person);
   const willReceiveByPersonId = {};
-  nodes.forEach((node) => { willReceiveByPersonId[String(node.personId)] = node.willReceive !== false; });
+  const inheritanceDecisionByPersonId = {};
+  nodes.forEach((node) => {
+    willReceiveByPersonId[String(node.personId)] = node.willReceive !== false;
+    inheritanceDecisionByPersonId[String(node.personId)] = node.inheritanceDecision || "unset";
+  });
   return {
     people,
     nodes,
     assetOwnerIds: nodes.filter((node) => node.isLandOwner).map((node) => String(node.personId)),
     willReceiveByPersonId,
+    inheritanceDecisionByPersonId,
   };
 }
 
@@ -747,8 +750,8 @@ function applyEngineResult(models, engineResult) {
       distributedShare: allocation.distributedShare || "0",
       finalShare: allocation.finalShare || "0",
       hasInflow: !!hasInflow,
-      showShareSummary: !!(hasBaseShare || hasInflow || hasDistributed || Number(finalPercent) > 0 || (!node.person.death && node.willReceive === false)),
-      showReceiveControl: !node.person.death && (!!hasInflow || node.willReceive === false),
+      showShareSummary: !!(hasBaseShare || hasInflow || hasDistributed || Number(finalPercent) > 0 || (!node.person.death && node.inheritanceDecision === "refuse")),
+      showReceiveControl: !node.person.death && (!!hasInflow || node.inheritanceDecision === "refuse"),
       traceLabel: "",
       disabledReason: "",
     };
@@ -757,6 +760,8 @@ function applyEngineResult(models, engineResult) {
       nextNode.traceLabel = "Đồng sở hữu gốc";
     } else if (node.person.death && hasDistributed) {
       nextNode.traceLabel = "Đã nhận/chảy qua";
+    } else if (node.inheritanceDecision === "refuse") {
+      nextNode.traceLabel = "Từ chối nhận";
     }
     return nextNode;
   });
@@ -782,6 +787,7 @@ function runDiagramEngine(models) {
       flowFrom: node.flowFrom,
       isLandOwner: node.isLandOwner,
       willReceive: node.willReceive,
+      inheritanceDecision: node.inheritanceDecision || "unset",
     }));
   if (!inheritanceEngine?.runInheritanceCase) {
     return {
@@ -886,7 +892,8 @@ function buildParticipantsPayload(resolvedNodes) {
       issue_date: node.person.issue_date,
       issue_place: node.person.issue_place,
       place_of_origin: node.person.place_of_origin,
-      willReceive: !!node.willReceive,
+      willReceive: node.inheritanceDecision !== "refuse",
+      inheritanceDecision: node.inheritanceDecision || "unset",
       sharePercent: node.sharePercent || "0.00",
       share: node.sharePercent || "0.00",
       disabledReason: node.disabledReason || "",
@@ -977,13 +984,11 @@ const CARD_CONNECTOR_WIDTH = 28;
 const TIER_UNIT_GAP = 12;
 
 const S = {
-  card: (isDragOver, isOccupied, isDead, isGhost, isPending) => ({
+  card: (isDragOver, isOccupied, isDead, isGhost) => ({
     width: "100%",
-    minHeight: isGhost ? 52 : isOccupied ? 86 : 56,
+    minHeight: isGhost ? 52 : isOccupied ? 108 : 56,
     border: isGhost
       ? "2px dashed #c084fc"
-      : isPending
-      ? "2px solid #f59e0b"
       : isDragOver
       ? "2px solid #2563eb"
       : isOccupied
@@ -992,8 +997,6 @@ const S = {
     borderRadius: 12,
     background: isGhost
       ? "rgba(245,243,255,.7)"
-      : isPending
-      ? "linear-gradient(180deg,#fffbeb,#fef3c7)"
       : isDragOver
       ? "linear-gradient(180deg,#eff6ff,#dbeafe)"
       : isOccupied
@@ -1001,20 +1004,20 @@ const S = {
         ? "linear-gradient(180deg,#f8fafc,#eef2f7)"
         : "linear-gradient(180deg,#fff7ed,#fffdf7)"
       : "#f8fafc",
-    boxShadow: isPending
-      ? "0 0 0 3px rgba(245,158,11,.25), 0 4px 12px rgba(15,23,42,.08)"
-      : isDragOver
+    boxShadow: isDragOver
       ? "0 0 0 3px rgba(37,99,235,.2), 0 4px 12px rgba(15,23,42,.08)"
       : "0 2px 8px rgba(15,23,42,.07)",
-    padding: isPending ? "6px 8px 8px" : "6px 8px",
+    padding: "6px 8px 8px",
     position: "relative",
-    cursor: isGhost ? "pointer" : isPending ? "default" : "default",
+    cursor: isGhost ? "pointer" : "default",
     transition: "border .12s, background .12s, box-shadow .12s",
     flexShrink: 0,
-    opacity: isDead && !isPending ? 0.88 : 1,
-    filter: isDead && !isPending ? "grayscale(.18)" : "none",
+    opacity: isDead ? 0.88 : 1,
+    filter: isDead ? "grayscale(.18)" : "none",
     boxSizing: "border-box",
     overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   }),
   label: {
     fontSize: 8, fontWeight: 700, color: "#94a3b8", marginBottom: 4,
@@ -1049,6 +1052,23 @@ const S = {
     fontSize: 10, fontWeight: 700, color: "#64748b",
     background: "#f8fafc", borderRadius: 999, padding: "1px 6px",
   },
+  actionRow: {
+    display: "flex", gap: 3, marginTop: "auto", paddingTop: 6,
+  },
+  actionButton: (active, color) => ({
+    flex: 1,
+    fontSize: 9,
+    fontWeight: 700,
+    color: active ? "#fff" : color,
+    background: active ? color : "#fff",
+    border: `1px solid ${color}`,
+    borderRadius: 6,
+    padding: "3px 0",
+    cursor: "pointer",
+    lineHeight: 1.3,
+    opacity: active ? 1 : 0.85,
+    transition: "all .12s",
+  }),
 };
 
 function getRelativeBox(element, rootElement) {
@@ -1182,17 +1202,14 @@ function buildSoftCurve(source, target) {
 }
 
 const BrickCard = React.forwardRef(function BrickCard(
-  { node, onAssign, onRemove, onToggleReceive, onToggleLandOwner, onMoveWithin, onGhostExpand, onValidateAssign, shareMode, onPendingDecision, width },
+  { node, onAssign, onRemove, onToggleInheritanceDecision, onToggleLandOwner, onMoveWithin, onGhostExpand, onValidateAssign, shareMode, width },
   ref
 ) {
   const [isDragOver, setIsDragOver] = useState(false);
   const isOccupied = !!node.person;
   const isDead = !!node.person?.death;
   const isGhost = node.kind === "ghost";
-  const isPending = node.kind === "pendingSpouse";
-  const canToggleReceive = isOccupied && node.showReceiveControl && !node.disabledReason && !isDead && !isPending;
-  const showShareSummary = isOccupied && node.showShareSummary && !isPending;
-  const showReceiveCheckbox = (canToggleReceive || (isOccupied && node.hasInflow && !isDead)) && !isPending;
+  const decision = node.inheritanceDecision || "unset";
   const displayLabel = isGhost
     ? (node.ghostAction === "addGrandchild"
       ? "Con thế vị"
@@ -1205,7 +1222,6 @@ const BrickCard = React.forwardRef(function BrickCard(
 
   const handleDragOver = (e) => {
     e.preventDefault(); e.stopPropagation();
-    // Don't set dropEffect — let browser pick compatible value with source's effectAllowed
     setIsDragOver(true);
   };
   const handleDragLeave = (e) => {
@@ -1214,7 +1230,6 @@ const BrickCard = React.forwardRef(function BrickCard(
   const handleDrop = (e) => {
     e.preventDefault(); e.stopPropagation();
     setIsDragOver(false);
-    // Try application/json first (our own drag), fall back to Text (SortableJS/other)
     let raw = e.dataTransfer.getData("application/json");
     if (!raw) raw = e.dataTransfer.getData("Text");
     if (!raw) return;
@@ -1242,19 +1257,31 @@ const BrickCard = React.forwardRef(function BrickCard(
     } catch (err) { console.error("BrickCard drop error", err); }
   };
   const handleDragStart = (e) => {
-    if (!isOccupied || isPending) return;
+    if (!isOccupied) return;
     e.dataTransfer.setData("application/json", JSON.stringify({ ...node.person, sourceNodeId: node.id }));
     e.dataTransfer.effectAllowed = "all";
   };
 
-  const cardStyle = S.card(isDragOver, isOccupied, isDead, isGhost, isPending);
+  const cardStyle = S.card(isDragOver, isOccupied, isDead, isGhost);
   const finalStyle = width !== undefined ? { ...cardStyle, width, minWidth: width, maxWidth: width } : cardStyle;
+
+  const canDecide = isOccupied && !isGhost && !isDead && node.allowsShare !== false;
+  const isLandOwnerActive = !!node.isLandOwner;
+  const isAcceptActive = decision === "accept";
+  const isRefuseActive = decision === "refuse";
+
+  const shareColor = isRefuseActive ? "#94a3b8" : isAcceptActive ? "#0f172a" : "#475569";
+  const shareTitle = isRefuseActive
+    ? "Từ chối nhận"
+    : isAcceptActive
+    ? "Xác nhận nhận"
+    : "Chưa chốt nhận/từ chối";
 
   return (
     <div
       ref={ref}
       style={finalStyle}
-      draggable={isOccupied && !isPending}
+      draggable={isOccupied}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1263,38 +1290,13 @@ const BrickCard = React.forwardRef(function BrickCard(
       {/* Label row (ghosts only) */}
       {isGhost && <div style={S.label}>{displayLabel}</div>}
 
-      {/* Pending banner */}
-      {isPending && (
-        <div style={{
-          fontSize: 9, fontWeight: 800, color: "#92400e", background: "#fde68a",
-          borderRadius: 6, padding: "2px 6px", marginBottom: 5, textAlign: "center",
-        }}>
-          Chèn vợ/chồng?
-        </div>
-      )}
-
-      {/* Land owner badge */}
-      {!isPending && (
-        <span
-          style={{ ...S.landBadge(!!node.isLandOwner), opacity: isOccupied ? 1 : 0.35 }}
-          title="Đánh dấu chủ sở hữu tài sản"
-          draggable={false}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!isOccupied || isPending) return;
-            onToggleLandOwner?.(node.id);
-          }}
-        >★</span>
-      )}
-
       {/* Remove button */}
-      {isOccupied && !isPending && (
+      {isOccupied && (
         <button type="button" style={S.removeBtn} onClick={() => onRemove(node.id)} title="Xoá">×</button>
       )}
 
       {/* Person content */}
-      {!isOccupied && !isPending ? (
+      {!isOccupied ? (
         <div style={S.placeholder}>Thả ngườii<br />vào đây...</div>
       ) : (
         <>
@@ -1303,53 +1305,44 @@ const BrickCard = React.forwardRef(function BrickCard(
             {formatYear(node.person.birth) || "?"}{isDead ? ` · ✝${formatYear(node.person.death)}` : ""}
           </div>
 
-          {node.disabledReason && !isPending ? (
+          {node.disabledReason ? (
             <div style={S.insightChip("#92400e")}>{node.disabledReason}</div>
           ) : null}
 
-          {showShareSummary && (
-            <div style={S.receiveRow}>
-              {showReceiveCheckbox ? (
-                <label style={S.shareLabel} title={node.isLandOwner ? "Nhận chỉ áp dụng phần di sản chảy vào, không áp dụng phần sở hữu gốc." : ""}>
-                  <input
-                    type="checkbox"
-                    checked={!!node.willReceive}
-                    disabled={!canToggleReceive}
-                    onChange={() => onToggleReceive(node.id)}
-                  />
-                  Nhận
-                </label>
-              ) : (
-                <span style={S.shareLabel}>{node.traceLabel || (node.isLandOwner ? "Sở hữu" : "Tỷ lệ")}</span>
-              )}
-              <span style={S.sharePct}>{Number(node.sharePercent || 0).toFixed(2)}%</span>
-            </div>
-          )}
-
-          {node.traceLabel && isDead && !isPending ? (
-            <div style={S.insightChip("#475569")}>{node.traceLabel}</div>
+          {node.traceLabel ? (
+            <div style={S.insightChip(isRefuseActive ? "#94a3b8" : "#475569")}>{node.traceLabel}</div>
           ) : null}
 
-          {isPending && (
-            <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-              <button
-                type="button"
-                style={{
-                  flex: 1, fontSize: 10, fontWeight: 700, color: "#14532d", background: "#86efac",
-                  border: "none", borderRadius: 6, padding: "3px 0", cursor: "pointer",
-                }}
-                onClick={(e) => { e.stopPropagation(); onPendingDecision?.(node.id, true); }}
-              >Có</button>
-              <button
-                type="button"
-                style={{
-                  flex: 1, fontSize: 10, fontWeight: 700, color: "#7f1d1d", background: "#fecaca",
-                  border: "none", borderRadius: 6, padding: "3px 0", cursor: "pointer",
-                }}
-                onClick={(e) => { e.stopPropagation(); onPendingDecision?.(node.id, false); }}
-              >Không</button>
-            </div>
-          )}
+          <div style={S.receiveRow}>
+            <span style={S.shareLabel}>{node.traceLabel || (isLandOwnerActive ? "Sở hữu" : "Tỷ lệ")}</span>
+            <span style={{ ...S.sharePct, color: shareColor }} title={shareTitle}>
+              {isRefuseActive ? "0.00" : Number(node.sharePercent || 0).toFixed(2)}%
+            </span>
+          </div>
+
+          {/* Bottom action buttons */}
+          <div style={S.actionRow}>
+            <button
+              type="button"
+              style={S.actionButton(isLandOwnerActive, "#f59e0b")}
+              title="Chủ đất"
+              onClick={(e) => { e.stopPropagation(); onToggleLandOwner?.(node.id); }}
+            >Chủ đất</button>
+            <button
+              type="button"
+              style={S.actionButton(isAcceptActive, "#16a34a")}
+              title="Nhận"
+              disabled={!canDecide}
+              onClick={(e) => { e.stopPropagation(); onToggleInheritanceDecision?.(node.id, "accept"); }}
+            >Nhận</button>
+            <button
+              type="button"
+              style={S.actionButton(isRefuseActive, "#dc2626")}
+              title="Từ chối"
+              disabled={!canDecide}
+              onClick={(e) => { e.stopPropagation(); onToggleInheritanceDecision?.(node.id, "refuse"); }}
+            >Từ chối</button>
+          </div>
         </>
       )}
     </div>
@@ -1645,7 +1638,6 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
 
   const personNodes = resolvedNodes.filter((n) => n.kind === "person");
   const ghostNodes = resolvedNodes.filter((n) => n.kind === "ghost");
-  const pendingNodes = resolvedNodes.filter((n) => n.kind === "pendingSpouse");
   const father = personNodes.find((n) => n.id === "father");
   const mother = personNodes.find((n) => n.id === "mother");
   const spFather = personNodes.find((n) => n.id === "spouse_father");
@@ -1677,14 +1669,9 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
     personNodeById.get(parentId)?.relationType !== "sibling"
   );
 
-  function getPendingFor(nodeId) {
-    return pendingNodes.find((p) => p.parentSlotId === nodeId);
-  }
-
   function getBranchSpouseFor(childId) {
     return (
       personNodes.find((n) => n.relationType === "branchSpouse" && n.parentSlotId === childId) ||
-      pendingNodes.find((p) => p.parentSlotId === childId) ||
       ghostNodes.find((n) => n.relationType === "ghostBranchSpouse" && n.parentSlotId === childId)
     );
   }
@@ -1880,60 +1867,34 @@ function TieredDiagram({ resolvedNodes, handlers, shareMode, warnings, engineSta
       if (father && mother) {
         units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: father, spouse: mother });
       } else if (father) {
-        const pending = getPendingFor(father.id);
-        if (pending) {
-          units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: father, spouse: pending });
-        } else {
-          units.push({ type: "person", key: father.id, node: father });
-        }
+        units.push({ type: "person", key: father.id, node: father });
       } else if (mother) {
-        const pending = getPendingFor(mother.id);
-        if (pending) {
-          units.push({ type: "pair", key: "birthParents", groupId: "birthParentsPair", primary: mother, spouse: pending });
-        } else {
-          units.push({ type: "person", key: mother.id, node: mother });
-        }
+        units.push({ type: "person", key: mother.id, node: mother });
       }
     }
     if (spFather || spMother) {
       if (spFather && spMother) {
         units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spFather, spouse: spMother });
       } else if (spFather) {
-        const pending = getPendingFor(spFather.id);
-        if (pending) {
-          units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spFather, spouse: pending });
-        } else {
-          units.push({ type: "person", key: spFather.id, node: spFather });
-        }
+        units.push({ type: "person", key: spFather.id, node: spFather });
       } else if (spMother) {
-        const pending = getPendingFor(spMother.id);
-        if (pending) {
-          units.push({ type: "pair", key: "spouseParents", groupId: "spouseParentsPair", primary: spMother, spouse: pending });
-        } else {
-          units.push({ type: "person", key: spMother.id, node: spMother });
-        }
+        units.push({ type: "person", key: spMother.id, node: spMother });
       }
     }
     return units;
   }
 
   function personUnit(node) {
-    const pending = getPendingFor(node.id);
-    if (pending) {
-      return { type: "pair", key: `pair:${node.id}`, groupId: `pair:${node.id}`, primary: node, spouse: pending };
-    }
     return { type: "person", key: node.id, node };
   }
 
   function buildTier1Units() {
     const units = [];
-    const ownerPending = getPendingFor("owner");
-    const ownerSpouse = spouse || ownerPending;
-    if (owner && ownerSpouse) {
-      units.push({ type: "pair", key: "ownerPair", groupId: "ownerPair", primary: owner, spouse: ownerSpouse });
+    if (owner && spouse) {
+      units.push({ type: "pair", key: "ownerPair", groupId: "ownerPair", primary: owner, spouse: spouse });
     } else {
-      units.push({ type: "person", key: owner.id, node: owner });
-      if (ownerSpouse) units.push({ type: "person", key: ownerSpouse.id, node: ownerSpouse });
+      if (owner) units.push({ type: "person", key: owner.id, node: owner });
+      if (spouse) units.push({ type: "person", key: spouse.id, node: spouse });
     }
     birthSiblings.forEach((sib) => units.push(personUnit(sib)));
     birthGhostSiblings.forEach((g) => units.push({ type: "ghost", key: g.id, node: g }));
@@ -2208,40 +2169,12 @@ function FamilyTreeApp() {
     return validateAssignment(currentNodes, nodeId, normalizePersonPayload(rawPerson), resolved);
   }, [shareMode]);
 
-  function createPendingSpouseNode(anchorNode, person) {
-    return createLogicalNode({
-      id: nextIdCounter(),
-      kind: "pendingSpouse",
-      label: "",
-      role: "Vợ/Chồng",
-      relationType: "spouse",
-      bucket: anchorNode.bucket,
-      allowsShare: true,
-      removable: true,
-      person: normalizePersonPayload(person),
-      parentSlotId: anchorNode.id,
-      spouseOf: anchorNode.id,
-      willReceive: !person.death,
-      sharePercent: "0.00",
-    });
-  }
-
   const commitAssign = useCallback((nodeId, rawPerson) => {
     const person = normalizePersonPayload(rawPerson);
     const currentNodes = logicalNodesRef.current;
     const resolved = resolveSubRelations(currentNodes, shareMode).nodes;
     const validation = validateAssignment(currentNodes, nodeId, person, resolved);
     if (!validation.ok) return validation;
-    if (validation.createPending && validation.targetNode.kind === "person") {
-      commitLogicalNodes((prevNodes) => {
-        const anchor = prevNodes.find((n) => n.id === nodeId);
-        if (!anchor || !anchor.person) return prevNodes;
-        const hasPending = prevNodes.some((n) => n.kind === "pendingSpouse" && n.parentSlotId === nodeId);
-        if (hasPending) return prevNodes;
-        return [...prevNodes, createPendingSpouseNode(anchor, person)];
-      });
-      return { ok: true, person: validation.person, displacedPersons: [] };
-    }
     if (validation.targetNode.kind === "ghost") {
       commitLogicalNodes((prevNodes) => {
         const prevResolved = resolveSubRelations(prevNodes, shareMode).nodes;
@@ -2318,47 +2251,22 @@ function FamilyTreeApp() {
     })));
   }, [commitLogicalNodes, materializeGhostNode, nextId, pruneLinkedNodes, shareMode]);
 
-  const onToggleReceive = useCallback((nodeId) => {
+  const onToggleInheritanceDecision = useCallback((nodeId, decision) => {
     commitLogicalNodes((prevNodes) =>
-      prevNodes.map((node) =>
-        node.id === nodeId
-          ? { ...node, willReceive: !node.willReceive }
-          : node
-      )
+      prevNodes.map((node) => {
+        if (node.id !== nodeId) return node;
+        const nextDecision = node.inheritanceDecision === decision ? "unset" : decision;
+        return {
+          ...node,
+          inheritanceDecision: nextDecision,
+          willReceive: nextDecision !== "refuse",
+        };
+      })
     );
   }, [commitLogicalNodes]);
 
   const onToggleLandOwner = useCallback((nodeId) => {
     commitLogicalNodes((prev) => prev.map((n) => n.id === nodeId ? { ...n, isLandOwner: !n.isLandOwner } : n));
-  }, [commitLogicalNodes]);
-
-  const onPendingDecision = useCallback((pendingNodeId, accepted) => {
-    const pending = logicalNodesRef.current.find((n) => n.id === pendingNodeId);
-    if (!pending || pending.kind !== "pendingSpouse") return;
-    if (accepted) {
-      commitLogicalNodes((prevNodes) => {
-        const anchor = prevNodes.find((n) => n.id === pending.parentSlotId);
-        const relationType = anchor?.relationType === "owner" ? "spouse" : "branchSpouse";
-        return prevNodes.map((n) =>
-          n.id === pendingNodeId
-            ? {
-                ...n,
-                kind: "person",
-                relationType,
-                spouseOf: pending.parentSlotId,
-                parentSlotId: pending.parentSlotId,
-                label: "",
-              }
-            : n
-        );
-      });
-    } else {
-      const person = normalizePersonPayload(pending.person);
-      commitLogicalNodes((prevNodes) => prevNodes.filter((n) => n.id !== pendingNodeId));
-      if (person?.id) {
-        bridgeWorkflowUpdates([{ id: person.id, patch: { inDiagram: false, inTree: false, inPool: true } }]);
-      }
-    }
   }, [commitLogicalNodes]);
 
   useEffect(() => {
@@ -2486,7 +2394,6 @@ function FamilyTreeApp() {
       setSaving: (nextSaving) => store.setSaving(nextSaving),
       getBusyCount: () => store.getBusyCount(),
       isBusy: () => store.isBusy(),
-      pendingCount: () => logicalNodesRef.current.filter((n) => n.kind === "pendingSpouse").length,
     };
     window.__DIAGRAM_API__ = api;
     applyCommittedState(initialCommittedRef.current);
@@ -2503,10 +2410,9 @@ function FamilyTreeApp() {
     onRemove: removeWithWorkflow,
     onMoveWithin: moveWithinDiagram,
     onValidateAssign: preflightAssign,
-    onToggleReceive,
+    onToggleInheritanceDecision,
     onToggleLandOwner,
     onGhostExpand,
-    onPendingDecision,
   };
 
   return (

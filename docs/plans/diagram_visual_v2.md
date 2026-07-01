@@ -1,8 +1,8 @@
 # Plan: Diagram Visual V2 (Sơ đồ thừa kế)
 
-**Trang thai:** COMPLETED (30/06/2026)
-**Cap nhat:** 2026-06-26
-**Files lien quan:** `frontend/static/ReactFlowApp.jsx`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html`
+**Trang thai:** PARTIAL (30/06/2026) — core 3-state + bottom actions done; auto spouse/co-parent slot + Z slot deferred
+**Cap nhat:** 2026-06-30
+**Files lien quan:** `frontend/static/ReactFlowApp.jsx`, `frontend/static/inheritance_engine.js`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html`, `routers/cases.py`
 **Tier:** MAJOR
 
 ---
@@ -154,3 +154,27 @@ Thiet ke lai visual cua so do thua ke:
 1 → 2 → 4 → 3 → 7 → 5 → 6 → 8
 
 (Ly do: Phase 4 card toi gian truoc de Phase 3 auto-layout co card size cu the; Phase 7 data model truoc Phase 5 pending de pending materialize vao model dung.)
+
+---
+
+## Update 2026-06-30: 3 trang thai thua ke + 3 nut duoi the
+
+### Da thuc hien
+- Them `inheritanceDecision` (`unset` | `accept` | `refuse`) vao node model, hydrate, persist.
+- Sua `inheritance_engine.js`: chi `refuse` bi loai khoi dong chia; `accept` va `unset` van duoc tinh.
+- Sua card UI: xoa dau ★ goc tren, them 3 nut duoi the: **Chu dat**, **Nhan**, **Tu choi**.
+- Nhan / Tu choi loai tru nhau; bam lai nut dang active thi ve `unset`.
+- Sua backend `routers/cases.py`: preserve `inheritanceDecision`, `unset` khong vao `case.participants`.
+- Sua `form.html`: hidden participants va live preview chi gui `accept`/`refuse`.
+- Bo drop-de: keo vao node da co nguoi bi block, khong con pending spouse.
+- Tests cap nhat va pass.
+
+### Chua thuc hien (can task rieng hoac tiep tuc)
+- **Auto sinh o vo/chong / cha-me**: chua tu dong tao o trong khi nguoi dung tich Chu dat + chet + co con chet.
+- **Sua nhanh Z / anh chi em**: chua tu dong sinh o Z khi cha/me nhan phan roi chet sau; van dung nut "+ Thêm Anh/Chị/Em".
+- Chua verify lai connector/layout sau khi bo pending spouse.
+
+### Test sau update
+- `node --test tests/diagram_inheritance_engine.test.mjs tests/cases_ui_dataflow_static.test.mjs`: 62/62 pass
+- `python -m unittest tests.test_diagram_payload_parser`: 52/52 pass
+- `.\verify.bat`: pass

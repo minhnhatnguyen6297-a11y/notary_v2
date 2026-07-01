@@ -41,10 +41,11 @@ test("workflow restore guard allows explicit undelete from diagram removal", () 
   );
 });
 
-test("land owner star is clickable and wired to the toggle handler", () => {
-  assert.equal(reactFlowApp.includes('cursor: "not-allowed"'), false);
+test("land owner action button is present and wired to the toggle handler", () => {
   assert.match(reactFlowApp, /onToggleLandOwner\?\.\(node\.id\)/);
-  assert.match(reactFlowApp, /onMouseDown=\{\(e\)\s*=>\s*\{\s*e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*\}\}/);
+  assert.match(reactFlowApp, /Chủ đất/);
+  assert.equal(reactFlowApp.includes("S.landBadge"), false);
+  assert.equal(reactFlowApp.includes(">★</span>"), false);
 });
 
 test("case state is posted and hydrated so stage survives reload", () => {
@@ -357,7 +358,7 @@ test("diagram assignment blocks occupied targets instead of replace or swap", ()
   const validateBlock = reactFlowApp.match(/function validateAssignment\(logicalNodes,\s*nodeId,\s*person,\s*targetNodes = logicalNodes\)\s*{[\s\S]*?^\s*}/m);
   assert.ok(validateBlock, "validateAssignment should exist");
   assert.match(validateBlock[0], /targetNode\.person/);
-  assert.match(validateBlock[0], /node da co nguoi|da co san nguoi|occupied/i);
+  assert.match(validateBlock[0], /Ô này đã có ngườ|đã có ngườ|occupied/i);
 
   const commitBlock = reactFlowApp.match(/const commitAssign = useCallback\(\(nodeId,\s*rawPerson\) => \{[\s\S]*?\}, \[commitLogicalNodes, materializeGhostNode, nextId, shareMode\]\);/);
   assert.ok(commitBlock, "commitAssign should exist");

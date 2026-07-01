@@ -1997,17 +1997,6 @@ endif %}
       </div>
 
 
-      <div id="pending-spouse-warning" class="alert alert-warning py-2 px-3 m-3 mb-0 d-none" style="font-size:12px;">
-
-
-        <i class="bi bi-exclamation-triangle-fill me-1"></i><span id="pending-spouse-text"></span>
-
-
-      </div>
-
-
-
-
       <div id="react-flow-root"></div>
 
 
@@ -5424,6 +5413,12 @@ endif %}
       if (!id) return null;
 
       const receiveRaw = raw.receive ?? raw.co_nhan_tai_san ?? raw.willReceive;
+      let inheritanceDecision = raw.inheritanceDecision;
+      if (!inheritanceDecision) {
+        if (receiveRaw === '0' || receiveRaw === false || receiveRaw === 0) inheritanceDecision = 'refuse';
+        else if (receiveRaw === '1' || receiveRaw === true || receiveRaw === 1) inheritanceDecision = 'unset';
+        else inheritanceDecision = 'unset';
+      }
 
       return {
 
@@ -5471,6 +5466,8 @@ endif %}
 
         receive: receiveRaw === undefined || receiveRaw === null || receiveRaw === '' ? '1' : String(receiveRaw),
 
+        inheritanceDecision,
+
         parent_id: pickFirstCustomerValue(raw.parent_id, raw.parentId, raw.parent_customer_id)
 
       };
@@ -5494,7 +5491,7 @@ endif %}
 
         'death', 'ngay_chet', 'address', 'dia_chi', 'issue_date', 'ngay_cap', 'issue_place',
 
-        'noi_cap', 'place_of_origin', 'nguyen_quan', 'role', 'share', 'receive', 'parent_id'
+        'noi_cap', 'place_of_origin', 'nguyen_quan', 'role', 'share', 'receive', 'inheritanceDecision', 'parent_id'
 
       ].forEach((key) => {
 
@@ -6333,23 +6330,6 @@ endif %}
       loadPool();
 
       if (typeof _syncAllDraftRowStates === 'function') _syncAllDraftRowStates();
-
-      // Rule 3: lock workflow buttons when pending spouse exists.
-      const pendingWarning = document.getElementById('pending-spouse-warning');
-      const pendingText = document.getElementById('pending-spouse-text');
-      const saveBtn = document.getElementById('btn-submit-case') || document.getElementById('btn-create-case');
-      const exportBtn = document.getElementById('btn-open-export');
-      const pendingCount = api?.pendingCount ? api.pendingCount() : 0;
-      if (pendingWarning && pendingText) {
-        if (pendingCount > 0) {
-          pendingText.textContent = `⚠ ${pendingCount} thẻ chờ xác nhận vợ/chồng`;
-          pendingWarning.classList.remove('d-none');
-        } else {
-          pendingWarning.classList.add('d-none');
-        }
-      }
-      if (saveBtn) saveBtn.disabled = pendingCount > 0;
-      if (exportBtn) exportBtn.disabled = pendingCount > 0;
 
       renderFamilyTreeWarnings(Array.isArray(detail.warnings) ? detail.warnings : []);
     });
@@ -8697,6 +8677,9 @@ endif %}
 
           if (!pid || p?.role === 'Owner') return;
 
+          const decision = p.inheritanceDecision || (p.willReceive === false ? 'refuse' : 'unset');
+          if (decision === 'unset') return;
+
           holder.insertAdjacentHTML('beforeend', `
 
         <input type="hidden" name="participant_id" value="${pid}">
@@ -8705,7 +8688,7 @@ endif %}
 
         <input type="hidden" name="participant_share" value="${p.sharePercent || p.share || '0'}">
 
-        <input type="hidden" name="participant_receive" value="${p.willReceive ? '1' : '0'}">
+        <input type="hidden" name="participant_receive" value="${decision === 'accept' ? '1' : '0'}">
 
         <input type="hidden" name="participant_parent_id" value="${p.parentId || ''}">
 
@@ -8839,13 +8822,17 @@ endif %}
 
       treePayload.forEach(p => {
 
+        const decision = p.inheritanceDecision || (p.willReceive === false ? 'refuse' : 'unset');
+
+        if (decision === 'unset') return;
+
         payload.append('participant_id', p.id);
 
         payload.append('participant_role', p.role);
 
         payload.append('participant_share', p.sharePercent || p.share || '0');
 
-        payload.append('participant_receive', p.willReceive ? '1' : '0');
+        payload.append('participant_receive', decision === 'accept' ? '1' : '0');
 
         payload.append('participant_parent_id', p.parentId || '');
 

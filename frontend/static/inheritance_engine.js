@@ -254,6 +254,7 @@
     const trace = [];
     const assetOwnerIds = uniqueIds(input.assetOwnerIds || (input.nodes || []).filter((node) => node.isLandOwner).map((node) => node.personId || node.person && node.person.id));
     const willReceive = input.willReceiveByPersonId || {};
+    const inheritanceDecision = input.inheritanceDecisionByPersonId || {};
     const holdings = new Map();
     const { ledger, row } = makeLedger(people);
 
@@ -269,6 +270,9 @@
     }
     function acceptsInheritance(personId) {
       const id = idOf(personId);
+      const decision = inheritanceDecision[id];
+      if (decision === "refuse") return false;
+      if (decision === "accept" || decision === "unset") return true;
       if (Object.prototype.hasOwnProperty.call(willReceive, id)) return !!willReceive[id];
       return true;
     }

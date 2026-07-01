@@ -221,6 +221,7 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
             "sourceId": _clean_nullable_text(raw_node.get("sourceId")),
             "flowFrom": normalized_flow_from,
             "willReceive": _coerce_bool(raw_node.get("willReceive"), True),
+            "inheritanceDecision": _clean_text(raw_node.get("inheritanceDecision")) or ("refuse" if _coerce_bool(raw_node.get("willReceive")) is False else "accept"),
             "hidden": _coerce_bool(raw_node.get("hidden"), False),
             "deleted": _coerce_bool(raw_node.get("deleted"), False),
             "isLandOwner": _coerce_bool(raw_node.get("isLandOwner"), False),
@@ -302,12 +303,15 @@ def _extract_diagram_participants(
             continue
         seen_participant_ids.add(person_id)
         customer = customers_by_id[person_id]
+        decision = _clean_text(node.get("inheritanceDecision")) or ("refuse" if _coerce_bool(node.get("willReceive")) is False else "unset")
+        if decision == "unset":
+            continue
         participants.append(SimpleNamespace(
             customer_id=customer.id,
             customer=customer,
             vai_tro=role,
             ty_le=0.0,
-            co_nhan_tai_san=_coerce_bool(node.get("willReceive"), True),
+            co_nhan_tai_san=decision == "accept",
             parent_customer_id=int(parent_person_id) if parent_person_id and parent_person_id.isdigit() else None,
         ))
 

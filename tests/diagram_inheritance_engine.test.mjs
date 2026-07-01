@@ -287,3 +287,79 @@ test("ambiguous sibling is not attached to the birth parent group", () => {
   assert.deepEqual(edges.ambiguousSiblingIds, ["sibling_unknown"]);
   assert.ok(!edges.kinshipEdges.some((edge) => edge.targetNodeId === "sibling_unknown"));
 });
+
+test("inheritanceDecision refuse excludes person from allocation", () => {
+  const result = runInheritanceCase({
+    people: [
+      { id: "A", death: "2020" },
+      { id: "B" },
+      { id: "C" },
+      { id: "D" },
+      { id: "E" },
+    ],
+    assetOwnerIds: ["A"],
+    inheritanceDecisionByPersonId: { B: "refuse", C: "refuse", D: "accept", E: "accept" },
+    relationships: {
+      parentsByChild: {
+        B: ["A"],
+        C: ["A"],
+        D: ["A"],
+        E: ["A"],
+      },
+    },
+  });
+
+  assert.equal(allocationOf(result, "D"), "1/2");
+  assert.equal(allocationOf(result, "E"), "1/2");
+  assert.equal(allocationOf(result, "B"), "0");
+  assert.equal(allocationOf(result, "C"), "0");
+});
+
+test("inheritanceDecision unset still counts as entitled but not grouped", () => {
+  const result = runInheritanceCase({
+    people: [
+      { id: "A", death: "2020" },
+      { id: "B" },
+      { id: "C" },
+      { id: "D" },
+      { id: "E" },
+    ],
+    assetOwnerIds: ["A"],
+    inheritanceDecisionByPersonId: { B: "refuse", C: "refuse", D: "accept", E: "unset" },
+    relationships: {
+      parentsByChild: {
+        B: ["A"],
+        C: ["A"],
+        D: ["A"],
+        E: ["A"],
+      },
+    },
+  });
+
+  assert.equal(allocationOf(result, "D"), "1/2");
+  assert.equal(allocationOf(result, "E"), "1/2");
+  assert.equal(allocationOf(result, "B"), "0");
+  assert.equal(allocationOf(result, "C"), "0");
+});
+
+test("inheritanceDecision overrides willReceive false", () => {
+  const result = runInheritanceCase({
+    people: [
+      { id: "A", death: "2020" },
+      { id: "B" },
+      { id: "C" },
+    ],
+    assetOwnerIds: ["A"],
+    willReceiveByPersonId: { B: false },
+    inheritanceDecisionByPersonId: { B: "accept", C: "unset" },
+    relationships: {
+      parentsByChild: {
+        B: ["A"],
+        C: ["A"],
+      },
+    },
+  });
+
+  assert.equal(allocationOf(result, "B"), "1/2");
+  assert.equal(allocationOf(result, "C"), "1/2");
+});

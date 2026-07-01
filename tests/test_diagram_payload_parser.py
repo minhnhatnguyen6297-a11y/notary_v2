@@ -3073,6 +3073,29 @@ class DiagramPayloadParserTests(unittest.TestCase):
         self.assertFalse(participants[1].co_nhan_tai_san)
         self.assertEqual(json.loads(engine_state)["nodes"][0]["id"], "owner")
 
+    def test_parse_case_diagram_payload_filters_unset_decision(self):
+        customers = {
+            "1": _customer(1, "Owner"),
+            "2": _customer(2, "Accept"),
+            "3": _customer(3, "Refuse"),
+            "4": _customer(4, "Unset"),
+        }
+        payload = _payload([
+            {"id": "owner", "kind": "person", "role": "Owner", "relationType": "owner", "personId": "1"},
+            {"id": "child_1", "kind": "person", "role": "Con", "relationType": "child", "personId": "2", "parentPersonId": "1", "inheritanceDecision": "accept"},
+            {"id": "child_2", "kind": "person", "role": "Con", "relationType": "child", "personId": "3", "parentPersonId": "1", "inheritanceDecision": "refuse"},
+            {"id": "child_3", "kind": "person", "role": "Con", "relationType": "child", "personId": "4", "parentPersonId": "1", "inheritanceDecision": "unset"},
+        ])
+
+        participants, participant_ids, engine_state = _parse_case_diagram_payload(payload, customers, "1")
+
+        self.assertEqual(participant_ids, {2, 3})
+        self.assertTrue(participants[0].co_nhan_tai_san)
+        self.assertFalse(participants[1].co_nhan_tai_san)
+        normalized = json.loads(engine_state)
+        self.assertEqual(len(normalized["nodes"]), 4)
+        self.assertEqual(normalized["nodes"][3].get("inheritanceDecision"), "unset")
+
     def test_parse_case_diagram_payload_rejects_owner_mismatch(self):
         customers = {"1": _customer(1, "Dead"), "2": _customer(2, "Wrong Owner")}
         payload = _payload([
