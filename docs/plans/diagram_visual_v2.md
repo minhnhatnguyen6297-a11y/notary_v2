@@ -1,6 +1,6 @@
 # Plan: Diagram Visual V2 (Sơ đồ thừa kế)
 
-**Trang thai:** PARTIAL (30/06/2026) — core 3-state + bottom actions done; auto spouse/co-parent slot + Z slot deferred
+**Trang thai:** COMPLETED (30/06/2026) — auto spouse/co-parent slot + Z slot implemented
 **Cap nhat:** 2026-06-30
 **Files lien quan:** `frontend/static/ReactFlowApp.jsx`, `frontend/static/inheritance_engine.js`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html`, `routers/cases.py`
 **Tier:** MAJOR
@@ -169,12 +169,14 @@ Thiet ke lai visual cua so do thua ke:
 - Bo drop-de: keo vao node da co nguoi bi block, khong con pending spouse.
 - Tests cap nhat va pass.
 
-### Chua thuc hien (can task rieng hoac tiep tuc)
-- **Auto sinh o vo/chong / cha-me**: chua tu dong tao o trong khi nguoi dung tich Chu dat + chet + co con chet.
-- **Sua nhanh Z / anh chi em**: chua tu dong sinh o Z khi cha/me nhan phan roi chet sau; van dung nut "+ Thêm Anh/Chị/Em".
-- Chua verify lai connector/layout sau khi bo pending spouse.
+### Da thuc hien (auto slot + Z)
+- **Auto sinh o vo/chong / cha-me**: `resolveSubRelations()` tu dong tao `auto_spouse_{anchorId}` khi anchor la Chu dat, hoac nguoi chet co phan tai san, hoac co con chet.
+- **Sua nhanh Z / anh chi em**: da bo nut "+ Thêm Anh/Chị/Em"; `resolveSubRelations()` tu dong tao `auto_z_{parentId}` khi cha/me chet sau con va co dong tai san chay qua.
+- **Xu ly tắt Chu đất**: `onToggleLandOwner()` xoa o auto trong; neu o da co nguoi thi tra ve pool roi xoa.
+- Giu lai ghost nut "+ Thêm Cháu thế vị" va "+ Thêm Dâu/Rể".
+- Connector/layout van duoc giu ngang/doc, khong quay lai roi.
 
 ### Test sau update
-- `node --test tests/diagram_inheritance_engine.test.mjs tests/cases_ui_dataflow_static.test.mjs`: 62/62 pass
+- `node --test tests/diagram_inheritance_engine.test.mjs tests/cases_ui_dataflow_static.test.mjs`: 65/65 pass
 - `python -m unittest tests.test_diagram_payload_parser`: 52/52 pass
 - `.\verify.bat`: pass
