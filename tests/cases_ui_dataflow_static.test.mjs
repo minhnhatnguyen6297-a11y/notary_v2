@@ -94,8 +94,14 @@ test("unchecking land owner clears fixed spouse of owner when no inflow, no dead
   assert.ok(toggleBlock, "onToggleLandOwner should exist");
   assert.match(toggleBlock[0], /node\.id === "owner"/);
   assert.match(toggleBlock[0], /fixedSpouse/);
-  assert.match(toggleBlock[0], /hasDeadChild/);
-  assert.match(toggleBlock[0], /ownerIsDead/);
+  assert.match(toggleBlock[0], /anchorHasDeadChild/);
+  assert.match(toggleBlock[0], /stillNeedsSpouse/);
+});
+
+test("owner spouse slot is hidden when no land owner, no dead-with-share, no dead child", () => {
+  assert.match(reactFlowApp, /shouldShowOwnerSpouse/);
+  assert.match(reactFlowApp, /n\.hidden/);
+  assert.match(reactFlowApp, /n\.kind === "person" && !n\.hidden/);
 });
 
 test("case state is posted and hydrated so stage survives reload", () => {
