@@ -1,0 +1,6891 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "11921542b33f8ff43c7b1140d7a9641822413bb3",
+  "generatedAt": "2026-06-05T01:59:35.202Z",
+  "files": {
+    ".agent/workflows/vibe-code.md": {
+      "filePath": ".agent/workflows/vibe-code.md",
+      "contentHash": "bf40dd6e006f50ff0ee81f33a7066d0c3986d79b3c99cffec7c0c737b3481726",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 40,
+      "hasStructuralAnalysis": true
+    },
+    ".agents/skills/test-ocr/SKILL.md": {
+      "filePath": ".agents/skills/test-ocr/SKILL.md",
+      "contentHash": "b28eb942af1d0b333228f62852a2a4adb63c9142eeacb51b5ce53fa1137fa0fe",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
+    },
+    ".claude/commands/claudex.md": {
+      "filePath": ".claude/commands/claudex.md",
+      "contentHash": "0437c846e91393ad4ea07a81aecb74c8ffc54e3fe8572c1a3fd74b794b36e05e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 188,
+      "hasStructuralAnalysis": true
+    },
+    ".claude/skills/test-ocr/SKILL.md": {
+      "filePath": ".claude/skills/test-ocr/SKILL.md",
+      "contentHash": "07e830a7262f1d2a0f94981262a18e651b5eef7115b778c8624b6413faaba4b6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
+    },
+    ".env.example": {
+      "filePath": ".env.example",
+      "contentHash": "a977247769e32e677890999c118b83275a7b40df529efb9580bb614a0b8890c2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": true
+    },
+    ".gitattributes": {
+      "filePath": ".gitattributes",
+      "contentHash": "1df84947e0d933c53fe759123bcf4074fcb674edacd7d3d6de0958311c1e7d4b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": false
+    },
+    ".understand-anything/.understandignore": {
+      "filePath": ".understand-anything/.understandignore",
+      "contentHash": "e3d4acc36c352633c6111606719e151e445e40899ada25447fed3e839ad64307",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 46,
+      "hasStructuralAnalysis": false
+    },
+    "AGENTS.md": {
+      "filePath": "AGENTS.md",
+      "contentHash": "6e86743966c5f6fa64640e9e41352d89e82f97c067ad01cc9ef41779b9963589",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 427,
+      "hasStructuralAnalysis": true
+    },
+    "celery_app.py": {
+      "filePath": "celery_app.py",
+      "contentHash": "b70180090cf20900a55e5c363ac6b6863f039b48e9e465b4cc73dd6e2633bec8",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "celery",
+          "specifiers": [
+            "Celery"
+          ]
+        },
+        {
+          "source": "tasks",
+          "specifiers": [
+            "tasks"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 26,
+      "hasStructuralAnalysis": true
+    },
+    "CLAUDE.md": {
+      "filePath": "CLAUDE.md",
+      "contentHash": "daa97254d3502515c6fdb6a4d982292659eefd131f8ddec672a4336fafcd52c6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": true
+    },
+    "connect_vps.bat": {
+      "filePath": "connect_vps.bat",
+      "contentHash": "65c7004a9d9f0f47e634ed2063e81909e9ce008739309aa805f7b7591e017a82",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 155,
+      "hasStructuralAnalysis": false
+    },
+    "database.py": {
+      "filePath": "database.py",
+      "contentHash": "ba9aec3ed48d6a3fe1e3445c33cd97f0aeb56851da9fe72dd59714e65a3e9536",
+      "functions": [
+        {
+          "name": "migrate_customers_nullable",
+          "params": [],
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "_ensure_table_columns",
+          "params": [
+            "cur",
+            "table_name",
+            "expected_columns"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "migrate_inheritance_cases_schema",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "migrate_properties_schema",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "migrate_inheritance_case_properties_schema",
+          "params": [],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "get_db",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "create_engine"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "declarative_base",
+            "sessionmaker"
+          ]
+        }
+      ],
+      "exports": [
+        "migrate_customers_nullable",
+        "_ensure_table_columns",
+        "migrate_inheritance_cases_schema",
+        "migrate_properties_schema",
+        "migrate_inheritance_case_properties_schema",
+        "get_db"
+      ],
+      "totalLines": 125,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/connect_vps.ps1": {
+      "filePath": "deploy/vps/connect_vps.ps1",
+      "contentHash": "037a99f1651038417e832adf3edab85fadfe0d17613fa05bace56f49d7758c94",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 210,
+      "hasStructuralAnalysis": false
+    },
+    "deploy/vps/install_systemd.sh": {
+      "filePath": "deploy/vps/install_systemd.sh",
+      "contentHash": "d72b43e06849b80f382a1cbb2e6b30a67d3dacc522aed9377c23e1f6ec237b32",
+      "functions": [
+        {
+          "name": "log",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "die",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "usage",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "run_root",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "parse_args",
+          "params": [],
+          "exported": false,
+          "lineCount": 33
+        },
+        {
+          "name": "validate",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "install_services",
+          "params": [],
+          "exported": false,
+          "lineCount": 57
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 145,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/manage_services.sh": {
+      "filePath": "deploy/vps/manage_services.sh",
+      "contentHash": "eeb899cdd9527c9747dbd2f6988819bb36d6bdef27a0c56c761aa7f3d9e3b1af",
+      "functions": [
+        {
+          "name": "run_root",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "usage",
+          "params": [],
+          "exported": false,
+          "lineCount": 13
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 62,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/one_click_install.sh": {
+      "filePath": "deploy/vps/one_click_install.sh",
+      "contentHash": "e5e91605484b25e1c41d7ce595cad002808c0c5be49b9c217e62c457d4f0d9ab",
+      "functions": [
+        {
+          "name": "log",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "die",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "usage",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "run_root",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "escape_sed_replacement",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "set_env_if_empty_or_missing",
+          "params": [],
+          "exported": false,
+          "lineCount": 16
+        },
+        {
+          "name": "set_env_value",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "parse_args",
+          "params": [],
+          "exported": false,
+          "lineCount": 40
+        },
+        {
+          "name": "install_system_packages",
+          "params": [],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "setup_python_env",
+          "params": [],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "install_local_ocr_python_deps",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "setup_env_and_dirs",
+          "params": [],
+          "exported": false,
+          "lineCount": 21
+        },
+        {
+          "name": "install_systemd_services",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "print_summary",
+          "params": [],
+          "exported": false,
+          "lineCount": 30
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": false,
+          "lineCount": 17
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 260,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/setup_swap.sh": {
+      "filePath": "deploy/vps/setup_swap.sh",
+      "contentHash": "f01a4314d4b54c6bf3c536c24ab1fd8f29fbbb683157b4e8a707a72bc8a8f9f2",
+      "functions": [
+        {
+          "name": "log",
+          "params": [],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "die",
+          "params": [],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "usage",
+          "params": [],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "run_root",
+          "params": [],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "parse_args",
+          "params": [],
+          "exported": false,
+          "lineCount": 23
+        },
+        {
+          "name": "ensure_swap_file",
+          "params": [],
+          "exported": false,
+          "lineCount": 27
+        },
+        {
+          "name": "persist_swap",
+          "params": [],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "persist_vm_tuning",
+          "params": [],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 117,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/ssh_credentials.env": {
+      "filePath": "deploy/vps/ssh_credentials.env",
+      "contentHash": "e411918b11dbfcd930efedba2e5664d3d4c13f7a4bade14673490294a8372673",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 15,
+      "hasStructuralAnalysis": true
+    },
+    "deploy/vps/ssh_credentials.example": {
+      "filePath": "deploy/vps/ssh_credentials.example",
+      "contentHash": "2f1c61addf0a82816374e3dbe60c61de94b01cdaf44ba68157f74c10339bddcd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 18,
+      "hasStructuralAnalysis": false
+    },
+    "deploy/vps/view_vps_logs.ps1": {
+      "filePath": "deploy/vps/view_vps_logs.ps1",
+      "contentHash": "0814ba80a455134d9996da4dfef5ae897217a803cb536f51ae88051f1a20a682",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 97,
+      "hasStructuralAnalysis": false
+    },
+    "docs/glossary.md": {
+      "filePath": "docs/glossary.md",
+      "contentHash": "8ec5b85da840f172ea9d7a4b7e47a7e960456425f3568a0029a6b3ae1376b2e2",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 111,
+      "hasStructuralAnalysis": true
+    },
+    "docs/mau_nhap_nguoi (3).xlsx": {
+      "filePath": "docs/mau_nhap_nguoi (3).xlsx",
+      "contentHash": "83bbc5f187047deccf370ffcdab99222d71ba122b7343dc597780370aae966ff",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 107,
+      "hasStructuralAnalysis": false
+    },
+    "docs/plans/_INDEX.md": {
+      "filePath": "docs/plans/_INDEX.md",
+      "contentHash": "adc4c99af922f774721aa954450d085ae6d79c2dc1ff02a7bb5a8c87425c970b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 18,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/cases_dataflow_v2.md": {
+      "filePath": "docs/plans/cases_dataflow_v2.md",
+      "contentHash": "5c5928d582e73765c1f64a0188ea05af5e9a32693d7e8329beca04c6d0d88cdd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 561,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/codex_relay.md": {
+      "filePath": "docs/plans/codex_relay.md",
+      "contentHash": "ab544aaa735003e195732a83e760309d3709a052c8a246d7ee97293d804db22c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 121,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/inheritance_diagram_v2_refactor_wip.md": {
+      "filePath": "docs/plans/inheritance_diagram_v2_refactor_wip.md",
+      "contentHash": "4140b95f419a1475a80a509f06df9e38d392584580ed2dd26648f99cb3adff5a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 405,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/inheritance_diagram.md": {
+      "filePath": "docs/plans/inheritance_diagram.md",
+      "contentHash": "37968357635b48dad484deceb8f458995b4a3e12574d0913d7475aa7a725a73c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 247,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/ocr_ai.md": {
+      "filePath": "docs/plans/ocr_ai.md",
+      "contentHash": "08e8d8443bfd0bab976c1e97754d434fcea9c324f4913fc84c8e2b98ffe4d8e0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 207,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/ocr_local.md": {
+      "filePath": "docs/plans/ocr_local.md",
+      "contentHash": "e3a9daec499727df999f9eb5f7689162508e6f1dd268f342a53a459309ad18e9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 212,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/ocr_property_rules.md": {
+      "filePath": "docs/plans/ocr_property_rules.md",
+      "contentHash": "760435448c2611bbe37468ff7471859d1dd86440ad8c17656718d1bf53908bbb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 207,
+      "hasStructuralAnalysis": true
+    },
+    "docs/plans/unified-orbiting-pebble.md": {
+      "filePath": "docs/plans/unified-orbiting-pebble.md",
+      "contentHash": "4c55658685ee233d2af6f2cf33bc65e599cfb243c647280c141c5e8b00b3b4c4",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 146,
+      "hasStructuralAnalysis": true
+    },
+    "docs/VPS_CONNECT_ONE_CLICK.md": {
+      "filePath": "docs/VPS_CONNECT_ONE_CLICK.md",
+      "contentHash": "ca2f7c345b6e111d99e3e041647b836b12dc0ebf566742dd088dde73678fa163",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 96,
+      "hasStructuralAnalysis": true
+    },
+    "docs/VPS_ONE_CLICK_SETUP.md": {
+      "filePath": "docs/VPS_ONE_CLICK_SETUP.md",
+      "contentHash": "a1f8a87c28a80ac4f6397fa080e6bc02ba400a6341e0561ee4591988ba66fc2e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 68,
+      "hasStructuralAnalysis": true
+    },
+    "docs/VPS_WORKFLOW.md": {
+      "filePath": "docs/VPS_WORKFLOW.md",
+      "contentHash": "225d39ba709e9bd98a1da34e7e4fc801914267292083db7387dedd782f34386c",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 105,
+      "hasStructuralAnalysis": true
+    },
+    "docs/word_template_properties_guide.md": {
+      "filePath": "docs/word_template_properties_guide.md",
+      "contentHash": "c878aaaa1960519d3d2d2d385b27aa53de0b1f52fc27dabc5cf0fa3bef430192",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 81,
+      "hasStructuralAnalysis": true
+    },
+    "fix_encoding.py": {
+      "filePath": "fix_encoding.py",
+      "contentHash": "eb57f33ece1a4d97d52938487d751dade9415ee63cb7e626e95d5e6f762cb360",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 41,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/static/css/cases/form.css": {
+      "filePath": "frontend/static/css/cases/form.css",
+      "contentHash": "aa4f044b69e85f0fd30ee5c83c53d8b081ff6073b4bf65454b4d663abe70c4d8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 828,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/static/diagram_edges.js": {
+      "filePath": "frontend/static/diagram_edges.js",
+      "contentHash": "b160fc5baf479a65edf1e12f3f507d09c338e6b3b48a1254be6e40debf568028",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 184,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/static/diagram_state.js": {
+      "filePath": "frontend/static/diagram_state.js",
+      "contentHash": "efbae7f129225a2e31e7bdabcb5a41ad067004b9ed9bf45a6acffa2fafd2ebe3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 99,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/static/inheritance_engine.js": {
+      "filePath": "frontend/static/inheritance_engine.js",
+      "contentHash": "0a73712b5a9702958092dedbc0898580eecee24a2c5046693946a7a5f1ed1469",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 418,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/static/ocr_qr_worker.js": {
+      "filePath": "frontend/static/ocr_qr_worker.js",
+      "contentHash": "825c9194da7d646a3b676dacf724b0cba30cfbc63ac9c6d7b0c866e5afb297e7",
+      "functions": [
+        {
+          "name": "toGray",
+          "params": [
+            "src"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "applyLinearContrast",
+          "params": [
+            "src"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "threshold",
+          "params": [
+            "src"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "rotateImageData",
+          "params": [
+            "data",
+            "width",
+            "height",
+            "angle"
+          ],
+          "exported": false,
+          "lineCount": 35
+        },
+        {
+          "name": "tryDecode",
+          "params": [
+            "data",
+            "width",
+            "height"
+          ],
+          "exported": false,
+          "lineCount": 4
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 122,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/static/ReactFlowApp.jsx": {
+      "filePath": "frontend/static/ReactFlowApp.jsx",
+      "contentHash": "30611742b4a4fd8fecc9b8fabd7cb7063d43a56170c95ea70164c11c014921eb",
+      "functions": [
+        {
+          "name": "bootstrapId",
+          "params": [
+            "prefix"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "parseFlexibleDate",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "formatYear",
+          "params": [
+            "value"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "normalizePersonPayload",
+          "params": [
+            "rawPerson"
+          ],
+          "exported": false,
+          "lineCount": 41
+        },
+        {
+          "name": "createLogicalNode",
+          "params": [
+            "overrides"
+          ],
+          "exported": false,
+          "lineCount": 33
+        },
+        {
+          "name": "createBaseNodes",
+          "params": [],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "createDynamicNode",
+          "params": [
+            "prefix",
+            "config"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "findCustomerById",
+          "params": [
+            "customerId"
+          ],
+          "exported": false,
+          "lineCount": 7
+        },
+        {
+          "name": "resolveCustomerForDrop",
+          "params": [
+            "rawPayload"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "validateAssignment",
+          "params": [
+            "logicalNodes",
+            "nodeId",
+            "person"
+          ],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "deriveParentPersonId",
+          "params": [
+            "nodes",
+            "node"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "buildAssignedNode",
+          "params": [
+            "node",
+            "nodes",
+            "person"
+          ],
+          "exported": false,
+          "lineCount": 57
+        },
+        {
+          "name": "assignPersonToNode",
+          "params": [
+            "nodes",
+            "nodeId",
+            "person"
+          ],
+          "exported": false,
+          "lineCount": 11
+        },
+        {
+          "name": "ghostMaterializedIdPrefix",
+          "params": [
+            "node"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "collectPrunableNodeIds",
+          "params": [
+            "nodes",
+            "targetId"
+          ],
+          "exported": false,
+          "lineCount": 13
+        },
+        {
+          "name": "collectRemovedPeople",
+          "params": [
+            "nodes",
+            "targetId"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "bridgeWorkflowUpdates",
+          "params": [
+            "transitions"
+          ],
+          "exported": false,
+          "lineCount": 6
+        },
+        {
+          "name": "buildOwnerPayload",
+          "params": [],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "ensureSpareChildNode",
+          "params": [
+            "nodes"
+          ],
+          "exported": false,
+          "lineCount": 18
+        },
+        {
+          "name": "pickSiblingSource",
+          "params": [
+            "nodes",
+            "participant"
+          ],
+          "exported": false,
+          "lineCount": 19
+        },
+        {
+          "name": "hydrateEngineStateNodes",
+          "params": [],
+          "exported": false,
+          "lineCount": 27
+        },
+        {
+          "name": "hydrateInitialNodes",
+          "params": [],
+          "exported": false,
+          "lineCount": 142
+        },
+        {
+          "name": "compareDeathDates",
+          "params": [
+            "ownerDeathDate",
+            "personDeathDate"
+          ],
+          "exported": false,
+          "lineCount": 8
+        },
+        {
+          "name": "survivesAt",
+          "params": [
+            "personDeathDate",
+            "eventDeathDate"
+          ],
+          "exported": false,
+          "lineCount": 5
+        },
+        {
+          "name": "getBaseInsight",
+          "params": [
+            "node",
+            "deathComparison"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "buildModelWarnings",
+          "params": [
+            "models",
+            "shareMode"
+          ],
+          "exported": false,
+          "lineCount": 60
+        },
+        {
+          "name": "buildEngineInput",
+          "params": [
+            "models"
+          ],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "applyEngineResult",
+          "params": [
+            "models",
+            "engineResult"
+          ],
+          "exported": false,
+          "lineCount": 32
+        },
+        {
+          "name": "runDiagramEngine",
+          "params": [
+            "models"
+          ],
+          "exported": false,
+          "lineCount": 29
+        },
+        {
+          "name": "resolveSubRelations",
+          "params": [
+            "nodes",
+            "shareMode"
+          ],
+          "exported": false,
+          "lineCount": 67
+        },
+        {
+          "name": "buildParticipantsPayload",
+          "params": [
+            "resolvedNodes"
+          ],
+          "exported": false,
+          "lineCount": 26
+        },
+        {
+          "name": "buildCommittedSnapshot",
+          "params": [
+            "logicalNodes",
+            "shareMode"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "createFallbackDiagramStore",
+          "params": [
+            "initialSnapshot",
+            "onPublish"
+          ],
+          "exported": false,
+          "lineCount": 52
+        },
+        {
+          "name": "getRelativeBox",
+          "params": [
+            "element",
+            "rootElement"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "getBoxCenterX",
+          "params": [
+            "box"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "getBoxBottomY",
+          "params": [
+            "box"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "getBoxCenterY",
+          "params": [
+            "box"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "getCombinedBox",
+          "params": [
+            "boxes"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "getKinshipSourcePoint",
+          "params": [
+            "sourceBox",
+            "targetBox"
+          ],
+          "exported": false,
+          "lineCount": 9
+        },
+        {
+          "name": "getFlowOrientation",
+          "params": [
+            "sourceBox",
+            "targetBox"
+          ],
+          "exported": false,
+          "lineCount": 25
+        },
+        {
+          "name": "slotSortValue",
+          "params": [
+            "box",
+            "side"
+          ],
+          "exported": false,
+          "lineCount": 4
+        },
+        {
+          "name": "buildEdgeSlotMap",
+          "params": [
+            "edges",
+            "keyBuilder",
+            "valueBuilder"
+          ],
+          "exported": false,
+          "lineCount": 17
+        },
+        {
+          "name": "getSlottedCardPoint",
+          "params": [
+            "box",
+            "side",
+            "slotIndex",
+            "slotCount",
+            "mode"
+          ],
+          "exported": false,
+          "lineCount": 22
+        },
+        {
+          "name": "buildSoftCurve",
+          "params": [
+            "source",
+            "target"
+          ],
+          "exported": false,
+          "lineCount": 14
+        },
+        {
+          "name": "PairConnector",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "SvgPairConnector",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "PairUnit",
+          "params": [],
+          "exported": false,
+          "lineCount": 10
+        },
+        {
+          "name": "GhostButton",
+          "params": [],
+          "exported": false,
+          "lineCount": 15
+        },
+        {
+          "name": "TierHeader",
+          "params": [],
+          "exported": false,
+          "lineCount": 12
+        },
+        {
+          "name": "TieredDiagramLegacy",
+          "params": [],
+          "exported": false,
+          "lineCount": 185
+        },
+        {
+          "name": "TieredDiagram",
+          "params": [],
+          "exported": false,
+          "lineCount": 365
+        },
+        {
+          "name": "FamilyTreeApp",
+          "params": [],
+          "exported": false,
+          "lineCount": 390
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2299,
+      "hasStructuralAnalysis": true
+    },
+    "frontend/templates/base.html": {
+      "filePath": "frontend/templates/base.html",
+      "contentHash": "a5c5f55d93a4125d2b4928e63b17fd6798b5211c802b91e57375b975bd41415f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 244,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/_document_template.html": {
+      "filePath": "frontend/templates/cases/_document_template.html",
+      "contentHash": "cdfc6dd95e2039350939179b472ea2de4ec8d83ca985b3596f717748ebde0d31",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 83,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/detail.html": {
+      "filePath": "frontend/templates/cases/detail.html",
+      "contentHash": "7e99af0540d94cbb98f6602e0e191d0a4c2778dfcb26b449bb3ceb1973b16a49",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 333,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/form.html": {
+      "filePath": "frontend/templates/cases/form.html",
+      "contentHash": "c84fa3dad9bdfac6d65a45ea0e854e822c69e5a6b36603406297356ba060e4ac",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 14095,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/list.html": {
+      "filePath": "frontend/templates/cases/list.html",
+      "contentHash": "26d8408445cc4b69d079bb069ea59645225aa907d46aadeb433f9cace605f207",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 92,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/preview.html": {
+      "filePath": "frontend/templates/cases/preview.html",
+      "contentHash": "73d1bf21ec2b36a3cda822c7d0de0b96016cd4424047f4e98e281e27e45aef9b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 69,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/cases/templates.html": {
+      "filePath": "frontend/templates/cases/templates.html",
+      "contentHash": "07d7d3029c87aa410ff8e881212b260c968174987321eef49400a9619accda9d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 102,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/customers/detail.html": {
+      "filePath": "frontend/templates/customers/detail.html",
+      "contentHash": "469201da8d100d4fd1ec3274a7f6671048e9c3185a4d29b119267c85b8a79e95",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 87,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/customers/form.html": {
+      "filePath": "frontend/templates/customers/form.html",
+      "contentHash": "3e52520cbf58b90eaee15795bc907eac2309115dcbfc826793ab9c2a091e2780",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 115,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/customers/list.html": {
+      "filePath": "frontend/templates/customers/list.html",
+      "contentHash": "669db40bfbe3e51dff13f2beb1d04cfb8e786140a4960522c5f569fd51127d0d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 155,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/customers/upload_result.html": {
+      "filePath": "frontend/templates/customers/upload_result.html",
+      "contentHash": "9c9df0d4a10abf870f218cf3970ae7115f22a3eea4600bcbbd6a6d87a6fe71b0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 158,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/home.html": {
+      "filePath": "frontend/templates/home.html",
+      "contentHash": "d17383c74f2cb68c3796ecf7b625a76a825a0b0316797f2a7aef59f48f78bd44",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 147,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/macros.html": {
+      "filePath": "frontend/templates/macros.html",
+      "contentHash": "a6aa66c524f33527d491ff70f7ef7b5feef7fa3cfbedd732910b074313f81b6d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/properties/detail.html": {
+      "filePath": "frontend/templates/properties/detail.html",
+      "contentHash": "f1c0b4b30e6e1de1b1fe64b90c05c479878c7a14425b454ea60ab60ed56b4aa3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 33,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/properties/form.html": {
+      "filePath": "frontend/templates/properties/form.html",
+      "contentHash": "d2cfe4f2fd42d969d97b73617635e92cfb77b7c26c1d93dbaa2de65c4eba4ab9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 116,
+      "hasStructuralAnalysis": false
+    },
+    "frontend/templates/properties/list.html": {
+      "filePath": "frontend/templates/properties/list.html",
+      "contentHash": "da7c69c4da8a947fbb8330b735df11437a10e99b147d4764cd32b4ba183289a8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 75,
+      "hasStructuralAnalysis": false
+    },
+    "implementation_plan sơ đồ.md": {
+      "filePath": "implementation_plan sơ đồ.md",
+      "contentHash": "a1d51a0a26e5dc8f3f2846979e1d9ed950e92966cbb5134ffe9965bf6fa4643a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 193,
+      "hasStructuralAnalysis": true
+    },
+    "install_vps.sh": {
+      "filePath": "install_vps.sh",
+      "contentHash": "d791429a0f75f0eb449c08f4debc03f23029367de436645200d163225f07e92d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": true
+    },
+    "launch_vps_app.bat": {
+      "filePath": "launch_vps_app.bat",
+      "contentHash": "909830df60100f94e681d55f53efe4bdba8481a759e7bb099a565ebb52b55704",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": false
+    },
+    "main.py": {
+      "filePath": "main.py",
+      "contentHash": "d26d603461b22d8bfed243445566eed5bd2e88faac706f504eaa2c068c4feaf1",
+      "functions": [
+        {
+          "name": "lifespan",
+          "params": [
+            "app"
+          ],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "http_timing_log",
+          "params": [
+            "request",
+            "call_next"
+          ],
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "home",
+          "params": [
+            "request"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "stats",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "asynccontextmanager"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "perf_counter"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "load_dotenv"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "FastAPI",
+            "Request"
+          ]
+        },
+        {
+          "source": "fastapi.staticfiles",
+          "specifiers": [
+            "StaticFiles"
+          ]
+        },
+        {
+          "source": "fastapi.templating",
+          "specifiers": [
+            "Jinja2Templates"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "Base",
+            "engine",
+            "migrate_customers_nullable",
+            "migrate_inheritance_case_properties_schema",
+            "migrate_inheritance_cases_schema",
+            "migrate_properties_schema"
+          ]
+        },
+        {
+          "source": "observability",
+          "specifiers": [
+            "configure_process_logging"
+          ]
+        },
+        {
+          "source": "routers",
+          "specifiers": [
+            "cases",
+            "customers",
+            "ocr_ai",
+            "ocr_local",
+            "participants",
+            "properties"
+          ]
+        }
+      ],
+      "exports": [
+        "lifespan",
+        "http_timing_log",
+        "home",
+        "stats"
+      ],
+      "totalLines": 129,
+      "hasStructuralAnalysis": true
+    },
+    "models.py": {
+      "filePath": "models.py",
+      "contentHash": "0130069c064d19198e3d131071b5a50ae062094d35f84d1ab62448d14194408f",
+      "functions": [],
+      "classes": [
+        {
+          "name": "Customer",
+          "methods": [
+            "con_song",
+            "_moc_cccd_moi",
+            "loai_giay_to",
+            "noi_cap",
+            "loai_dia_chi"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 47
+        },
+        {
+          "name": "Property",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "InheritanceCase",
+          "methods": [
+            "is_locked",
+            "tong_ty_le"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "InheritanceCaseProperty",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "InheritanceParticipant",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "WordTemplate",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "OCRJob",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "ExtractedDocument",
+          "methods": [],
+          "properties": [],
+          "exported": true,
+          "lineCount": 10
+        }
+      ],
+      "imports": [
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "Column",
+            "Integer",
+            "String",
+            "Date",
+            "Boolean",
+            "Float",
+            "ForeignKey",
+            "Text",
+            "DateTime",
+            "JSON"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "relationship"
+          ]
+        },
+        {
+          "source": "sqlalchemy.sql",
+          "specifiers": [
+            "func"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "Base"
+          ]
+        }
+      ],
+      "exports": [
+        "Customer",
+        "Property",
+        "InheritanceCase",
+        "InheritanceCaseProperty",
+        "InheritanceParticipant",
+        "WordTemplate",
+        "OCRJob",
+        "ExtractedDocument"
+      ],
+      "totalLines": 184,
+      "hasStructuralAnalysis": true
+    },
+    "models/rapidocr/latin_dict.txt": {
+      "filePath": "models/rapidocr/latin_dict.txt",
+      "contentHash": "ab1fcc6dbb5ae074d0e8966984ee977ed9d62976abd96c6461a0cdb684ddec90",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 186,
+      "hasStructuralAnalysis": false
+    },
+    "models/rapidocr/latin_PP-OCRv3_rec_infer.onnx": {
+      "filePath": "models/rapidocr/latin_PP-OCRv3_rec_infer.onnx",
+      "contentHash": "52adca757ad13d930c822536f8ed46760482005a1eac33bbbab76fd5e8e3543f",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 28039,
+      "hasStructuralAnalysis": false
+    },
+    "models/rapidocr/vi_dict.txt": {
+      "filePath": "models/rapidocr/vi_dict.txt",
+      "contentHash": "d917d7489d2c20d2e4cee8c17068f8ac54f6ee406a04bf5ac3b1ff5dc38e1e52",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6623,
+      "hasStructuralAnalysis": false
+    },
+    "models/rapidocr/vi_PP-OCRv4_rec_infer.onnx": {
+      "filePath": "models/rapidocr/vi_PP-OCRv4_rec_infer.onnx",
+      "contentHash": "5173c2b4626a2593f4e0bb6146e203a5c55cfd6ecd7a557a83263a7a27f77fe0",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44919,
+      "hasStructuralAnalysis": false
+    },
+    "observability.py": {
+      "filePath": "observability.py",
+      "contentHash": "645c6bfb72211d3087ad0ad94c01d2f3e94f864f10fbf75c2b36006f13e488bd",
+      "functions": [
+        {
+          "name": "_parse_log_level",
+          "params": [
+            "raw"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_ensure_handler",
+          "params": [
+            "logger",
+            "handler_type",
+            "target_path",
+            "level"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "configure_process_logging",
+          "params": [
+            "service_name"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "logging.handlers",
+          "specifiers": [
+            "RotatingFileHandler"
+          ]
+        }
+      ],
+      "exports": [
+        "_parse_log_level",
+        "_ensure_handler",
+        "configure_process_logging"
+      ],
+      "totalLines": 61,
+      "hasStructuralAnalysis": true
+    },
+    "requirements-dev.txt": {
+      "filePath": "requirements-dev.txt",
+      "contentHash": "c4e653d86a627cd10964c11d56f8a6e0894a6142802bc6ba946c4c79c0b13dea",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 4,
+      "hasStructuralAnalysis": false
+    },
+    "requirements-gpu.txt": {
+      "filePath": "requirements-gpu.txt",
+      "contentHash": "ada191a066df2f1df41caf5cf3e3daa335773b08005a41111aba62f0e3f3ab7e",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 8,
+      "hasStructuralAnalysis": false
+    },
+    "requirements-local-ocr.txt": {
+      "filePath": "requirements-local-ocr.txt",
+      "contentHash": "eb7aef64547171153860d0f38a7c18ab17f4f20b6d38454dd6d92ca3192599ed",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 6,
+      "hasStructuralAnalysis": false
+    },
+    "requirements.txt": {
+      "filePath": "requirements.txt",
+      "contentHash": "74820a896081c1fdd6ad8f7051a6ac2c9e0a041b52d01df61713fe6d36d02741",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 14,
+      "hasStructuralAnalysis": false
+    },
+    "routers/__init__.py": {
+      "filePath": "routers/__init__.py",
+      "contentHash": "416cc1cb9a135a1d80c9e52e1890910b32b4e5d5b55af24cffab7f3130b1bd12",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    "routers/cases.py": {
+      "filePath": "routers/cases.py",
+      "contentHash": "340c167c34e645146c967ecc63262610221b5bfc470c44bf7496b101c14422f4",
+      "functions": [
+        {
+          "name": "_hang_for_role",
+          "params": [
+            "role"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_to_list",
+          "params": [
+            "v"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_normalize_property_ids",
+          "params": [
+            "primary_property_id",
+            "raw_property_ids"
+          ],
+          "returnType": "list[int]",
+          "exported": true,
+          "lineCount": 35
+        },
+        {
+          "name": "_sync_case_property_links",
+          "params": [
+            "db",
+            "case_id",
+            "property_ids",
+            "primary_property_id"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_clean_text",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_clean_nullable_text",
+          "params": [
+            "value"
+          ],
+          "returnType": "Optional[str]",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_coerce_bool",
+          "params": [
+            "value",
+            "default"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_normalize_role",
+          "params": [
+            "role",
+            "relation_type"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_normalize_diagram_payload",
+          "params": [
+            "raw_payload"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 67
+        },
+        {
+          "name": "_extract_diagram_participants",
+          "params": [
+            "diagram_state",
+            "customers_by_id",
+            "deceased_customer_id"
+          ],
+          "returnType": "tuple[list[SimpleNamespace], set[int]]",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "_parse_case_diagram_payload",
+          "params": [
+            "raw_payload",
+            "customers_by_id",
+            "deceased_customer_id"
+          ],
+          "returnType": "tuple[list[SimpleNamespace], set[int], str]",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_build_temp_participants",
+          "params": [
+            "all_customers",
+            "participant_id",
+            "participant_role",
+            "participant_share",
+            "participant_receive",
+            "participant_parent_id"
+          ],
+          "exported": true,
+          "lineCount": 47
+        },
+        {
+          "name": "_render_case_form",
+          "params": [
+            "request",
+            "obj",
+            "deceased",
+            "properties",
+            "errors",
+            "field_errors",
+            "form",
+            "all_customers",
+            "participants",
+            "participant_ids",
+            "case_property_ids"
+          ],
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "_validate_case_refs",
+          "params": [
+            "nguoi_chet_id",
+            "tai_san_id",
+            "selected_property_ids",
+            "customers_by_id",
+            "properties_by_id",
+            "field_errors",
+            "errors"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_resolve_posted_participants",
+          "params": [
+            "all_customers",
+            "deceased_customer_id",
+            "diagram_payload",
+            "participant_id",
+            "participant_role",
+            "participant_share",
+            "participant_receive",
+            "participant_parent_id",
+            "engine_state_json"
+          ],
+          "returnType": "tuple[list[SimpleNamespace], set[int], Optional[str], str]",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "_replace_case_participants",
+          "params": [
+            "db",
+            "case_id",
+            "participants"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "list_cases",
+          "params": [
+            "request",
+            "db",
+            "q"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "create_form",
+          "params": [
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "create",
+          "params": [
+            "request",
+            "nguoi_chet_id",
+            "tai_san_id",
+            "property_ids",
+            "participant_id",
+            "participant_role",
+            "participant_share",
+            "participant_receive",
+            "participant_parent_id",
+            "diagram_payload",
+            "engine_state_json",
+            "case_state_json",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 113
+        },
+        {
+          "name": "detail",
+          "params": [
+            "cid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "edit_form",
+          "params": [
+            "cid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "edit",
+          "params": [
+            "cid",
+            "request",
+            "nguoi_chet_id",
+            "tai_san_id",
+            "property_ids",
+            "noi_niem_yet",
+            "participant_id",
+            "participant_role",
+            "participant_share",
+            "participant_receive",
+            "participant_parent_id",
+            "diagram_payload",
+            "engine_state_json",
+            "case_state_json",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 109
+        },
+        {
+          "name": "lock",
+          "params": [
+            "cid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "unlock",
+          "params": [
+            "cid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "delete",
+          "params": [
+            "cid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_get_selected_word_template_path",
+          "params": [
+            "db"
+          ],
+          "returnType": "Optional[Path]",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "list_templates_json",
+          "params": [
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "word_templates_page",
+          "params": [
+            "request",
+            "db",
+            "ok",
+            "err"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "upload_word_template",
+          "params": [
+            "ten_mau",
+            "file_mau",
+            "dat_mac_dinh",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "activate_word_template",
+          "params": [
+            "tid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "delete_word_template",
+          "params": [
+            "tid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "api_upload_template",
+          "params": [
+            "ten_mau",
+            "file_mau",
+            "dat_mac_dinh",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 34
+        },
+        {
+          "name": "api_activate_template",
+          "params": [
+            "tid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "api_delete_template",
+          "params": [
+            "tid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "_fmt_date",
+          "params": [
+            "d"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_fmt_birth_or_year",
+          "params": [
+            "d"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_safe_text",
+          "params": [
+            "v"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_so_thanh_chu",
+          "params": [
+            "so"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 68
+        },
+        {
+          "name": "_pick_core_people",
+          "params": [
+            "case"
+          ],
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "_build_template_mapping",
+          "params": [
+            "case"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 105
+        },
+        {
+          "name": "_normalize_token",
+          "params": [
+            "s"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_build_normalized_mapping",
+          "params": [
+            "mapping"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_normalize_case_state_json",
+          "params": [
+            "raw_payload"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_replace_text_placeholders",
+          "params": [
+            "text",
+            "mapping",
+            "normalized_mapping"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "_replace_in_paragraph",
+          "params": [
+            "paragraph",
+            "mapping",
+            "normalized_mapping"
+          ],
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "_replace_in_doc",
+          "params": [
+            "doc",
+            "mapping"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "export_word",
+          "params": [
+            "cid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 91
+        },
+        {
+          "name": "export_word_from_template",
+          "params": [
+            "cid",
+            "db",
+            "template_id"
+          ],
+          "exported": true,
+          "lineCount": 53
+        },
+        {
+          "name": "create_live_preview",
+          "params": [
+            "request",
+            "ngay_lap_ho_so",
+            "loai_van_ban",
+            "tai_san_id",
+            "ghi_chu",
+            "participant_id",
+            "participant_role",
+            "participant_share",
+            "participant_receive",
+            "participant_parent_id",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 118
+        },
+        {
+          "name": "export_draft_generic",
+          "params": [
+            "html_content"
+          ],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "preview_word",
+          "params": [
+            "cid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "export_preview",
+          "params": [
+            "cid",
+            "html_content",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 28
+        }
+      ],
+      "classes": [
+        {
+          "name": "DiagramPayloadValidationError",
+          "methods": [
+            "__init__"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "Request",
+            "Form",
+            "HTTPException",
+            "UploadFile",
+            "File"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "RedirectResponse",
+            "StreamingResponse",
+            "JSONResponse"
+          ]
+        },
+        {
+          "source": "fastapi.templating",
+          "specifiers": [
+            "Jinja2Templates"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "Session"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional",
+            "List",
+            "Union",
+            "Any"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "date",
+            "datetime"
+          ]
+        },
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "unicodedata",
+          "specifiers": [
+            "unicodedata"
+          ]
+        },
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid4"
+          ]
+        },
+        {
+          "source": "types",
+          "specifiers": [
+            "SimpleNamespace"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "get_db"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "InheritanceCase",
+            "Customer",
+            "Property",
+            "InheritanceParticipant",
+            "InheritanceCaseProperty",
+            "WordTemplate"
+          ]
+        }
+      ],
+      "exports": [
+        "_hang_for_role",
+        "_to_list",
+        "_normalize_property_ids",
+        "_sync_case_property_links",
+        "DiagramPayloadValidationError",
+        "_clean_text",
+        "_clean_nullable_text",
+        "_coerce_bool",
+        "_normalize_role",
+        "_normalize_diagram_payload",
+        "_extract_diagram_participants",
+        "_parse_case_diagram_payload",
+        "_build_temp_participants",
+        "_render_case_form",
+        "_validate_case_refs",
+        "_resolve_posted_participants",
+        "_replace_case_participants",
+        "list_cases",
+        "create_form",
+        "create",
+        "detail",
+        "edit_form",
+        "edit",
+        "lock",
+        "unlock",
+        "delete",
+        "_get_selected_word_template_path",
+        "list_templates_json",
+        "word_templates_page",
+        "upload_word_template",
+        "activate_word_template",
+        "delete_word_template",
+        "api_upload_template",
+        "api_activate_template",
+        "api_delete_template",
+        "_fmt_date",
+        "_fmt_birth_or_year",
+        "_safe_text",
+        "_so_thanh_chu",
+        "_pick_core_people",
+        "_build_template_mapping",
+        "_normalize_token",
+        "_build_normalized_mapping",
+        "_normalize_case_state_json",
+        "_replace_text_placeholders",
+        "_replace_in_paragraph",
+        "_replace_in_doc",
+        "export_word",
+        "export_word_from_template",
+        "create_live_preview",
+        "export_draft_generic",
+        "preview_word",
+        "export_preview"
+      ],
+      "totalLines": 1664,
+      "hasStructuralAnalysis": true
+    },
+    "routers/customers.py": {
+      "filePath": "routers/customers.py",
+      "contentHash": "edaf2e80c13a527444521736eb122f692a651e984e0dc38e844fbd56289b5aab",
+      "functions": [
+        {
+          "name": "normalize_excel_header",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "parse_date",
+          "params": [
+            "value",
+            "allow_year_only"
+          ],
+          "returnType": "Optional[date]",
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "format_date_display",
+          "params": [
+            "d"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "normalize_gender",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "as_input_value",
+          "params": [
+            "value",
+            "is_date"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "to_customer_json",
+          "params": [
+            "c"
+          ],
+          "returnType": "Dict[str, Any]",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "validate_customer_form",
+          "params": [
+            "form",
+            "db",
+            "current_id",
+            "duplicate_as_error"
+          ],
+          "exported": true,
+          "lineCount": 41
+        },
+        {
+          "name": "result_message",
+          "params": [
+            "field_errors"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "list_customers",
+          "params": [
+            "request",
+            "db",
+            "q"
+          ],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "search_customers",
+          "params": [
+            "db",
+            "q",
+            "limit"
+          ],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "download_template",
+          "params": [],
+          "exported": true,
+          "lineCount": 31
+        },
+        {
+          "name": "upload_excel",
+          "params": [
+            "request",
+            "file",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 130
+        },
+        {
+          "name": "upload_excel_save_row",
+          "params": [
+            "ho_ten",
+            "gioi_tinh",
+            "ngay_sinh",
+            "ngay_chet",
+            "so_giay_to",
+            "ngay_cap",
+            "dia_chi",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "create_form",
+          "params": [
+            "request"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "inline_create",
+          "params": [
+            "ho_ten",
+            "gioi_tinh",
+            "ngay_sinh",
+            "ngay_chet",
+            "so_giay_to",
+            "ngay_cap",
+            "dia_chi",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "quick_update",
+          "params": [
+            "cid",
+            "ho_ten",
+            "gioi_tinh",
+            "ngay_sinh",
+            "ngay_chet",
+            "so_giay_to",
+            "ngay_cap",
+            "dia_chi",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "create",
+          "params": [
+            "request",
+            "ho_ten",
+            "gioi_tinh",
+            "ngay_sinh",
+            "ngay_chet",
+            "so_giay_to",
+            "ngay_cap",
+            "dia_chi",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "detail",
+          "params": [
+            "cid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "edit_form",
+          "params": [
+            "cid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "edit",
+          "params": [
+            "cid",
+            "request",
+            "ho_ten",
+            "gioi_tinh",
+            "ngay_sinh",
+            "ngay_chet",
+            "so_giay_to",
+            "ngay_cap",
+            "dia_chi",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 41
+        },
+        {
+          "name": "delete",
+          "params": [
+            "cid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "unicodedata",
+          "specifiers": [
+            "unicodedata"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "date",
+            "datetime"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Dict",
+            "Optional"
+          ]
+        },
+        {
+          "source": "sqlalchemy.exc",
+          "specifiers": [
+            "IntegrityError"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "File",
+            "Form",
+            "HTTPException",
+            "Request",
+            "UploadFile"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "JSONResponse",
+            "RedirectResponse",
+            "StreamingResponse"
+          ]
+        },
+        {
+          "source": "fastapi.templating",
+          "specifiers": [
+            "Jinja2Templates"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "or_"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "Session"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "get_db"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "Customer"
+          ]
+        }
+      ],
+      "exports": [
+        "normalize_excel_header",
+        "parse_date",
+        "format_date_display",
+        "normalize_gender",
+        "as_input_value",
+        "to_customer_json",
+        "validate_customer_form",
+        "result_message",
+        "list_customers",
+        "search_customers",
+        "download_template",
+        "upload_excel",
+        "upload_excel_save_row",
+        "create_form",
+        "inline_create",
+        "quick_update",
+        "create",
+        "detail",
+        "edit_form",
+        "edit",
+        "delete"
+      ],
+      "totalLines": 606,
+      "hasStructuralAnalysis": true
+    },
+    "routers/ocr_ai.py": {
+      "filePath": "routers/ocr_ai.py",
+      "contentHash": "274605dd7aae5167fa66a75aa27daf6b8c6b898c826b839002768d8535b8d604",
+      "functions": [
+        {
+          "name": "_ms",
+          "params": [
+            "seconds"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_read_env",
+          "params": [],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_get_model",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_get_api_key",
+          "params": [
+            "model"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_log_ocr_ai",
+          "params": [
+            "event",
+            "level"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_clean_text",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_fold_text",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_ascii_text",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_norm_label_key",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_looks_like_label",
+          "params": [
+            "line",
+            "labels",
+            "threshold"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_normalize_date",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_normalize_gender",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_normalize_person_data",
+          "params": [
+            "data"
+          ],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_field_sources",
+          "params": [
+            "data",
+            "source"
+          ],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_zxing_decode_qr",
+          "params": [
+            "image_obj"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_qr_variants",
+          "params": [
+            "file_bytes"
+          ],
+          "returnType": "list[Image.Image]",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "try_decode_qr",
+          "params": [
+            "file_bytes"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "parse_cccd_qr",
+          "params": [
+            "text"
+          ],
+          "returnType": "dict[str, str] | None",
+          "exported": true,
+          "lineCount": 145
+        },
+        {
+          "name": "_prepare_ai_image_bytes",
+          "params": [
+            "file_bytes",
+            "max_px"
+          ],
+          "returnType": "bytes",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_extract_native_ocr_lines",
+          "params": [
+            "payload"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "_call_qwen_native_ocr_single",
+          "params": [
+            "client",
+            "api_key",
+            "model",
+            "image_b64",
+            "filename",
+            "enable_rotate"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 73
+        },
+        {
+          "name": "_extract_dates_from_line",
+          "params": [
+            "line"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_extract_id12",
+          "params": [
+            "line"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_extract_mrz_lines",
+          "params": [
+            "lines"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_parse_person_mrz",
+          "params": [
+            "lines"
+          ],
+          "returnType": "dict[str, str]",
+          "exported": true,
+          "lineCount": 45
+        },
+        {
+          "name": "_detect_side",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_extract_name_candidate",
+          "params": [
+            "lines",
+            "side"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_strip_address_noise",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_sanitize_address",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "_extract_address",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 47
+        },
+        {
+          "name": "_extract_issue_date",
+          "params": [
+            "lines",
+            "side"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_extract_birth_date",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_extract_gender",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "_extract_id",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_land_name_to_code",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_property_has_value",
+          "params": [
+            "value"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_looks_like_property_doc",
+          "params": [
+            "lines"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "_classify_property_book_type",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_clean_property_code",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_extract_code_like",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_looks_like_property_registry_label",
+          "params": [
+            "line"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_extract_registry_code_like",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_extract_property_serial_candidates",
+          "params": [
+            "value",
+            "allow_single_letter"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_looks_like_property_serial_label",
+          "params": [
+            "line"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_is_property_serial_context",
+          "params": [
+            "line"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "_property_serial_candidate_score",
+          "params": [
+            "candidate",
+            "line"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "_property_registry_candidate_score",
+          "params": [
+            "candidate",
+            "line",
+            "offset"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_extract_property_serial",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_extract_property_registry_no",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "_extract_first_number",
+          "params": [
+            "line"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_extract_number_after_property_label",
+          "params": [
+            "line",
+            "label_patterns"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_extract_property_number_field",
+          "params": [
+            "lines",
+            "label_patterns",
+            "labels"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "_extract_property_plot_no",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_extract_property_map_sheet",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_normalize_property_area_number",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_extract_property_area",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "_property_address_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_strip_property_address_noise",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_looks_like_property_footer_date_line",
+          "params": [
+            "value"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_extract_property_address",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 37
+        },
+        {
+          "name": "_extract_property_field_by_label",
+          "params": [
+            "lines",
+            "labels"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_extract_property_block_after_label",
+          "params": [
+            "lines",
+            "labels",
+            "stop_labels",
+            "max_follow_lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_extract_property_land_use_form",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_property_owner_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "_extract_property_owner",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_extract_land_rows_from_named_lines",
+          "params": [
+            "lines"
+          ],
+          "returnType": "list[dict[str, str]]",
+          "exported": true,
+          "lineCount": 56
+        },
+        {
+          "name": "_extract_property_land_rows",
+          "params": [
+            "lines"
+          ],
+          "returnType": "list[dict[str, str]]",
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "_sum_land_row_area",
+          "params": [
+            "rows"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_normalize_property_side",
+          "params": [
+            "side"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_extract_property_issue_date",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 53
+        },
+        {
+          "name": "_extract_year",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_extract_footer_context_year",
+          "params": [
+            "lines"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_should_rescue_property_issue_date",
+          "params": [
+            "doc"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "_property_authority_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "_clean_property_authority_value",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_prepare_property_footer_image_bytes",
+          "params": [
+            "file_bytes",
+            "max_px"
+          ],
+          "returnType": "bytes",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "_extract_property_authority",
+          "params": [
+            "lines",
+            "issue_date"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_normalize_property_land_type_value",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_normalize_property_data",
+          "params": [
+            "data"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 37
+        },
+        {
+          "name": "_fill_property_from_land_rows",
+          "params": [
+            "data"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_property_missing_fields",
+          "params": [
+            "data"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_normalize_property_ocr_doc",
+          "params": [
+            "lines",
+            "filename",
+            "side"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 45
+        },
+        {
+          "name": "_property_doc_score",
+          "params": [
+            "doc"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_should_retry_property_rotate",
+          "params": [
+            "doc"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_count_alpha_num",
+          "params": [
+            "text"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_property_serial_value_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_property_registry_value_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_property_area_value_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_merge_property_land_rows",
+          "params": [
+            "front_rows",
+            "back_rows"
+          ],
+          "returnType": "tuple[list[dict[str, str]], str]",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "_property_value_clean_score",
+          "params": [
+            "field",
+            "value"
+          ],
+          "returnType": "tuple[int, int, int, str]",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "_parse_property_issue_date_candidate",
+          "params": [
+            "value"
+          ],
+          "returnType": "tuple[bool, bool, int, str]",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_property_authority_marker_score",
+          "params": [
+            "value"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_pick_property_issue_date_value",
+          "params": [
+            "front_value",
+            "back_value"
+          ],
+          "returnType": "tuple[Any, str] | None",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_pick_property_authority_value",
+          "params": [
+            "front_value",
+            "back_value"
+          ],
+          "returnType": "tuple[Any, str] | None",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "_pick_property_field_value",
+          "params": [
+            "field",
+            "front_value",
+            "back_value"
+          ],
+          "returnType": "tuple[Any, str]",
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "_merge_property_pair",
+          "params": [
+            "front_doc",
+            "back_doc"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 36
+        },
+        {
+          "name": "_normalize_native_ocr_doc",
+          "params": [
+            "lines",
+            "filename"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "_append_qr_person",
+          "params": [
+            "persons",
+            "raw_results",
+            "filename",
+            "qr_text",
+            "qr_data"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_append_ai_doc",
+          "params": [
+            "doc",
+            "persons",
+            "raw_results"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 23
+        },
+        {
+          "name": "_has_diacritics",
+          "params": [
+            "text"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_normalize_name_ascii",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_id_hamming_distance",
+          "params": [
+            "left",
+            "right"
+          ],
+          "returnType": "int | None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_name_match_strong",
+          "params": [
+            "left",
+            "right"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "_sides_can_pair",
+          "params": [
+            "side_a",
+            "side_b"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_is_optional_field_compatible",
+          "params": [
+            "left",
+            "right",
+            "key"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_should_fuzzy_pair",
+          "params": [
+            "left",
+            "right"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 19
+        },
+        {
+          "name": "_merge_person_group",
+          "params": [
+            "group"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 103
+        },
+        {
+          "name": "_pair_persons",
+          "params": [
+            "persons"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 53
+        },
+        {
+          "name": "_process_single_image",
+          "params": [
+            "upload",
+            "model",
+            "api_key",
+            "ai_semaphore",
+            "client"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 67
+        },
+        {
+          "name": "_process_single_property_image",
+          "params": [
+            "upload",
+            "model",
+            "api_key",
+            "ai_semaphore",
+            "client",
+            "side",
+            "enable_footer_date_rescue"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 105
+        },
+        {
+          "name": "analyze_images",
+          "params": [
+            "files"
+          ],
+          "exported": true,
+          "lineCount": 124
+        },
+        {
+          "name": "analyze_property_images",
+          "params": [
+            "files"
+          ],
+          "exported": true,
+          "lineCount": 106
+        },
+        {
+          "name": "analyze_property_pair",
+          "params": [
+            "front_file",
+            "back_file"
+          ],
+          "exported": true,
+          "lineCount": 122
+        },
+        {
+          "name": "ocr_config",
+          "params": [],
+          "exported": true,
+          "lineCount": 20
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "base64",
+          "specifiers": [
+            "base64"
+          ]
+        },
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "unicodedata",
+          "specifiers": [
+            "unicodedata"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "datetime"
+          ]
+        },
+        {
+          "source": "difflib",
+          "specifiers": [
+            "SequenceMatcher"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "perf_counter"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        },
+        {
+          "source": "zxingcpp",
+          "specifiers": [
+            "zxingcpp"
+          ]
+        },
+        {
+          "source": "dotenv",
+          "specifiers": [
+            "dotenv_values"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "File",
+            "HTTPException",
+            "UploadFile"
+          ]
+        },
+        {
+          "source": "PIL",
+          "specifiers": [
+            "Image",
+            "ImageOps"
+          ]
+        }
+      ],
+      "exports": [
+        "_ms",
+        "_read_env",
+        "_get_model",
+        "_get_api_key",
+        "_log_ocr_ai",
+        "_clean_text",
+        "_fold_text",
+        "_ascii_text",
+        "_norm_label_key",
+        "_looks_like_label",
+        "_normalize_date",
+        "_normalize_gender",
+        "_normalize_person_data",
+        "_field_sources",
+        "_zxing_decode_qr",
+        "_qr_variants",
+        "try_decode_qr",
+        "parse_cccd_qr",
+        "_prepare_ai_image_bytes",
+        "_extract_native_ocr_lines",
+        "_call_qwen_native_ocr_single",
+        "_extract_dates_from_line",
+        "_extract_id12",
+        "_extract_mrz_lines",
+        "_parse_person_mrz",
+        "_detect_side",
+        "_extract_name_candidate",
+        "_strip_address_noise",
+        "_sanitize_address",
+        "_extract_address",
+        "_extract_issue_date",
+        "_extract_birth_date",
+        "_extract_gender",
+        "_extract_id",
+        "_land_name_to_code",
+        "_property_has_value",
+        "_looks_like_property_doc",
+        "_classify_property_book_type",
+        "_clean_property_code",
+        "_extract_code_like",
+        "_looks_like_property_registry_label",
+        "_extract_registry_code_like",
+        "_extract_property_serial_candidates",
+        "_looks_like_property_serial_label",
+        "_is_property_serial_context",
+        "_property_serial_candidate_score",
+        "_property_registry_candidate_score",
+        "_extract_property_serial",
+        "_extract_property_registry_no",
+        "_extract_first_number",
+        "_extract_number_after_property_label",
+        "_extract_property_number_field",
+        "_extract_property_plot_no",
+        "_extract_property_map_sheet",
+        "_normalize_property_area_number",
+        "_extract_property_area",
+        "_property_address_score",
+        "_strip_property_address_noise",
+        "_looks_like_property_footer_date_line",
+        "_extract_property_address",
+        "_extract_property_field_by_label",
+        "_extract_property_block_after_label",
+        "_extract_property_land_use_form",
+        "_property_owner_score",
+        "_extract_property_owner",
+        "_extract_land_rows_from_named_lines",
+        "_extract_property_land_rows",
+        "_sum_land_row_area",
+        "_normalize_property_side",
+        "_extract_property_issue_date",
+        "_extract_year",
+        "_extract_footer_context_year",
+        "_should_rescue_property_issue_date",
+        "_property_authority_score",
+        "_clean_property_authority_value",
+        "_prepare_property_footer_image_bytes",
+        "_extract_property_authority",
+        "_normalize_property_land_type_value",
+        "_normalize_property_data",
+        "_fill_property_from_land_rows",
+        "_property_missing_fields",
+        "_normalize_property_ocr_doc",
+        "_property_doc_score",
+        "_should_retry_property_rotate",
+        "_count_alpha_num",
+        "_property_serial_value_score",
+        "_property_registry_value_score",
+        "_property_area_value_score",
+        "_merge_property_land_rows",
+        "_property_value_clean_score",
+        "_parse_property_issue_date_candidate",
+        "_property_authority_marker_score",
+        "_pick_property_issue_date_value",
+        "_pick_property_authority_value",
+        "_pick_property_field_value",
+        "_merge_property_pair",
+        "_normalize_native_ocr_doc",
+        "_append_qr_person",
+        "_append_ai_doc",
+        "_has_diacritics",
+        "_normalize_name_ascii",
+        "_id_hamming_distance",
+        "_name_match_strong",
+        "_sides_can_pair",
+        "_is_optional_field_compatible",
+        "_should_fuzzy_pair",
+        "_merge_person_group",
+        "_pair_persons",
+        "_process_single_image",
+        "_process_single_property_image",
+        "analyze_images",
+        "analyze_property_images",
+        "analyze_property_pair",
+        "ocr_config"
+      ],
+      "totalLines": 2985,
+      "hasStructuralAnalysis": true
+    },
+    "routers/ocr_local.py": {
+      "filePath": "routers/ocr_local.py",
+      "contentHash": "895bc7816cb924c177c4addb163d696608b3546cda3468531bcc4e1027a3c17a",
+      "functions": [
+        {
+          "name": "_ms",
+          "params": [
+            "seconds"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_log_timing",
+          "params": [
+            "event",
+            "level",
+            "**fields"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_zxing_decode_qr_local",
+          "params": [
+            "image_obj"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_cv_to_pil_gray_local",
+          "params": [
+            "gray_img"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_qr_variants_local",
+          "params": [
+            "file_bytes"
+          ],
+          "returnType": "list[Image.Image]",
+          "exported": true,
+          "lineCount": 56
+        },
+        {
+          "name": "try_decode_qr",
+          "params": [
+            "file_bytes"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "parse_cccd_qr",
+          "params": [
+            "text"
+          ],
+          "returnType": "dict | None",
+          "exported": true,
+          "lineCount": 193
+        },
+        {
+          "name": "_log_debug",
+          "params": [
+            "event",
+            "level",
+            "**fields"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_ensure_local_ocr_dependencies",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_warn_legacy_local_ocr_env",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_ascii_fold",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_normalize_ocr_line",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_normalize_ocr_lines",
+          "params": [
+            "lines"
+          ],
+          "returnType": "List[str]",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_normalize_date",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_count_vietnamese_diacritics",
+          "params": [
+            "text"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_clean_doc_number",
+          "params": [
+            "value"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_clean_name_candidate",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_is_likely_name",
+          "params": [
+            "candidate"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_build_raw_text",
+          "params": [
+            "lines"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_preview_text",
+          "params": [
+            "text",
+            "limit"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_numeric_stats",
+          "params": [
+            "values",
+            "digits"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_print_rapidocr_raw_text",
+          "params": [
+            "raw_text",
+            "context"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_safe_filename",
+          "params": [
+            "filename",
+            "index"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_empty_person_data",
+          "params": [],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_build_qr_person_data",
+          "params": [
+            "qr_data"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_address_expected",
+          "params": [
+            "profile"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_collect_warnings",
+          "params": [
+            "data",
+            "profile"
+          ],
+          "returnType": "List[str]",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_build_field_sources",
+          "params": [
+            "source_type",
+            "data"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_infer_side",
+          "params": [
+            "profile",
+            "doc_type"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_merge_side",
+          "params": [
+            "current",
+            "incoming"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_merge_profile",
+          "params": [
+            "current",
+            "incoming"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_merge_person_data",
+          "params": [
+            "base_data",
+            "incoming_data",
+            "field_sources",
+            "incoming_source_type",
+            "fill_missing_only"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "_apply_delta_merge",
+          "params": [
+            "merged_data",
+            "records"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_append_person_raw_text",
+          "params": [
+            "record",
+            "raw_text",
+            "filename"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_should_run_detail_phase",
+          "params": [
+            "person_data",
+            "profile"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_normalize_qr_texts",
+          "params": [
+            "qr_texts",
+            "total"
+          ],
+          "returnType": "List[str]",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_normalize_qr_failed_flags",
+          "params": [
+            "flags",
+            "total"
+          ],
+          "returnType": "List[bool]",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_is_valid_qr_data",
+          "params": [
+            "qr_data"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_get_rapidocr_engine",
+          "params": [],
+          "exported": true,
+          "lineCount": 40
+        },
+        {
+          "name": "_get_vietocr_engine",
+          "params": [],
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "_get_rapidocr_recognizer",
+          "params": [],
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "warmup_local_ocr",
+          "params": [],
+          "returnType": "tuple[bool, str]",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_preprocess",
+          "params": [
+            "img_bgr"
+          ],
+          "returnType": "np.ndarray",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_opencv_smart_crop",
+          "params": [
+            "img_bgr"
+          ],
+          "returnType": "tuple[np.ndarray, Tuple[int, int, int, int], float] | None",
+          "exported": true,
+          "lineCount": 50
+        },
+        {
+          "name": "_detect_documents",
+          "params": [
+            "img_native",
+            "img_ocr"
+          ],
+          "returnType": "List[DocCrop]",
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "_pick_primary_crop",
+          "params": [
+            "crops"
+          ],
+          "returnType": "DocCrop",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_normalize_box_points",
+          "params": [
+            "box"
+          ],
+          "returnType": "np.ndarray | None",
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_iter_detected_boxes",
+          "params": [
+            "raw_boxes"
+          ],
+          "returnType": "List[Any]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_box_bounds",
+          "params": [
+            "box"
+          ],
+          "returnType": "Tuple[float, float, float, float]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_box_center_ratio",
+          "params": [
+            "box",
+            "img_shape"
+          ],
+          "returnType": "Tuple[float, float]",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_box_area_ratio",
+          "params": [
+            "box",
+            "img_shape"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_box_height_ratio",
+          "params": [
+            "box",
+            "img_shape"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_sort_box_dicts",
+          "params": [
+            "items"
+          ],
+          "returnType": "List[dict]",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "_group_lines",
+          "params": [
+            "items"
+          ],
+          "returnType": "List[str]",
+          "exported": true,
+          "lineCount": 26
+        },
+        {
+          "name": "_order_box_points",
+          "params": [
+            "box"
+          ],
+          "returnType": "np.ndarray",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_prepare_recognition_crop",
+          "params": [
+            "crop"
+          ],
+          "returnType": "np.ndarray | None",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_crop_box_image",
+          "params": [
+            "img_bgr",
+            "box",
+            "pad_ratio"
+          ],
+          "returnType": "np.ndarray | None",
+          "exported": true,
+          "lineCount": 42
+        },
+        {
+          "name": "_vietocr_predict_batch",
+          "params": [
+            "images"
+          ],
+          "returnType": "List[dict]",
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "_rapidocr_detect_boxes",
+          "params": [
+            "img_bgr"
+          ],
+          "returnType": "tuple[List[dict], float]",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "filter_target_boxes",
+          "params": [
+            "boxes",
+            "img_shape",
+            "triage_state",
+            "phase"
+          ],
+          "returnType": "List[dict]",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "_recognize_target_boxes",
+          "params": [
+            "img_ocr",
+            "boxes",
+            "context"
+          ],
+          "returnType": "tuple[List[dict], float]",
+          "exported": true,
+          "lineCount": 53
+        },
+        {
+          "name": "_recognize_target_boxes_rapidocr",
+          "params": [
+            "img_ocr",
+            "boxes",
+            "context"
+          ],
+          "returnType": "tuple[List[dict], float]",
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "_extract_id_12_from_text",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_extract_id_12_from_mrz_text",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_extract_dates",
+          "params": [
+            "text"
+          ],
+          "returnType": "List[str]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_extract_anchor_block",
+          "params": [
+            "full_text",
+            "label_pattern",
+            "stop_pattern"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_extract_date_after_label",
+          "params": [
+            "full_text",
+            "label_pattern"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_extract_gender_from_text",
+          "params": [
+            "full_text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_is_back_profile",
+          "params": [
+            "profile"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_parse_cccd_fulltext",
+          "params": [
+            "full_text",
+            "profile"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "_coarse_doc_type_from_profile",
+          "params": [
+            "profile",
+            "model_doc_type"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_infer_doc_profile",
+          "params": [
+            "normalized_lines",
+            "model_doc_type"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 36
+        },
+        {
+          "name": "_triage_state_from_signals",
+          "params": [
+            "face_detected",
+            "qr_detected",
+            "mrz_score"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_triage_profile_from_state",
+          "params": [
+            "state"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_triage_side_from_state",
+          "params": [
+            "state"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_triage_state_has_qr",
+          "params": [
+            "state"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_rotate_by_angle",
+          "params": [
+            "img_bgr",
+            "angle"
+          ],
+          "returnType": "np.ndarray",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_make_proxy_image",
+          "params": [
+            "img_bgr",
+            "max_side"
+          ],
+          "returnType": "np.ndarray",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_get_face_cascade",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "_get_qr_detector",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_detect_face_proxy",
+          "params": [
+            "proxy_img"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_detect_qr_proxy",
+          "params": [
+            "proxy_img"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_mrz_likelihood_score",
+          "params": [
+            "proxy_img"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 41
+        },
+        {
+          "name": "_triage_confidence",
+          "params": [
+            "face_detected",
+            "qr_detected",
+            "mrz_score",
+            "state"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_triage_crop_orientation",
+          "params": [
+            "crop_img"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 61
+        },
+        {
+          "name": "_try_qr_data_from_crop",
+          "params": [
+            "crop",
+            "seeded_qr_text",
+            "timing"
+          ],
+          "returnType": "tuple[dict | None, str]",
+          "exported": true,
+          "lineCount": 78
+        },
+        {
+          "name": "_extract_primary_id",
+          "params": [
+            "img_rec",
+            "boxes",
+            "triage_state",
+            "context"
+          ],
+          "returnType": "tuple[str, str, str, float, int, int]",
+          "exported": true,
+          "lineCount": 47
+        },
+        {
+          "name": "_merge_record_into",
+          "params": [
+            "target",
+            "incoming"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "_ensure_person_record",
+          "params": [
+            "persons_map",
+            "person_order",
+            "key",
+            "filename",
+            "index"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_rekey_person_record",
+          "params": [
+            "persons_map",
+            "person_order",
+            "old_key",
+            "new_key"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_analyze_image_prepare",
+          "params": [
+            "index",
+            "filename",
+            "raw_bytes",
+            "seeded_qr_text",
+            "client_qr_failed",
+            "trace_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 144
+        },
+        {
+          "name": "_ensure_detection",
+          "params": [
+            "prepared"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_run_detail_phase",
+          "params": [
+            "prepared",
+            "record"
+          ],
+          "returnType": "tuple[dict, str, float]",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "_local_engine_name",
+          "params": [],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_finalize_image_rows",
+          "params": [
+            "image_results",
+            "persons_map"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_build_summary",
+          "params": [
+            "image_results",
+            "persons",
+            "errors",
+            "state_counts",
+            "engine_ms",
+            "total_ms"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 46
+        },
+        {
+          "name": "_local_ocr_batch_from_inputs_triage_v2",
+          "params": [
+            "file_items",
+            "qr_texts",
+            "client_qr_failed",
+            "trace_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 238
+        },
+        {
+          "name": "local_ocr_batch_from_inputs",
+          "params": [
+            "file_items",
+            "qr_texts",
+            "client_qr_failed",
+            "trace_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "local_ocr_from_bytes",
+          "params": [
+            "file_bytes",
+            "qr_text",
+            "client_qr_failed",
+            "trace_id"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 51
+        },
+        {
+          "name": "analyze_images_local",
+          "params": [
+            "files"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "submit_local_job",
+          "params": [
+            "file",
+            "qr_text",
+            "client_qr_failed"
+          ],
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "submit_local_batch_job",
+          "params": [
+            "files",
+            "qr_texts_json",
+            "client_qr_failed_json"
+          ],
+          "exported": true,
+          "lineCount": 54
+        },
+        {
+          "name": "get_local_job_status",
+          "params": [
+            "job_id"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "confirm_save",
+          "params": [
+            "payload"
+          ],
+          "exported": true,
+          "lineCount": 28
+        }
+      ],
+      "classes": [
+        {
+          "name": "DocCrop",
+          "methods": [],
+          "properties": [
+            "img_native",
+            "img_ocr",
+            "bbox",
+            "doc_type",
+            "confidence"
+          ],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "imports": [
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "traceback",
+          "specifiers": [
+            "traceback"
+          ]
+        },
+        {
+          "source": "unicodedata",
+          "specifiers": [
+            "unicodedata"
+          ]
+        },
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "dataclasses",
+          "specifiers": [
+            "dataclass"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "datetime"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "perf_counter"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any",
+            "Dict",
+            "Iterable",
+            "List",
+            "Optional",
+            "Tuple"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Body",
+            "File",
+            "Form",
+            "HTTPException",
+            "UploadFile"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "SessionLocal"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "ExtractedDocument",
+            "OCRJob"
+          ]
+        }
+      ],
+      "exports": [
+        "DocCrop",
+        "_ms",
+        "_log_timing",
+        "_zxing_decode_qr_local",
+        "_cv_to_pil_gray_local",
+        "_qr_variants_local",
+        "try_decode_qr",
+        "parse_cccd_qr",
+        "_log_debug",
+        "_ensure_local_ocr_dependencies",
+        "_warn_legacy_local_ocr_env",
+        "_ascii_fold",
+        "_normalize_ocr_line",
+        "_normalize_ocr_lines",
+        "_normalize_date",
+        "_count_vietnamese_diacritics",
+        "_clean_doc_number",
+        "_clean_name_candidate",
+        "_is_likely_name",
+        "_build_raw_text",
+        "_preview_text",
+        "_numeric_stats",
+        "_print_rapidocr_raw_text",
+        "_safe_filename",
+        "_empty_person_data",
+        "_build_qr_person_data",
+        "_address_expected",
+        "_collect_warnings",
+        "_build_field_sources",
+        "_infer_side",
+        "_merge_side",
+        "_merge_profile",
+        "_merge_person_data",
+        "_apply_delta_merge",
+        "_append_person_raw_text",
+        "_should_run_detail_phase",
+        "_normalize_qr_texts",
+        "_normalize_qr_failed_flags",
+        "_is_valid_qr_data",
+        "_get_rapidocr_engine",
+        "_get_vietocr_engine",
+        "_get_rapidocr_recognizer",
+        "warmup_local_ocr",
+        "_preprocess",
+        "_opencv_smart_crop",
+        "_detect_documents",
+        "_pick_primary_crop",
+        "_normalize_box_points",
+        "_iter_detected_boxes",
+        "_box_bounds",
+        "_box_center_ratio",
+        "_box_area_ratio",
+        "_box_height_ratio",
+        "_sort_box_dicts",
+        "_group_lines",
+        "_order_box_points",
+        "_prepare_recognition_crop",
+        "_crop_box_image",
+        "_vietocr_predict_batch",
+        "_rapidocr_detect_boxes",
+        "filter_target_boxes",
+        "_recognize_target_boxes",
+        "_recognize_target_boxes_rapidocr",
+        "_extract_id_12_from_text",
+        "_extract_id_12_from_mrz_text",
+        "_extract_dates",
+        "_extract_anchor_block",
+        "_extract_date_after_label",
+        "_extract_gender_from_text",
+        "_is_back_profile",
+        "_parse_cccd_fulltext",
+        "_coarse_doc_type_from_profile",
+        "_infer_doc_profile",
+        "_triage_state_from_signals",
+        "_triage_profile_from_state",
+        "_triage_side_from_state",
+        "_triage_state_has_qr",
+        "_rotate_by_angle",
+        "_make_proxy_image",
+        "_get_face_cascade",
+        "_get_qr_detector",
+        "_detect_face_proxy",
+        "_detect_qr_proxy",
+        "_mrz_likelihood_score",
+        "_triage_confidence",
+        "_triage_crop_orientation",
+        "_try_qr_data_from_crop",
+        "_extract_primary_id",
+        "_merge_record_into",
+        "_ensure_person_record",
+        "_rekey_person_record",
+        "_analyze_image_prepare",
+        "_ensure_detection",
+        "_run_detail_phase",
+        "_local_engine_name",
+        "_finalize_image_rows",
+        "_build_summary",
+        "_local_ocr_batch_from_inputs_triage_v2",
+        "local_ocr_batch_from_inputs",
+        "local_ocr_from_bytes",
+        "analyze_images_local",
+        "submit_local_job",
+        "submit_local_batch_job",
+        "get_local_job_status",
+        "confirm_save"
+      ],
+      "totalLines": 2723,
+      "hasStructuralAnalysis": true
+    },
+    "routers/participants.py": {
+      "filePath": "routers/participants.py",
+      "contentHash": "c6648d66153f99bef56a1e6aaf3a96359232b2540d872436c9d266b59745cd42",
+      "functions": [
+        {
+          "name": "add",
+          "params": [
+            "ho_so_id",
+            "customer_id",
+            "vai_tro",
+            "hang_thua_ke",
+            "co_nhan_tai_san",
+            "ty_le",
+            "ghi_chu",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 28
+        },
+        {
+          "name": "edit",
+          "params": [
+            "pid",
+            "vai_tro",
+            "hang_thua_ke",
+            "co_nhan_tai_san",
+            "ty_le",
+            "ghi_chu",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "delete",
+          "params": [
+            "pid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "Request",
+            "Form",
+            "HTTPException"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "RedirectResponse"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "Session"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "get_db"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "InheritanceParticipant",
+            "InheritanceCase"
+          ]
+        }
+      ],
+      "exports": [
+        "add",
+        "edit",
+        "delete"
+      ],
+      "totalLines": 72,
+      "hasStructuralAnalysis": true
+    },
+    "routers/properties.py": {
+      "filePath": "routers/properties.py",
+      "contentHash": "3ef738ea9dc9ec5a075e93499df9772c6829ca85081421330740a3f6f68baaf3",
+      "functions": [
+        {
+          "name": "parse_date",
+          "params": [
+            "s"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "list_properties",
+          "params": [
+            "request",
+            "db",
+            "q"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "create_form",
+          "params": [
+            "request"
+          ],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "inline_create",
+          "params": [
+            "so_serial",
+            "so_vao_so",
+            "so_thua_dat",
+            "so_to_ban_do",
+            "dia_chi",
+            "loai_so",
+            "hinh_thuc_su_dung",
+            "nguon_goc",
+            "ngay_cap",
+            "co_quan_cap",
+            "land_rows",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 92
+        },
+        {
+          "name": "create",
+          "params": [
+            "request",
+            "so_serial",
+            "so_vao_so",
+            "so_thua_dat",
+            "so_to_ban_do",
+            "dia_chi",
+            "dien_tich",
+            "loai_so",
+            "loai_dat",
+            "hinh_thuc_su_dung",
+            "thoi_han",
+            "nguon_goc",
+            "ngay_cap",
+            "co_quan_cap",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 68
+        },
+        {
+          "name": "detail",
+          "params": [
+            "pid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "edit_form",
+          "params": [
+            "pid",
+            "request",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "edit",
+          "params": [
+            "pid",
+            "request",
+            "so_serial",
+            "so_vao_so",
+            "so_thua_dat",
+            "so_to_ban_do",
+            "dia_chi",
+            "dien_tich",
+            "loai_so",
+            "loai_dat",
+            "hinh_thuc_su_dung",
+            "thoi_han",
+            "nguon_goc",
+            "ngay_cap",
+            "co_quan_cap",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 64
+        },
+        {
+          "name": "delete",
+          "params": [
+            "pid",
+            "db"
+          ],
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "APIRouter",
+            "Depends",
+            "Request",
+            "Form",
+            "HTTPException"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "RedirectResponse",
+            "JSONResponse"
+          ]
+        },
+        {
+          "source": "fastapi.templating",
+          "specifiers": [
+            "Jinja2Templates"
+          ]
+        },
+        {
+          "source": "sqlalchemy.orm",
+          "specifiers": [
+            "Session"
+          ]
+        },
+        {
+          "source": "sqlalchemy",
+          "specifiers": [
+            "or_"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Optional"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "date",
+            "datetime"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "get_db"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "Property"
+          ]
+        }
+      ],
+      "exports": [
+        "parse_date",
+        "list_properties",
+        "create_form",
+        "inline_create",
+        "create",
+        "detail",
+        "edit_form",
+        "edit",
+        "delete"
+      ],
+      "totalLines": 318,
+      "hasStructuralAnalysis": true
+    },
+    "run.bat": {
+      "filePath": "run.bat",
+      "contentHash": "a5d31318b957796ab824cd3a894f239d2c3409371746b72536b68f9967a494fa",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 180,
+      "hasStructuralAnalysis": false
+    },
+    "tasks.py": {
+      "filePath": "tasks.py",
+      "contentHash": "380655b25a3f61fb6d1be425c8cc6f282df78d5de4933c0536ad98365a6a06c0",
+      "functions": [
+        {
+          "name": "_ensure_worker_logging",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_ms",
+          "params": [
+            "seconds"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_timing_log",
+          "params": [
+            "event",
+            "**fields"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_delete_file",
+          "params": [
+            "path"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_delete_path",
+          "params": [
+            "path"
+          ],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "_parse_json_array",
+          "params": [
+            "raw"
+          ],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "process_ocr_job",
+          "params": [
+            "job_id",
+            "qr_text",
+            "client_qr_failed"
+          ],
+          "exported": true,
+          "lineCount": 62
+        },
+        {
+          "name": "process_ocr_batch_job",
+          "params": [
+            "job_id",
+            "qr_texts_json",
+            "client_qr_failed_json"
+          ],
+          "exported": true,
+          "lineCount": 103
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "shutil",
+          "specifiers": [
+            "shutil"
+          ]
+        },
+        {
+          "source": "traceback",
+          "specifiers": [
+            "traceback"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "faulthandler",
+          "specifiers": [
+            "faulthandler"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "celery_app",
+          "specifiers": [
+            "celery_app"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "SessionLocal"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "OCRJob"
+          ]
+        },
+        {
+          "source": "observability",
+          "specifiers": [
+            "configure_process_logging"
+          ]
+        },
+        {
+          "source": "routers.ocr_local",
+          "specifiers": [
+            "local_ocr_batch_from_inputs",
+            "local_ocr_from_bytes"
+          ]
+        }
+      ],
+      "exports": [
+        "_ensure_worker_logging",
+        "_ms",
+        "_timing_log",
+        "_delete_file",
+        "_delete_path",
+        "_parse_json_array",
+        "process_ocr_job",
+        "process_ocr_batch_job"
+      ],
+      "totalLines": 250,
+      "hasStructuralAnalysis": true
+    },
+    "test_ocr_local.py": {
+      "filePath": "test_ocr_local.py",
+      "contentHash": "c81acb1b2ee6c9d1b9645d68aefeadbed4627d4d1df3fad46fad6b50fac9e6dd",
+      "functions": [
+        {
+          "name": "test",
+          "params": [],
+          "exported": true,
+          "lineCount": 35
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "routers.ocr_local",
+          "specifiers": [
+            "_local_ocr_batch_from_inputs_triage_v2"
+          ]
+        },
+        {
+          "source": "routers.ocr_local",
+          "specifiers": [
+            "warmup_local_ocr"
+          ]
+        },
+        {
+          "source": "logging",
+          "specifiers": [
+            "logging"
+          ]
+        }
+      ],
+      "exports": [
+        "test"
+      ],
+      "totalLines": 49,
+      "hasStructuralAnalysis": true
+    },
+    "tests/__init__.py": {
+      "filePath": "tests/__init__.py",
+      "contentHash": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 2,
+      "hasStructuralAnalysis": true
+    },
+    "tests/cases_ui_dataflow_static.test.mjs": {
+      "filePath": "tests/cases_ui_dataflow_static.test.mjs",
+      "contentHash": "3c57b13808e065bf455fdddbf019558883db30677d5a2a6d30b437d7b5dd570f",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "node:fs",
+          "specifiers": [
+            "readFileSync"
+          ]
+        },
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 56,
+      "hasStructuralAnalysis": true
+    },
+    "tests/diagram_inheritance_engine.test.mjs": {
+      "filePath": "tests/diagram_inheritance_engine.test.mjs",
+      "contentHash": "4166338ac9374b8e2f5d65c1a577635af25c49af1c7c65d109ef7a760569dde2",
+      "functions": [
+        {
+          "name": "allocationOf",
+          "params": [
+            "result",
+            "id"
+          ],
+          "exported": false,
+          "lineCount": 3
+        },
+        {
+          "name": "receivedOf",
+          "params": [
+            "result",
+            "id"
+          ],
+          "exported": false,
+          "lineCount": 3
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        },
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "../frontend/static/inheritance_engine.js",
+          "specifiers": [
+            "engine"
+          ]
+        },
+        {
+          "source": "../frontend/static/diagram_edges.js",
+          "specifiers": [
+            "diagramEdges"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 290,
+      "hasStructuralAnalysis": true
+    },
+    "tests/diagram_state.test.mjs": {
+      "filePath": "tests/diagram_state.test.mjs",
+      "contentHash": "5a35ea7745ec12b10adf210355a2f1fa2243c73db5dfe4ca0f7603b4393fa9e5",
+      "functions": [],
+      "classes": [],
+      "imports": [
+        {
+          "source": "node:test",
+          "specifiers": [
+            "test"
+          ]
+        },
+        {
+          "source": "node:assert/strict",
+          "specifiers": [
+            "assert"
+          ]
+        },
+        {
+          "source": "node:module",
+          "specifiers": [
+            "createRequire"
+          ]
+        }
+      ],
+      "exports": [],
+      "totalLines": 51,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_customers_excel.py": {
+      "filePath": "tests/test_customers_excel.py",
+      "contentHash": "6bea3c9af1d39efe033191d2cfa6aa32fd0cd6a769169701472a1d63db192345",
+      "functions": [],
+      "classes": [
+        {
+          "name": "DummyQuery",
+          "methods": [
+            "filter",
+            "first"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "DummyDb",
+          "methods": [
+            "query"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "CustomerExcelImportTests",
+          "methods": [
+            "test_numeric_year_is_not_treated_as_excel_serial",
+            "test_excel_serial_date_still_imports_as_real_date",
+            "test_normalize_excel_header_matches_vietnamese_titles",
+            "test_missing_document_number_is_cleaned_to_none",
+            "test_template_formats_date_columns_as_text"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 45
+        }
+      ],
+      "imports": [
+        {
+          "source": "asyncio",
+          "specifiers": [
+            "asyncio"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "date"
+          ]
+        },
+        {
+          "source": "io",
+          "specifiers": [
+            "BytesIO"
+          ]
+        },
+        {
+          "source": "unittest",
+          "specifiers": [
+            "unittest"
+          ]
+        },
+        {
+          "source": "openpyxl",
+          "specifiers": [
+            "openpyxl"
+          ]
+        },
+        {
+          "source": "routers.customers",
+          "specifiers": [
+            "EXCEL_COLUMNS",
+            "as_input_value",
+            "download_template",
+            "normalize_excel_header",
+            "parse_date",
+            "validate_customer_form"
+          ]
+        }
+      ],
+      "exports": [
+        "DummyQuery",
+        "DummyDb",
+        "CustomerExcelImportTests"
+      ],
+      "totalLines": 80,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_diagram_payload_parser.py": {
+      "filePath": "tests/test_diagram_payload_parser.py",
+      "contentHash": "a800130aed309f999ae19eb1fad266fe189fd6a8479ce876b4b7b7f438a45a9b",
+      "functions": [
+        {
+          "name": "_customer",
+          "params": [
+            "cid",
+            "name"
+          ],
+          "returnType": "Customer",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_property",
+          "params": [
+            "pid"
+          ],
+          "returnType": "Property",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_payload",
+          "params": [
+            "nodes"
+          ],
+          "exported": true,
+          "lineCount": 6
+        }
+      ],
+      "classes": [
+        {
+          "name": "CaseStateSchemaTests",
+          "methods": [
+            "test_inheritance_case_model_declares_case_state_json_column",
+            "test_inheritance_cases_schema_migration_adds_case_state_json"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 38
+        },
+        {
+          "name": "CaseStatePayloadTests",
+          "methods": [
+            "test_create_and_edit_accept_case_state_json_form_field",
+            "test_normalize_case_state_json_accepts_stage_and_diagram",
+            "test_normalize_case_state_json_rejects_non_object_payload"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "DiagramPayloadParserTests",
+          "methods": [
+            "test_normalize_diagram_payload_accepts_nullable_relation_fields",
+            "test_parse_case_diagram_payload_returns_non_owner_participants_only",
+            "test_parse_case_diagram_payload_rejects_owner_mismatch",
+            "test_parse_case_diagram_payload_rejects_duplicate_active_person",
+            "test_parse_case_diagram_payload_rejects_unknown_parent",
+            "test_normalize_diagram_payload_requires_version_two",
+            "test_validate_case_refs_flags_unknown_customer_and_property",
+            "test_resolve_posted_participants_falls_back_to_legacy_inputs"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 125
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "inspect",
+          "specifiers": [
+            "inspect"
+          ]
+        },
+        {
+          "source": "sqlite3",
+          "specifiers": [
+            "sqlite3"
+          ]
+        },
+        {
+          "source": "tempfile",
+          "specifiers": [
+            "tempfile"
+          ]
+        },
+        {
+          "source": "unittest",
+          "specifiers": [
+            "unittest"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "database",
+          "specifiers": [
+            "database"
+          ]
+        },
+        {
+          "source": "models",
+          "specifiers": [
+            "Customer",
+            "InheritanceCase",
+            "Property"
+          ]
+        },
+        {
+          "source": "routers.cases",
+          "specifiers": [
+            "DiagramPayloadValidationError",
+            "_normalize_case_state_json",
+            "_normalize_diagram_payload",
+            "_parse_case_diagram_payload",
+            "_resolve_posted_participants",
+            "_validate_case_refs",
+            "create",
+            "edit"
+          ]
+        }
+      ],
+      "exports": [
+        "_customer",
+        "_property",
+        "_payload",
+        "CaseStateSchemaTests",
+        "CaseStatePayloadTests",
+        "DiagramPayloadParserTests"
+      ],
+      "totalLines": 229,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_ocr_ai.py": {
+      "filePath": "tests/test_ocr_ai.py",
+      "contentHash": "7a67c368ed4ab46f523b544038121c2bb46516120f91886e046644da59c15f10",
+      "functions": [
+        {
+          "name": "make_upload",
+          "params": [
+            "filename",
+            "content"
+          ],
+          "returnType": "UploadFile",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [
+        {
+          "name": "AnalyzeImagesTests",
+          "methods": [
+            "test_normalize_property_doc_extracts_core_fields",
+            "test_normalize_property_doc_handles_noisy_registry_and_plot_lines",
+            "test_extract_property_registry_no_rejects_non_code_followup",
+            "test_extract_property_authority_prefers_real_issuing_agency",
+            "test_extract_property_authority_rejects_warning_sentence",
+            "test_should_rescue_property_issue_date_when_footer_year_is_newer",
+            "test_should_not_rescue_property_issue_date_without_footer_signal",
+            "test_extract_property_address_keeps_nam_dinh_continuation",
+            "test_extract_property_address_stops_before_footer_date_line",
+            "test_normalize_property_doc_accepts_standalone_serial_and_owner",
+            "test_extract_property_serial_rejects_registry_like_standalone_code",
+            "test_normalize_property_doc_extracts_plot_and_map_from_combined_line",
+            "test_normalize_property_doc_accepts_sparse_back_page",
+            "test_normalize_property_doc_unknown_for_non_property",
+            "test_parse_person_mrz_extracts_expected_fields",
+            "test_extract_address_strips_expiry_label_noise",
+            "test_extract_address_strips_expiry_noise_same_line",
+            "test_extract_native_ocr_lines_from_text_payload",
+            "test_normalize_native_doc_prefers_mrz_on_back",
+            "test_normalize_native_doc_front_drops_issue_date",
+            "test_analyze_images_prefers_qr_over_ai_result",
+            "test_analyze_images_qr_front_pairs_with_back_and_clears_missing_back",
+            "test_analyze_images_runs_native_ocr_for_non_qr_images",
+            "test_analyze_images_collects_native_errors_per_file",
+            "test_analyze_images_pairs_front_back_by_id",
+            "test_analyze_images_marks_mismatched_front_and_back_as_incomplete",
+            "test_analyze_property_images_returns_properties_only",
+            "test_analyze_property_pair_merges_by_field_and_returns_owner",
+            "test_analyze_property_pair_is_order_independent_without_footer_rescue",
+            "test_merge_property_pair_is_order_independent",
+            "test_merge_property_pair_prefers_cleaner_address_and_area",
+            "test_pick_property_field_value_prefers_recent_issue_date",
+            "test_pick_property_field_value_prefers_clean_authority",
+            "test_pair_persons_allows_fuzzy_id_when_name_matches",
+            "test_pair_persons_rejects_fuzzy_id_when_mismatch_too_high"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 678
+        }
+      ],
+      "imports": [
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "unittest",
+          "specifiers": [
+            "unittest"
+          ]
+        },
+        {
+          "source": "unittest",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "HTTPException",
+            "UploadFile"
+          ]
+        },
+        {
+          "source": "routers",
+          "specifiers": [
+            "ocr_ai"
+          ]
+        }
+      ],
+      "exports": [
+        "make_upload",
+        "AnalyzeImagesTests"
+      ],
+      "totalLines": 696,
+      "hasStructuralAnalysis": true
+    },
+    "tests/test_ocr_local_v4.py": {
+      "filePath": "tests/test_ocr_local_v4.py",
+      "contentHash": "2da47b774849233fc6d9d7d1cb174e32791ce484b86bf5d57de8aae9e7396b10",
+      "functions": [
+        {
+          "name": "make_box",
+          "params": [
+            "x1",
+            "y1",
+            "x2",
+            "y2"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 7
+        }
+      ],
+      "classes": [
+        {
+          "name": "FilterTargetBoxesTests",
+          "methods": [
+            "test_filter_target_boxes_keeps_only_valid_front_id_boxes",
+            "test_filter_target_boxes_uses_unknown_detail_wide_roi"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "ParseFullTextTests",
+          "methods": [
+            "test_parse_cccd_fulltext_front_old_extracts_key_fields",
+            "test_parse_cccd_fulltext_back_new_reads_mrz_id_and_dates"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 39
+        },
+        {
+          "name": "DetectorAndCropTests",
+          "methods": [
+            "test_rapidocr_detect_boxes_handles_numpy_array_output",
+            "test_crop_box_image_upscales_small_text_line"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "MergeFlowTests",
+          "methods": [
+            "test_rekey_and_delta_merge_keep_single_person_record"
+          ],
+          "properties": [],
+          "exported": true,
+          "lineCount": 64
+        }
+      ],
+      "imports": [
+        {
+          "source": "unittest",
+          "specifiers": [
+            "unittest"
+          ]
+        },
+        {
+          "source": "unittest",
+          "specifiers": [
+            "mock"
+          ]
+        },
+        {
+          "source": "numpy",
+          "specifiers": [
+            "np"
+          ]
+        },
+        {
+          "source": "routers",
+          "specifiers": [
+            "ocr_local"
+          ]
+        }
+      ],
+      "exports": [
+        "make_box",
+        "FilterTargetBoxesTests",
+        "ParseFullTextTests",
+        "DetectorAndCropTests",
+        "MergeFlowTests"
+      ],
+      "totalLines": 194,
+      "hasStructuralAnalysis": true
+    },
+    "tools/codex_relay.py": {
+      "filePath": "tools/codex_relay.py",
+      "contentHash": "3ea3998af53324d66a1fb6a97343711f11708fe8fcbb86219f4b96b82ddd870d",
+      "functions": [
+        {
+          "name": "_slug",
+          "params": [
+            "text",
+            "max_len"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_make_run_dir",
+          "params": [
+            "task"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_read_task",
+          "params": [
+            "path"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "_format_task",
+          "params": [
+            "task"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 22
+        },
+        {
+          "name": "_run_codex",
+          "params": [
+            "prompt",
+            "out_md",
+            "jsonl_path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "_load_status",
+          "params": [
+            "run_dir"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_save_status",
+          "params": [
+            "run_dir",
+            "status"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "cmd_draft",
+          "params": [
+            "args"
+          ],
+          "exported": true,
+          "lineCount": 62
+        },
+        {
+          "name": "cmd_approve",
+          "params": [
+            "args"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "cmd_execute",
+          "params": [
+            "args"
+          ],
+          "exported": true,
+          "lineCount": 42
+        },
+        {
+          "name": "cmd_review",
+          "params": [
+            "args"
+          ],
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "cmd_status",
+          "params": [
+            "args"
+          ],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "main",
+          "params": [],
+          "exported": true,
+          "lineCount": 34
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "io",
+          "specifiers": [
+            "io"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "datetime"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        }
+      ],
+      "exports": [
+        "_slug",
+        "_make_run_dir",
+        "_read_task",
+        "_format_task",
+        "_run_codex",
+        "_load_status",
+        "_save_status",
+        "cmd_draft",
+        "cmd_approve",
+        "cmd_execute",
+        "cmd_review",
+        "cmd_status",
+        "main"
+      ],
+      "totalLines": 439,
+      "hasStructuralAnalysis": true
+    },
+    "tools/fix_mojibake_utf8.py": {
+      "filePath": "tools/fix_mojibake_utf8.py",
+      "contentHash": "de91a270f81341407b3f1ef085c9cd181f2f36613a8123856dd12a93eb14bfbd",
+      "functions": [
+        {
+          "name": "parse_args",
+          "params": [],
+          "returnType": "argparse.Namespace",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "should_scan",
+          "params": [
+            "path"
+          ],
+          "returnType": "bool",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "mojibake_score",
+          "params": [
+            "text"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "decode_cp1252_mojibake_once",
+          "params": [
+            "text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "fix_file",
+          "params": [
+            "path"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        }
+      ],
+      "exports": [
+        "parse_args",
+        "should_scan",
+        "mojibake_score",
+        "decode_cp1252_mojibake_once",
+        "fix_file",
+        "main"
+      ],
+      "totalLines": 152,
+      "hasStructuralAnalysis": true
+    },
+    "verify.bat": {
+      "filePath": "verify.bat",
+      "contentHash": "6114fde2a6a9da784d0b28c4bca05e8c497324a28a52faf19a257c4c3a80e879",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 3,
+      "hasStructuralAnalysis": false
+    },
+    "verify.ps1": {
+      "filePath": "verify.ps1",
+      "contentHash": "11f284c42f33eac95303b3a1f9734b9f6eef74f921ee86850f051d78b759c0e3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 110,
+      "hasStructuralAnalysis": false
+    },
+    "view_vps_logs.bat": {
+      "filePath": "view_vps_logs.bat",
+      "contentHash": "f2b70abb3f981d25c140467b06b0ec4d11a3f1ef04eeee3daf00e8c9c8897bad",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 30,
+      "hasStructuralAnalysis": false
+    },
+    "word_templates/custom/20260320_111543_e39fbc7d.docx": {
+      "filePath": "word_templates/custom/20260320_111543_e39fbc7d.docx",
+      "contentHash": "7cdb3319cf281a7cbcc2a8276b15392f9df49f38283becdd41097c26371f70dc",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 104,
+      "hasStructuralAnalysis": false
+    },
+    "word_templates/placeholder_mapping.md": {
+      "filePath": "word_templates/placeholder_mapping.md",
+      "contentHash": "13dc3bc009904d1a2cd7d78ed4a95129b36fa40d44ec00feb6bce25c824b571a",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 112,
+      "hasStructuralAnalysis": true
+    },
+    "word_templates/system_placeholder_reference.docx": {
+      "filePath": "word_templates/system_placeholder_reference.docx",
+      "contentHash": "af038cde175b23ae762c4710230c14f2622ff73c6a0783de2a807476e9489926",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 148,
+      "hasStructuralAnalysis": false
+    },
+    "word_templates/system_placeholder_reference.md": {
+      "filePath": "word_templates/system_placeholder_reference.md",
+      "contentHash": "50f37444d76d3ede0380ba9635a882fd8ba3c2c33ace390af39fb84090710cfd",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 32,
+      "hasStructuralAnalysis": true
+    },
+    "word_templates/system_template_chuan_v1.docx": {
+      "filePath": "word_templates/system_template_chuan_v1.docx",
+      "contentHash": "85c6217aaf838833b090a671db4066798fd7d5c5d24e19b7e83ec4fb090467a8",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 80,
+      "hasStructuralAnalysis": false
+    },
+    "word_templates/xa_PCDS_template.docx": {
+      "filePath": "word_templates/xa_PCDS_template.docx",
+      "contentHash": "b2c3c87cd3668dd3918a32812906bb70ca24331d738b93f1d5f39f56810d7d9d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 116,
+      "hasStructuralAnalysis": false
+    },
+    "word_templates/xa_PCDS_template.md": {
+      "filePath": "word_templates/xa_PCDS_template.md",
+      "contentHash": "aea4a0b02b1700dfa2cac78c810da6a33613219505744ee9ecdad313ed5c12eb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 130,
+      "hasStructuralAnalysis": true
+    }
+  }
+}

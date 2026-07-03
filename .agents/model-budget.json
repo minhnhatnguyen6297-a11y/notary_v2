@@ -1,0 +1,151 @@
+{
+  "version": "1.0",
+  "plan": "go",
+  "last_updated": "2026-06-26T00:00:00Z",
+  "last_quota_check": null,
+  "tiers": {
+    "S": {
+      "label": "Reasoning / Planning / Complex Debug",
+      "fallback_order": ["glm-5.2", "kimi-k2.7-code", "qwen3.7-max"],
+      "models": {
+        "glm-5.2": {
+          "name": "GLM-5.2",
+          "priority": 1,
+          "quota_per_5h": 880,
+          "quota_per_month": 4300,
+          "price_per_1m": {"input": 1.40, "output": 4.40, "cached": 0.26},
+          "strengths": ["instruction_following", "reasoning", "planning"],
+          "best_for": ["OCR pipeline", "architecture planning", "debug đa tầng"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "kimi-k2.7-code": {
+          "name": "Kimi K2.7 Code",
+          "priority": 2,
+          "quota_per_5h": 1350,
+          "quota_per_month": 9250,
+          "price_per_1m": {"input": 0.95, "output": 4.00, "cached": 0.19},
+          "strengths": ["code_generation", "debugging", "test_writing"],
+          "best_for": ["Code refactor", "fix bug logic", "test phức tạp"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "qwen3.7-max": {
+          "name": "Qwen3.7 Max",
+          "priority": 3,
+          "quota_per_5h": 950,
+          "quota_per_month": 4770,
+          "price_per_1m": {"input": 2.50, "output": 7.50, "cached": 0.50},
+          "strengths": ["multi_file_analysis", "cross_module_reasoning"],
+          "best_for": ["Multi-file analysis", "cross-module reasoning"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        }
+      }
+    },
+    "A": {
+      "label": "Task thường / CRUD / Feature nhỏ",
+      "fallback_order": ["qwen3.7-plus", "deepseek-v4-pro", "mimo-v2.5-pro"],
+      "models": {
+        "qwen3.7-plus": {
+          "name": "Qwen3.7 Plus",
+          "priority": 1,
+          "quota_per_5h": 4300,
+          "quota_per_month": 21600,
+          "price_per_1m": {"input": 0.40, "output": 1.60, "cached": 0.04},
+          "strengths": ["high_quota", "low_cost", "boilerplate"],
+          "best_for": ["CRUD", "feature nhỏ", "task lặp lại"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "priority": 2,
+          "quota_per_5h": 3450,
+          "quota_per_month": 17150,
+          "price_per_1m": {"input": 1.74, "output": 3.48, "cached": 0.0145},
+          "strengths": ["cache_efficiency", "balanced"],
+          "best_for": ["Validation", "form handling", "context lớn"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "mimo-v2.5-pro": {
+          "name": "MiMo-V2.5-Pro",
+          "priority": 3,
+          "quota_per_5h": 3250,
+          "quota_per_month": 16300,
+          "price_per_1m": {"input": 1.74, "output": 3.48, "cached": 0.0145},
+          "strengths": ["large_context", "frontend_backend_sync"],
+          "best_for": ["Frontend-backend sync", "ReactFlow logic"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        }
+      }
+    },
+    "B": {
+      "label": "TRIVIAL / Docs / Search-replace",
+      "fallback_order": ["mimo-v2.5", "deepseek-v4-flash", "minimax-m3"],
+      "models": {
+        "mimo-v2.5": {
+          "name": "MiMo-V2.5",
+          "priority": 1,
+          "quota_per_5h": 30100,
+          "quota_per_month": 150400,
+          "price_per_1m": {"input": 0.14, "output": 0.28, "cached": 0.0028},
+          "strengths": ["massive_quota", "cheapest"],
+          "best_for": ["Docs", "comment", "log", "config"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+          "priority": 2,
+          "quota_per_5h": 31650,
+          "quota_per_month": 158150,
+          "price_per_1m": {"input": 0.14, "output": 0.28, "cached": 0.0028},
+          "strengths": ["highest_quota", "pattern_matching"],
+          "best_for": ["Search/replace", "pattern matching"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        },
+        "minimax-m3": {
+          "name": "MiniMax M3",
+          "priority": 3,
+          "quota_per_5h": 3200,
+          "quota_per_month": 16000,
+          "price_per_1m": {"input": 0.30, "output": 1.20, "cached": 0.06},
+          "strengths": ["backup"],
+          "best_for": ["Test đơn giản"],
+          "personal_remaining_5h": null,
+          "personal_remaining_month": null
+        }
+      }
+    }
+  },
+  "backup_models": {
+    "glm-5.1": "glm-5.2",
+    "kimi-k2.6": "kimi-k2.7-code",
+    "minimax-m2.7": "minimax-m3",
+    "qwen3.6-plus": "qwen3.7-plus"
+  },
+  "rules": {
+    "ocr_always_tier": "S",
+    "planning_always_tier": "S",
+    "auto_fallback_within_tier": true,
+    "warn_at_percent": 70,
+    "downgrade_only_with_confirmation": true
+  },
+  "task_routing": {
+    "OCR pipeline": {"tier": "S", "primary": "glm-5.2"},
+    "Architecture planning": {"tier": "S", "primary": "glm-5.2"},
+    "Refactor lớn": {"tier": "S", "primary": "glm-5.2"},
+    "Debug phức tạp": {"tier": "S", "primary": "glm-5.2"},
+    "CRUD": {"tier": "A", "primary": "qwen3.7-plus"},
+    "Feature nhỏ": {"tier": "A", "primary": "qwen3.7-plus"},
+    "Test writing": {"tier": "A", "primary": "deepseek-v4-pro"},
+    "Frontend sync": {"tier": "A", "primary": "mimo-v2.5-pro"},
+    "Docs": {"tier": "B", "primary": "mimo-v2.5"},
+    "Search/replace": {"tier": "B", "primary": "deepseek-v4-flash"},
+    "Comment/log": {"tier": "B", "primary": "mimo-v2.5"}
+  }
+}
