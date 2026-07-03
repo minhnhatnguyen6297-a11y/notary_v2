@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, UploadFile, File
-from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from typing import Optional, List, Union, Any
@@ -14,6 +14,12 @@ from types import SimpleNamespace
 
 from database import get_db
 from models import InheritanceCase, Customer, Property, InheritanceParticipant, InheritanceCaseProperty, WordTemplate
+from services.word_engine import (
+    WordExportValidationError,
+    build_template_mapping,
+    list_public_builtin_templates,
+    replace_in_doc,
+)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="frontend/templates")
@@ -1065,6 +1071,11 @@ def _get_selected_word_template_path(db: Session) -> Optional[Path]:
         if p.exists():
             return p
 
+    # Ưu tiên template PCDS V2 mới.
+    default_v2 = Path("word_templates/1. PCDS .docx")
+    if default_v2.exists():
+        return default_v2
+
     template_candidates = [
         Path(r"\\maychu\D\Minh\HỒ SƠ UBND CÁC XÃ\2. Mẫu thừa kế\xã_PCDS -.docx"),
         Path("word_templates/xa_PCDS_template.docx"),
@@ -1079,17 +1090,21 @@ def _get_selected_word_template_path(db: Session) -> Optional[Path]:
 def list_templates_json(db: Session = Depends(get_db)):
     """API trả về danh sách template Word dạng JSON cho modal xuất văn bản."""
     items = db.query(WordTemplate).order_by(WordTemplate.id.desc()).all()
-    # Also include built-in templates from word_templates/ dir
-    builtin = []
-    for p in Path("word_templates").glob("*.docx"):
-        if p.exists():
-            builtin.append({"id": f"builtin:{p.name}", "ten_mau": p.stem, "is_active": False, "builtin": True})
+    builtin = list_public_builtin_templates(Path("word_templates"))
     return {
         "templates": [
             {"id": t.id, "ten_mau": t.ten_mau, "ten_file_goc": t.ten_file_goc, "is_active": t.is_active, "builtin": False}
             for t in items
         ] + builtin
     }
+
+
+@router.get("/templates/placeholders")
+def word_template_placeholders():
+    catalog_path = Path("word_templates/placeholder_mapping.md")
+    if not catalog_path.exists():
+        raise HTTPException(status_code=404, detail="Khong tim thay catalog placeholder.")
+    return PlainTextResponse(catalog_path.read_text(encoding="utf-8"), media_type="text/plain; charset=utf-8")
 
 
 @router.get("/templates/manage")
@@ -1382,6 +1397,8 @@ def _pick_core_people(case: InheritanceCase):
 
 
 def _build_template_mapping(case: InheritanceCase) -> dict:
+    return build_template_mapping(case)
+
     ts = case.tai_san
     person1, person2, person3, people_4_plus = _pick_core_people(case)
 
@@ -1657,6 +1674,8 @@ def _replace_in_paragraph(paragraph, mapping: dict, normalized_mapping: dict):
 
 
 def _replace_in_doc(doc, mapping: dict):
+    return replace_in_doc(doc, mapping)
+
     normalized_mapping = _build_normalized_mapping(mapping)
     for p in doc.paragraphs:
         _replace_in_paragraph(p, mapping, normalized_mapping)
@@ -1807,8 +1826,11 @@ def export_word_from_template(cid: int, db: Session = Depends(get_db), template_
     except Exception as ex:
         raise HTTPException(status_code=500, detail=f"Khong mo duoc template: {ex}")
 
-    mapping = _build_template_mapping(case)
-    _replace_in_doc(doc, mapping)
+    try:
+        mapping = build_template_mapping(case)
+    except WordExportValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    replace_in_doc(doc, mapping)
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1973,7 +1995,7 @@ def preview_word(cid: int, request: Request, db: Session = Depends(get_db)):
     case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
     if not case:
         raise HTTPException(404)
-    mapping = _build_template_mapping(case)
+    mapping = build_template_mapping(case)
     
     html_content = f"""
     <h1 style="text-align: center;">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</h1>
