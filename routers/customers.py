@@ -490,26 +490,26 @@ def quick_update(
     c = db.get(Customer, cid)
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
-    if ho_ten and ho_ten.strip():
+    if ho_ten is not None:
         c.ho_ten = ho_ten.strip()
     gt = normalize_gender(gioi_tinh or "")
-    if gt:
+    if gt or gioi_tinh is not None:
         c.gioi_tinh = gt
     ns = parse_date(ngay_sinh or "", allow_year_only=True)
-    if ns:
+    if ns or ngay_sinh is not None:
         c.ngay_sinh = ns
     nd = parse_date(ngay_chet or "", allow_year_only=True)
-    if nd:
+    if nd or ngay_chet is not None:
         c.ngay_chet = nd
-    so = (so_giay_to or "").strip()
-    if so:
-        c.so_giay_to = so
+    if so_giay_to is not None:
+        so = (so_giay_to or "").strip()
+        c.so_giay_to = so or None
     nc = parse_date(ngay_cap or "", allow_year_only=True)
-    if nc:
+    if nc or ngay_cap is not None:
         c.ngay_cap = nc
-    dc = (dia_chi or "").strip()
-    if dc:
-        c.dia_chi = dc
+    if dia_chi is not None:
+        dc = (dia_chi or "").strip()
+        c.dia_chi = dc or None
     try:
         db.commit()
     except IntegrityError:

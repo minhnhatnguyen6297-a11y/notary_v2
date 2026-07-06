@@ -227,7 +227,7 @@ endif %}
 
       display: grid;
 
-      grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 60px;
+      grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 72px;
 
       gap: 1px;
 
@@ -306,7 +306,7 @@ endif %}
 
       display: grid;
 
-      grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 60px;
+      grid-template-columns: 1fr 55px 108px 100px 130px 108px 1.5fr 72px;
 
       gap: 1px;
 
@@ -3584,6 +3584,11 @@ endif %}
           </a>
 
 
+          <a href="/cases/templates/placeholders" target="_blank" class="btn btn-sm btn-outline-secondary"
+      style="font-size:12px;">
+      <i class="bi bi-braces me-1"></i>Placeholder
+          </a>
+
         </div>
 
 
@@ -5081,17 +5086,26 @@ endif %}
       const record = toLegacyCustomerShape(raw) || raw || {};
       const id = String(record.id || raw?.id || '').trim();
       if (!id) return null;
+      const pick = (key, ...fallbacks) => {
+        const v = record[key];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v);
+        for (const f of fallbacks) {
+          const fv = record[f];
+          if (fv !== undefined && fv !== null && String(fv).trim() !== '') return String(fv);
+        }
+        return '';
+      };
       return {
         id,
-        ho_ten: record.ho_ten || record.name || '',
-        gioi_tinh: record.gioi_tinh || record.gender || '',
-        ngay_sinh: record.ngay_sinh || record.birth || '',
-        ngay_chet: record.ngay_chet || record.death || '',
-        so_giay_to: record.so_giay_to || record.doc || '',
-        ngay_cap: record.ngay_cap || record.issue_date || '',
-        noi_cap: record.noi_cap || record.issue_place || '',
-        dia_chi: record.dia_chi || record.address || '',
-        place_of_origin: record.place_of_origin || '',
+        ho_ten: pick('ho_ten', 'name'),
+        gioi_tinh: pick('gioi_tinh', 'gender'),
+        ngay_sinh: pick('ngay_sinh', 'birth'),
+        ngay_chet: pick('ngay_chet', 'death'),
+        so_giay_to: pick('so_giay_to', 'doc'),
+        ngay_cap: pick('ngay_cap', 'issue_date'),
+        noi_cap: pick('noi_cap', 'issue_place'),
+        dia_chi: pick('dia_chi', 'address'),
+        place_of_origin: pick('place_of_origin'),
       };
     }
 
@@ -8786,7 +8800,7 @@ endif %}
   <script src="/static/diagram_state.js?v=20260511a"></script>
   <script src="/static/diagram_edges.js?v=20260511a"></script>
   <script type="text/babel" data-presets="react" 
-src="/static/ReactFlowApp.jsx?v=20260703a"></script>
+src="/static/ReactFlowApp.jsx?v=20260703b"></script>
 
   <script>
     // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
