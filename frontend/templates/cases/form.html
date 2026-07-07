@@ -14002,9 +14002,12 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         row.style.borderColor = '#f87171';
 
-        row.title = json?.error || json?.errors ? JSON.stringify(json.error || json.errors) : 'Lỗi lưu';
+        const failReason = json?.error || (json?.errors ? Object.values(json.errors).join(', ') : '') || 'Lỗi lưu';
+        row.title = failReason;
 
         _setDraftRowStatus(row, '!');
+
+        showToast(`Lỗi lưu ${nameVal || 'dòng'}: ${failReason}`, 'danger');
 
 
         if (typeof window.__pushCaseDebugEvent__ === 'function') {
@@ -14179,37 +14182,37 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         _syncAllDraftRowStates();
 
-        if (failedCount === 0) {
+        try {
 
-          try {
+          const treeState = typeof getFamilyTreeState === 'function' ? getFamilyTreeState() : null;
 
-            const treeState = typeof getFamilyTreeState === 'function' ? getFamilyTreeState() : null;
+          const latestEngineState = treeState?.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
 
-            const latestEngineState = treeState?.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
+          if (typeof window.persistCommittedStageSnapshot === 'function') {
 
-            if (typeof window.persistCommittedStageSnapshot === 'function') {
+            await window.persistCommittedStageSnapshot({ latestEngineState, treeState });
 
-              await window.persistCommittedStageSnapshot({ latestEngineState, treeState });
+          }
 
-            }
+          if (failedCount === 0) {
 
             clearOcrTempAfterStageCommit();
 
-          } catch (e) {
+          }
 
-            failedCount += 1;
+        } catch (e) {
 
-            showToast('Khong the cap nhat Stage. OCR tam van duoc giu lai de doi chieu.', 'warning');
+          failedCount += 1;
 
-            if (typeof window.__pushCaseDebugEvent__ === 'function') {
+          showToast('Khong the cap nhat Stage. OCR tam van duoc giu lai de doi chieu.', 'warning');
 
-              window.__pushCaseDebugEvent__('PARTICIPANTS_STAGE_COMMIT_FAILED', {
+          if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
-                reason: String(e?.message || e || '')
+            window.__pushCaseDebugEvent__('PARTICIPANTS_STAGE_COMMIT_FAILED', {
 
-              });
+              reason: String(e?.message || e || '')
 
-            }
+            });
 
           }
 

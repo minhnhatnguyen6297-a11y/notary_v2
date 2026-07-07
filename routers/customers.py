@@ -439,20 +439,17 @@ def inline_create(
     if so_giay_to_val:
         existing = db.query(Customer).filter(Customer.so_giay_to == so_giay_to_val).first()
         if existing:
-            if name:
-                existing.ho_ten = name
+            existing.ho_ten = name
             gt = normalize_gender(gioi_tinh or "")
-            if gt:
-                existing.gioi_tinh = gt
+            existing.gioi_tinh = gt or None
             ns = parse_date(ngay_sinh or "", allow_year_only=True)
-            if ns:
-                existing.ngay_sinh = ns
+            existing.ngay_sinh = ns
+            nd = parse_date(ngay_chet or "", allow_year_only=True)
+            existing.ngay_chet = nd
             nc = parse_date(ngay_cap or "", allow_year_only=True)
-            if nc:
-                existing.ngay_cap = nc
+            existing.ngay_cap = nc
             dc = (dia_chi or "").strip()
-            if dc:
-                existing.dia_chi = dc
+            existing.dia_chi = dc or None
             db.commit()
             db.refresh(existing)
             return JSONResponse({"ok": True, "customer": to_customer_json(existing), "updated": True})
