@@ -13584,7 +13584,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       function _applyCustomerToDraftRow(row, raw) {
 
-        const record = toLegacyCustomerShape(upsertCustomerRecord(raw));
+        const record = toLegacyCustomerShape(raw) || toLegacyCustomerShape(upsertCustomerRecord(raw));
 
         if (!row || !record) return null;
 
@@ -13625,7 +13625,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       function _syncCustomerAfterSave(raw, options = {}) {
 
-        const record = toLegacyCustomerShape(upsertCustomerRecord(raw));
+        const record = toLegacyCustomerShape(raw) || toLegacyCustomerShape(upsertCustomerRecord(raw));
 
         if (!record?.id) return null;
 
@@ -13747,6 +13747,8 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       <div class="row-actions">
 
         <span class="draft-row-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
+
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
 
       </div>
     `;
@@ -14000,6 +14002,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         row.style.borderColor = '#f87171';
 
+        row.title = json?.error || json?.errors ? JSON.stringify(json.error || json.errors) : 'Lỗi lưu';
 
         _setDraftRowStatus(row, '!');
 
