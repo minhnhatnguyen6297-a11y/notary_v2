@@ -9972,26 +9972,47 @@ overlay._previewItems = previewItems;
 
         const input = document.getElementById('ocr-file-input');
 
-        document.getElementById('ocr-queue').innerHTML = '';
+        const ocrQueue = document.getElementById('ocr-queue');
 
-        document.getElementById('ocr-queue').appendChild(document.getElementById('ocr-queue-empty'));
+        const ocrQueueEmpty = document.getElementById('ocr-queue-empty');
 
-        document.getElementById('ocr-queue-empty').style.display = '';
+        if (ocrQueue) {
+          ocrQueue.innerHTML = '';
 
-        document.getElementById('ocr-btn-extract').disabled = true;
+          if (ocrQueueEmpty) ocrQueue.appendChild(ocrQueueEmpty);
+
+        }
+
+        if (ocrQueueEmpty) ocrQueueEmpty.style.display = '';
+
+        const extractBtn = document.getElementById('ocr-btn-extract');
+
+        if (extractBtn) extractBtn.disabled = true;
 
         const localExtractBtn = document.querySelector('[data-local-ocr-control]');
+
         if (localExtractBtn) localExtractBtn.disabled = true;
 
-        document.getElementById('ocr-results-empty').style.display = 'flex';
+        const resultsEmpty = document.getElementById('ocr-results-empty');
 
-        document.getElementById('ocr-results-list').style.display = 'none';
+        if (resultsEmpty) resultsEmpty.style.display = 'flex';
 
-        document.getElementById('ocr-results-list').innerHTML = '';
+        const resultsList = document.getElementById('ocr-results-list');
 
-        document.getElementById('ocr-btn-add-all').style.display = 'none';
+        if (resultsList) {
+          resultsList.style.display = 'none';
 
-        document.getElementById('ocr-summary-text').textContent = '';
+          resultsList.innerHTML = '';
+
+        }
+
+        const addAllBtn = document.getElementById('ocr-btn-add-all');
+
+        if (addAllBtn) addAllBtn.style.display = 'none';
+
+        const summaryText = document.getElementById('ocr-summary-text');
+
+        if (summaryText) summaryText.textContent = '';
 
         const st = document.getElementById('ocr-local-status');
 
