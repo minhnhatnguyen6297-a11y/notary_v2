@@ -113,6 +113,7 @@ Thiet ke lai visual cua so do thua ke:
 - `inheritance_engine.js`: chi `refuse` bi loai khoi dong chia; `unset` van tinh suất.
 - Bo nut `+ Them Anh/Chi/Em` thu cong.
 - `resolveSubRelations()` tu sinh `auto_z_{parentId}` khi cha/me chet sau con va co dong tai san chay qua.
+- Moi hang con dang visible phai luon co 1 o trong; hang Z/anh chi em sinh id ke tiep neu slot cu da materialize.
 - `childNodesOf` bao gom quan he co dinh father/mother -> owner, spouse_father/spouse_mother -> spouse.
 - File: `ReactFlowApp.jsx`, `inheritance_engine.js`, `cases/form.html`, `routers/cases.py`
 
@@ -169,6 +170,7 @@ Thiet ke lai visual cua so do thua ke:
 - Tests cap nhat va pass.
 
 ### Da thuc hien (auto slot + Z)
+- **Invariant hang con**: moi hang con visible luon giu 1 slot trong; sau khi drop Z vao slot auto, hang do sinh slot Z ke tiep va giu `parentSlotId`, `parentPersonId`, `familyGroupId`.
 - **Auto sinh o vo/chong / cha-me**: `resolveSubRelations()` tu dong tao `auto_spouse_{anchorId}` khi anchor la Chu dat, hoac nguoi chet co phan tai san, hoac co con chet.
 - **Sua nhanh Z / anh chi em**: da bo nut "+ Thêm Anh/Chị/Em"; `resolveSubRelations()` tu dong tao `auto_z_{parentId}` khi cha/me chet sau con va co dong tai san chay qua.
 - **Xu ly tắt Chu đất**: `onToggleLandOwner()` xoa o auto trong; neu o da co nguoi thi tra ve pool roi xoa.
