@@ -76,14 +76,25 @@ Source precedence: `AGENTS.md` hard rules -> accepted architecture ADR -> domain
 
 If code conflicts with a normative spec or contract, stop and report the conflict. Do not silently change either side.
 
-## 6. Project red lines
+## 6. Graphify code graph
+
+- A Graphify scan exists in `graphify-out/` for code navigation.
+- For non-trivial code changes, bug hunts, cross-file impact checks, or "where is X?" tasks, consult the graph before broad file search.
+- Useful commands from repo root:
+  - `D:\graphify\.venv\Scripts\graphify.exe query "question" --graph graphify-out/graph.json`
+  - `D:\graphify\.venv\Scripts\graphify.exe explain "NodeName" --graph graphify-out/graph.json`
+  - `D:\graphify\.venv\Scripts\graphify.exe path "A" "B" --graph graphify-out/graph.json`
+- Do not use Graphify as the source of truth for business rules; routed docs and touched code still win.
+- After meaningful code changes, refresh with `D:\graphify\.venv\Scripts\graphify.exe update .`.
+
+## 7. Project red lines
 
 - Stage is the UI source of truth for people in a case; Pool/Diagram must not mutate Stage person data.
 - OCR modal `x` must not save, clear, reset, flush, or auto-stage.
 - Cloud AI OCR is active default; Local OCR is parked/research unless explicitly scoped.
 - Detailed invariants belong in the routed spec/plan files.
 
-## 7. Run / smoke
+## 8. Run / smoke
 
 ```bash
 run.bat
