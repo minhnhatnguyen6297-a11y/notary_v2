@@ -59,20 +59,22 @@ BAO CAO HOAN THANH:
 
 ## 5. Read routing
 
-Before editing, read only the matching docs:
+Read `docs/README.md` only when the task area is not obvious. Then read the matching module entrypoint:
 
 | Task area | Read first |
 | --- | --- |
-| Cloud OCR / AI OCR | `docs/plans/ocr_ai.md` |
-| Local OCR parked engine / research | `docs/plans/ocr_local.md` |
-| Case UX flow / Stage / Pool / Diagram interaction | `docs/specs/case_user_flow.md` |
-| Case data-flow refactor | `docs/plans/cases_dataflow_v2.md` |
-| Diagram inheritance engine / inheritance math | `docs/plans/inheritance_diagram.md` |
-| Diagram visual / edges / connectors | `docs/plans/diagram_visual_v2.md` |
-| Word template | `docs/plans/word_template_v2.md` |
-| Feature plan index | `docs/plans/_INDEX.md` |
+| Hồ sơ thừa kế / inheritance rules | `docs/domains/inheritance/README.md` |
+| Stage / Pool / inheritance case UX | `docs/domains/inheritance/README.md` |
+| Cloud AI OCR / property OCR | `docs/platform/document-intake/README.md` |
+| Local OCR | `docs/platform/document-intake/README.md`; parked, separate redesign required |
+| Shared Stage / Pool capability | `docs/platform/case-workspace/README.md` |
+| Word renderer / placeholder engine | `docs/platform/document-generation/README.md` |
+| Fast text audit CLI | `docs/platform/fast-text-audit/README.md` |
+| Architecture or module boundaries | `docs/architecture/README.md` |
 
-If a plan/spec conflicts with this file, stop and ask unless the newer source explicitly supersedes the older one.
+Source precedence: `AGENTS.md` hard rules -> accepted architecture ADR -> domain spec -> platform contract -> technical/UX docs -> active plan -> research.
+
+If code conflicts with a normative spec or contract, stop and report the conflict. Do not silently change either side.
 
 ## 6. Project red lines
 

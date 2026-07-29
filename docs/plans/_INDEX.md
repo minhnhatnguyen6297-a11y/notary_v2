@@ -1,14 +1,19 @@
-# Index: Feature Plans
+# Index: Feature Plans (legacy; pending Task 5 deletion)
 
 Mỗi chức năng lớn có 1 file plan riêng. **Đọc plan trước khi sửa code.**
 
 | Chức năng | File | Trạng thái | Files code liên quan |
 |---|---|---|---|
-| OCR AI (Cloud) | [ocr_ai.md](ocr_ai.md) | active | `routers/ocr_ai.py` |
+| OCR AI (Cloud) | [spec.md](../platform/document-intake/spec.md) | active | `routers/ocr_ai.py` |
 | OCR Local (CPU) | [ocr_local.md](ocr_local.md) | active | `routers/ocr_local.py`, `tasks.py` |
-| Cases data flow V2 | [cases_dataflow_v2.md](cases_dataflow_v2.md) | PLANNED (12/05/2026) | `routers/cases.py`, `models.py`, `frontend/templates/cases/form.html`, `frontend/static/ReactFlowApp.jsx`, `frontend/static/case_state.js` (mới) |
-| Diagram Visual V2 | [diagram_visual_v2.md](diagram_visual_v2.md) | PLANNED (26/06/2026) | `frontend/static/ReactFlowApp.jsx`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html` |
-| Word Template V2 | [word_template_v2.md](word_template_v2.md) | active | `services/word_engine.py`, `routers/cases.py`, `word_templates/placeholder_mapping.md` |
+| Cases data flow V2 | [case-state.md](../domains/inheritance/technical/case-state.md) | PLANNED (12/05/2026) | `routers/cases.py`, `models.py`, `frontend/templates/cases/form.html`, `frontend/static/ReactFlowApp.jsx`, `frontend/static/case_state.js` (mới) |
+| Quy tắc nghiệp vụ thừa kế | [spec.md](../domains/inheritance/spec.md) | DRAFT REVIEW (22/07/2026) | Source of truth nghiệp vụ |
+| Inheritance case catalog | [case-catalog.md](../domains/inheritance/research/case-catalog.md) | DRAFT REVIEW (22/07/2026) | Fixture và acceptance |
+| Diagram UI/UX | [ux.md](../domains/inheritance/ux.md) | DRAFT REVIEW (22/07/2026) | `frontend/static/ReactFlowApp.jsx`, `frontend/static/diagram_edges.js`, `frontend/templates/cases/form.html` |
+| Inheritance Engine V2 implementation | [inheritance-engine.md](../domains/inheritance/technical/inheritance-engine.md) | DRAFT REVIEW (22/07/2026) | Backend engine, React adapter, persistence, Word và test |
+| Word Template V2 | [technical.md](../platform/document-generation/technical.md) | active | `services/word_engine.py`, `routers/cases.py`, `word_templates/placeholder_mapping.md` |
+| Fast text audit | [technical.md](../platform/fast-text-audit/technical.md) | active | `tools/run_fast_audit.py`, `services/fast_audit/` |
+| Word Export UX | [word-export.md](../domains/inheritance/word-export.md) | SPEC | `services/word_engine.py`, `routers/cases.py`, `word_templates` |
 
 ---
 

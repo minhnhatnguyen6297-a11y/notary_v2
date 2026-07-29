@@ -1,5 +1,9 @@
 # Quy tắc OCR Tài sản (Sổ đỏ / Sổ hồng)
 
+Status: active
+Owner: platform/document-intake
+Source of truth: property OCR field extraction and front/back merge rules
+
 > File này mô tả logic regex + scoring hiện tại trong `routers/ocr_ai.py`.
 > Khi muốn thay đổi rule, sửa file này trước rồi giao Codex implement theo.
 > Cập nhật: 22/04/2026
@@ -46,11 +50,11 @@ Tài liệu được nhận là sổ đỏ nếu **một trong** các điều ki
 - Có label "to ban do" hoặc "to so"
 - Parse được serial theo pattern `[A-Z]{2}\d{6,8}`
 
-**Classifier fallback (Codex thêm — cần xem xét):**
+**Open question — classifier fallback (non-normative):**
 Nếu không nhận được từ tiêu đề nhưng parse được ≥ 2 trong 8 strong fields
 (`so_serial`, `so_vao_so`, `so_thua_dat`, `so_to_ban_do`, `dien_tich`, `dia_chi`, `loai_dat`, `chu_su_dung`)
 → vẫn nhận là sổ đỏ.
-*Chưa có negative test — cần xác nhận có muốn giữ không.*
+*This fallback is not an approved contract. Verify current code and add negative tests in a separately scoped behavior task before retaining or changing it. The heuristic above is recorded as context only.*
 
 ---
 

@@ -7,8 +7,9 @@ Read this before changing:
 - person CCCD OCR modal
 - Stage / Pool / Diagram interaction
 - preview/export behavior that depends on case state
+- Word export UX and flow: `word-export.md`
 
-History and resolved bug notes live in `docs/changelog/case_flow_history.md`. Active issues live in `docs/issues/case_flow_open_issues.md`.
+Resolved bug notes are historical. Active issues live in `plan.md`.
 
 ## 1. Core principles
 
@@ -103,6 +104,8 @@ Diagram stores:
 - person assignments to nodes/slots
 - relationships
 - branch state
+- asset-owner assignments
+- receiver assignments for the current asset
 - engine output
 - render metadata
 
@@ -111,8 +114,26 @@ Rules:
 - Diagram save must not alter Stage person fields.
 - Removing/moving cards in Diagram must not delete people from Stage.
 - If Stage deletes a person and user clicks `Cập nhật`, Diagram must cascade/prune references to that person.
-- Diagram inheritance/business rules live in `docs/plans/inheritance_diagram.md`.
-- Diagram visual/edge rules live in `docs/plans/diagram_visual_v2.md`.
+- Diagram inheritance/business rules live in `spec.md`.
+- Diagram UI/UX and edge rules live in `ux.md`.
+- Word export UX/flow lives in `word-export.md`.
+
+### Asset decision rule
+
+- Diagram only lets the user mark who is an original landowner and who receives the current asset.
+- The two card buttons are `Chủ đất` and `Nhận`; there is no `★` or `Từ chối` button.
+- A person node must not have a separate unset/refusal decision.
+- The non-receiver list is derived as:
+
+```text
+Người không nhận = Tất cả người trên Diagram - Chủ đất - Người nhận
+```
+
+- `Người không nhận` is a product label, not legal refusal of inheritance.
+- `Người từ chối` may only come from separately confirmed legal data; Diagram does not infer it from `Nhận`.
+- Existing refusal fields may be read only for legacy migration; they are not a source of truth after the new rule is implemented.
+- Stage remains the source of truth for person data. Marking a landowner or receiver changes Diagram state only.
+- Receiver selection is scoped to the current asset. Multi-asset assignment will reuse the same rule separately for each asset.
 
 ## 7. Delete / clear permissions
 
@@ -136,7 +157,7 @@ Before editing this flow, answer:
 - What exact data may this action create/update/delete?
 - Is Stage still the UI source of truth?
 - If deleting/moving in Diagram, should the person return to Pool or disappear because Stage no longer contains them?
-- If touching inheritance engine, did you read `docs/plans/inheritance_diagram.md`?
-- If touching visual edges/connectors, did you read `docs/plans/diagram_visual_v2.md`?
+- If touching inheritance engine, did you read `spec.md`?
+- If touching Diagram UI/UX or connectors, did you read `ux.md`?
 
 If unclear, stop and ask user before changing business logic.

@@ -2,8 +2,8 @@
 
 Archive of resolved/superseded notes that used to live in `docs/case_user_flow_spec.md`.
 
-Current spec: `docs/specs/case_user_flow.md`.
-Active issues: `docs/issues/case_flow_open_issues.md`.
+Current spec: `docs/domains/inheritance/workflow.md`.
+Active issues: `docs/domains/inheritance/plan.md`.
 
 ## Resolved OCR modal notes
 
@@ -42,7 +42,7 @@ Active issues: `docs/issues/case_flow_open_issues.md`.
 - New case uses `Tạo hồ sơ`; `Lưu sơ đồ` must not become a hidden full-submit fallback.
 - Remove/move in Diagram prunes dependent branches and returns dependent people to Pool only if they still exist in Stage.
 - Visual edge/arrow work is deferred to `docs/plans/diagram_visual_v2.md`.
-- Detailed partial persistence risks live in `docs/issues/case_flow_open_issues.md` until resolved.
+- Detailed partial persistence risks live in `docs/domains/inheritance/plan.md` until resolved.
 
 ## Note
 

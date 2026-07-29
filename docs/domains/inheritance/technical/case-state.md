@@ -1,8 +1,10 @@
-# Cases dataflow V2 — Single SSoT refactor
+# Inheritance case state — Technical contract
 
-> **Trạng thái:** APPROVED, sẵn sàng commit 1.
-> **Tier:** MAJOR
-> **Cập nhật:** 18/05/2026
+Status: current migration contract
+
+This is the current case-state migration contract. Root-cause history is explanatory and non-normative. Persisted `case_state_json.diagram.engineState` is a snapshot container and does not replace the `engineInput`/`engineResult` contract.
+
+Business behavior is governed by `../spec.md` and `../workflow.md`.
 
 ---
 
@@ -43,18 +45,16 @@ User báo 3 bug:
 
 | # | Quyết định |
 |---|---|
-| 1 | **1 PR atomic, nhiều commit checkpoint.** Không tách 2 bước hybrid (vừa case_state_json vừa workflow flags chạy production). PR bàn giao là 1 merge atomic chứa toàn bộ; commit lịch sử bên trong PR có thể nhiều (mỗi commit có checkpoint test riêng) để dễ review/bisect. |
 | 2 | **Cột mới `case_state_json` trong InheritanceCase.** KHÔNG reuse `engine_state_json` (cột cũ giữ cho diagram engine + legacy fallback). |
 | 3 | **Xóa `derivePoolVisibility`, `__CUSTOMER_WORKFLOW__`, `__POOL_DATA_MAP__`.** Pool computed từ stage − diagram. |
 | 4 | **Giữ `__CUSTOMER_REGISTRY__`** chỉ làm cache lookup danh bạ (read-only). Không quyết định person nào thuộc case. |
 | 5 | **Legacy migration bắt buộc.** `GET /cases/{id}/edit` nếu `case_state_json IS NULL` → derive `{stage, diagram}` từ `engine_state_json` + `participants`. Không write DB ở GET. POST đầu tiên lưu cột mới (lazy migrate). |
 | 6 | **Quick-update update __CASE_STATE__.stage ngay sau success** → re-render Stage/Pool/Diagram labels. |
 | 7 | **Invariant test** kiểm `diagramIds ⊆ stageIds` và `pool = stage - diagram`. Chạy sau mỗi action (dev mode). Node test riêng. |
-| 8 | **Estimate không cam kết theo số dòng.** Plan có checkpoint test rõ ràng sau mỗi commit. Mục tiêu xóa nhiều hơn thêm, không vá flag. |
 | 9 | **InheritanceParticipant table giữ + derive trong POST.** Không drop phase này. `case_state_json` là SSoT nhưng POST vẫn sinh lại participant rows để tương thích Word export/preview legacy. |
 | 10 | **Stage record fields (10 fields):** `id, ho_ten, gioi_tinh, ngay_sinh, ngay_chet, so_giay_to, ngay_cap, noi_cap, dia_chi, place_of_origin`. Nếu frontend code dùng tên `issue_date/issue_place`, helper `normalizeStagePerson()` phải map 2 chiều với `ngay_cap/noi_cap`. |
 | 11 | **Engine output (allocations/breakdowns/warnings):** LƯU snapshot trong `case_state_json.diagram.engineState` (audit + Word export at submit time). KHI mở edit, React/engine recompute từ stage + assignments; nếu khác snapshot cũ → update khi user save tiếp. |
-| 12 | **`frontend/static/diagram_state.js`:** giữ nếu React còn cần store tạm (commit ref). Chỉ xóa khi `grep -r "diagram_state" frontend/ tests/` không còn usage sau commit 5. Quyết định cuối ở commit 7. |
+| 12 | **`frontend/static/diagram_state.js`:** chỉ giữ khi còn runtime reference; chỉ xóa sau khi reference scan xác nhận không còn consumer. |
 
 ---
 
@@ -398,95 +398,7 @@ window.__CASE_STATE_API__ = {
 
 ---
 
-## 7. Implementation — chia commit nhỏ (bàn giao 1 PR)
-
-### Commit 1 — Backend schema + migration (~150 dòng)
-- `models.py`: add cột `case_state_json TEXT NULL`
-- `database.py`: thêm `migrate_inheritance_cases_v2()`, gọi trong startup
-- `main.py`: gọi migration (nếu chưa được include trong existing migration)
-- Test: `python -m py_compile models.py database.py`, `python -m uvicorn main:app --port 8000` không crash
-- **Checkpoint:** mở SQLite DB, verify cột mới tồn tại + null cho mọi row cũ
-
-### Commit 2 — Backend parser + derive_from_legacy + GET (~250 dòng)
-- `routers/cases.py`:
-  - `parse_case_state(raw)` + `CaseStateValidationError`
-  - `derive_from_legacy(case, db)`
-  - `_build_assignments_from_nodes(nodes)`
-  - Sửa `GET /{cid}/edit`: dùng `derive_from_legacy` nếu null
-- `tests/test_case_state_parser.py`:
-  - Valid payload
-  - Duplicate stage id → error
-  - Invalid assignment ref → error
-  - `derive_from_legacy` với hồ sơ cũ minh họa
-- **Checkpoint:** chạy pytest, mở 1 hồ sơ cũ ở `/cases/{id}/edit`, xem source HTML có `case_state_json` đầy đủ stage list
-
-### Commit 3 — Frontend case_state.js + invariant test (~200 dòng)
-- `frontend/static/case_state.js` (mới): toàn bộ API
-- `tests/case_state.test.mjs`: test getPool, addToStage, assignToSlot, removeFromStage cảnh báo, invariant detection
-- **Checkpoint:** `node --test tests/case_state.test.mjs` pass
-
-### Commit 4 — Frontend hydrate + render stage/pool (~400 dòng, gồm XÓA nhiều)
-- `form.html`:
-  - Thêm `<script src="/static/case_state.js">` trước inline JS
-  - Bootstrap: `__CASE_STATE_API__.hydrate(JSON.parse('{{ case_state_json | safe }}'))`
-  - XÓA `__CUSTOMER_WORKFLOW__`, `__POOL_DATA_MAP__`, `derivePoolVisibility`, `setCustomerWorkflowState`, `commitCustomerToPool`, `updateCustomerWorkflow`
-  - Render stage area từ `__CASE_STATE_API__.subscribe(render)`
-  - Render pool area từ `__CASE_STATE_API__.getPool()`
-  - OCR/import/inline-create handlers → `addToStage()`
-- **Checkpoint:** mở `/cases/create`, thêm 3 người qua inline-create → stage hiện 3, pool hiện 3 (computed)
-
-### Commit 5 — React integration (~200 dòng)
-- `ReactFlowApp.jsx`:
-  - Bỏ `__DIAGRAM_API__` (giữ tối thiểu nếu cần)
-  - Props: `onAssign(personId, slotId)`, `onUnassign(slotId)`, `assignments` từ state
-  - Engine compute từ assignments
-- `form.html`: mount React với callbacks gọi `__CASE_STATE_API__`
-- **Checkpoint:** drag person từ pool → diagram, pool tự update; remove diagram → person về pool
-
-### Commit 6 — Save handler + atomic submit (~150 dòng)
-- `form.html` submit handler:
-  - Snapshot `window.__CASE_STATE__`
-  - Set hidden `case_state_json` = JSON.stringify
-  - Native form submit (không fetch)
-  - KHÔNG clear stage/localStorage trước submit
-- `routers/cases.py` `POST /{cid}/edit`:
-  - Nhận `case_state_json`
-  - Parse + validate
-  - Lưu raw vào cột mới
-  - Derive `InheritanceParticipant` rows cho Word export legacy
-  - Validation fail → render template với `validation_errors` + echo `case_state_json`
-- `cases/form.html` template: thêm `<div id="validation-errors">{{ errors }}</div>`
-- **Checkpoint:**
-  - 3 case bug user báo: drop z1 → save → reload, z1 còn nguyên
-  - Save với pool có cards → pool còn nguyên sau reload
-  - Stage cards không biến mất
-
-### Commit 7 — Cleanup + verify (~50 dòng)
-- Xóa `frontend/static/diagram_state.js` nếu không còn ai dùng
-- Xóa hidden `diagram_payload`, `engine_state_json` form input nếu không backward compat needed
-- Verify: `.\verify.bat`
-- Run manual checklist 5 case
-- Update `AGENTS.md` history mục `cases > diagram data flow`
-
----
-
-## 8. Checkpoint test (sau mỗi commit)
-
-| Commit | Test |
-|---|---|
-| 1 | `py_compile`, uvicorn start không crash, SQLite có cột mới |
-| 2 | `pytest tests/test_case_state_parser.py`, GET edit trả HTML có case_state_json |
-| 3 | `node --test tests/case_state.test.mjs` pass |
-| 4 | Inline-create 3 người → stage 3, pool 3 (computed); thêm 1 → 4/4 |
-| 5 | Drag → pool 3/diagram 1; remove → pool 4/diagram 0 |
-| 6 | Drop z1 → save → reload → z1 còn (3 bug case) |
-| 7 | `.\verify.bat` PASS; manual 5 case pass |
-
-**Nếu checkpoint fail:** dừng, không tiếp commit sau, fix tại chỗ.
-
----
-
-## 9. Risk + rollback
+## 7. Risk + rollback
 
 | Risk | Mitigation | Rollback |
 |---|---|---|
@@ -495,66 +407,3 @@ window.__CASE_STATE_API__ = {
 | React bridge bỏ DIAGRAM_API → diagram không render | Test commit 5 immediate | Revert commit 5 |
 | Submit format đổi → backend old code reject | Commit 6 yêu cầu commit 2 (parser) merged trước | Backend parser deploy trước frontend |
 | 1 PR atomic merge → deploy fail → cả PR rollback | Test trên staging trước production | `git revert <merge-commit>` |
-
----
-
-## 10. Migration tool (defer phase sau)
-
-Hồ sơ cũ trong DB sẽ lazy migrate khi user save lần đầu (commit 2 derive_from_legacy + commit 6 save mới). Không cần batch migration script ngay.
-
-Nếu cần batch sau (vd để clean old `engine_state_json`):
-```bash
-python tools/migrate_cases_to_v2.py --dry-run
-python tools/migrate_cases_to_v2.py --commit
-```
-Tool này KHÔNG trong scope phase này. Backlog.
-
----
-
-## 11. Defer (sau phase này)
-
-- Fetch async + JSON error contract
-- Banner restore localStorage draft mới hơn DB
-- Versioned localStorage migration đầy đủ
-- Engine refactor đa-`*` (đồng chủ sở hữu)
-- Renderer bug gom sibling cùng nhóm (Z bị vẽ cạnh X thay vì Y)
-- UI label động ("Con của Z")
-- Live preview parser align với V2
-- Batch migration tool v1 → v2
-- Cleanup orphan customer (tạo qua inline-create nhưng case không save)
-- Bỏ hoàn toàn `engine_state_json` cột cũ (sau khi 100% hồ sơ migrated)
-
----
-
-## 12. Post-task report template
-
-Sau khi implement xong, agent print:
-
-```text
-BAO CAO HOAN THANH:
-- File da sua: <list>
-- File da them: <list>
-- File da xoa: <list>
-- Ham/symbol da xoa: __CUSTOMER_WORKFLOW__, __POOL_DATA_MAP__, derivePoolVisibility, setCustomerWorkflowState, commitCustomerToPool, updateCustomerWorkflow, onFamilyTreeUpdate (phần reset)
-- Ham/symbol moi them: __CASE_STATE__, __CASE_STATE_API__, parse_case_state, derive_from_legacy, CaseStateValidationError
-- verify: .\verify.bat <PASS/FAIL>
-- Scope match list ban dau: <YES/NO + giải thích nếu cần SCOPE BREAK>
-- Ghi chu rui ro/test con lai: <list bug pattern còn nghi ngờ, test chưa cover>
-```
-
----
-
-## 13. Câu hỏi đã đóng
-
-- ✅ Cột mới hay reuse? → Cột mới `case_state_json`
-- ✅ Tách 2 bước hay 1 PR atomic? → 1 PR atomic, nhiều commit checkpoint
-- ✅ Migration ở GET hay batch tool? → Lazy migrate ở GET (derive_from_legacy)
-- ✅ Quick-update flow? → Success callback update `__CASE_STATE__.stage[i]`
-- ✅ Registry có giữ? → Có, làm cache lookup danh bạ
-- ✅ Estimate dòng? → Không cam kết, mục tiêu xóa nhiều hơn thêm
-- ✅ Invariant test? → Yes, `node --test` cho pure helpers
-- ✅ `InheritanceParticipant` table? → GIỮ + derive trong POST cho Word export compat
-- ✅ Stage record fields? → 10 fields (`id, ho_ten, gioi_tinh, ngay_sinh, ngay_chet, so_giay_to, ngay_cap, noi_cap, dia_chi, place_of_origin`) + helper map `issue_date/issue_place` ↔ `ngay_cap/noi_cap`
-- ✅ Engine output? → LƯU snapshot trong `case_state_json.diagram.engineState` (audit + Word export), recompute khi mở edit
-- ✅ `diagram_state.js`? → Giữ nếu commit 5 vẫn ref. Xóa ở commit 7 chỉ khi grep không còn usage.
-- ✅ Dev-mode check trong browser? → `window.__CASE_STATE_DEV__ === true` (không dùng `process.env`)

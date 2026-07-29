@@ -1,4 +1,8 @@
-# fast_text_audit - Kế hoạch triển khai
+# Fast text audit — Technical contract
+
+Status: active
+Owner: platform/fast-text-audit
+Source of truth: standalone fast text audit CLI contract
 
 Cập nhật: 04/07/2026
 
@@ -100,13 +104,6 @@ Cache ghi vào `<folder>\_audit_cache/`:
 - Word chính là `.docx`.
 - Thứ tự scan nhìn chung đúng.
 - V1 không xử lý logic pháp luật, chỉ audit text.
-
-## Hướng phát triển sau
-
-- Web UI mỏng bọc CLI.
-- Desktop app shell gọi CLI.
-- OCR vùng nếu page-level không đủ.
-- LLM fallback sau khi đã đo được tốc độ/lợi ích rõ ràng.
 
 ## Kiem thu
 
