@@ -19,8 +19,12 @@ tools/upload_lab/*.json
 tools/upload_lab/.ui_setup_state.json
 tools/upload_lab/nd_storage_state.json
 
-# Claude local config
-.claude/settings.local.json
+# Generated agent/tool state
+.claude/
+.hermes/
+.superpowers/
+.understand-anything/
+graphify-out/
 
 # Test data / fixtures (không phải source code)
 ocr test/
@@ -37,4 +41,3 @@ runtime/
 
 # Legacy accidental path after upload tool move
 tools/UPLOAD/
-.claude/worktrees/
