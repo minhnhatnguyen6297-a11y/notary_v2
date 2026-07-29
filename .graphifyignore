@@ -1,0 +1,19 @@
+# Generated analysis output
+graphify-out/
+.understand-anything/
+
+# Local/runtime state
+venv/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+logs/
+runtime/
+tmp/
+*.db
+
+# Vendored/minified browser bundles
+frontend/static/vendor/
+*.min.js
+*.min.css
