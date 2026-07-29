@@ -1,10 +1,10 @@
 # Inheritance case state — Technical contract
 
-Status: current migration contract
+Status: parked design reference; non-normative pending reconciliation with the V2 engine
 
-This is the current case-state migration contract. Root-cause history is explanatory and non-normative. Persisted `case_state_json.diagram.engineState` is a snapshot container and does not replace the `engineInput`/`engineResult` contract.
+This document contains the historical target design, including `case_state.js`. It must not direct implementation until reconciled with the V2 engine and explicitly approved. Root-cause history is explanatory and non-normative. Persisted `case_state_json.diagram.engineState` is a snapshot container and does not replace the `engineInput`/`engineResult` contract.
 
-Business behavior is governed by `../spec.md` and `../workflow.md`.
+Current observable UI behavior is governed by `../workflow.md`; `../spec.md` remains a draft requiring explicit user approval.
 
 ---
 
