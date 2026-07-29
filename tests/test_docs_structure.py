@@ -20,10 +20,23 @@ MODULE_READMES = (
     "docs/platform/fast-text-audit/README.md",
     "docs/architecture/README.md",
 )
+LEGACY_DOC_DIRS = (
+    "docs/plans",
+    "docs/specs",
+    "docs/issues",
+    "docs/changelog",
+    "docs/learning",
+    "docs/superpowers",
+    "docs/research",
+)
 
 def test_required_module_readmes_exist():
     missing = [path for path in MODULE_READMES if not (ROOT / path).is_file()]
     assert missing == []
+
+def test_legacy_document_buckets_are_gone():
+    remaining = [path for path in LEGACY_DOC_DIRS if (ROOT / path).exists()]
+    assert remaining == []
 
 def test_module_readmes_declare_routing_metadata():
     for path in MODULE_READMES:
