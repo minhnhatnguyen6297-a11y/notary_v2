@@ -1,5 +1,4 @@
-// Pure helpers for the inheritance diagram visual edges.
-// Kinship edges help read family structure; flow edges come from engine trace.
+// Pure helpers for the inheritance diagram kinship edges.
 (function initDiagramEdges(global) {
   "use strict";
 
@@ -149,37 +148,10 @@
     return { kinshipEdges: edges, ambiguousSiblingIds };
   }
 
-  function buildFlowEdges(nodes, engineState) {
-    const index = createIndex(nodes || []);
-    const edges = [];
-    const seen = new Set();
-    ((engineState && engineState.trace) || []).forEach((entry) => {
-      if (!entry || entry.type !== "flow") return;
-      const sourceNode = index.nodeByPersonId.get(idOf(entry.from));
-      const targetNode = index.nodeByPersonId.get(idOf(entry.to));
-      if (!sourceNode || !targetNode || sourceNode.id === targetNode.id) return;
-      const key = `flow:${sourceNode.id}->${targetNode.id}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      edges.push({
-        id: key,
-        kind: "flow",
-        sourceNodeId: sourceNode.id,
-        targetNodeId: targetNode.id,
-        fromPersonId: idOf(entry.from),
-        toPersonId: idOf(entry.to),
-        fraction: entry.fraction || "0",
-        eventDateKey: entry.eventDateKey || "",
-      });
-    });
-    return edges;
-  }
-
-  function buildDiagramEdges(nodes, engineState) {
+  function buildDiagramEdges(nodes) {
     const kinship = buildKinshipEdges(nodes || []);
     return {
       kinshipEdges: kinship.kinshipEdges,
-      flowEdges: buildFlowEdges(nodes || [], engineState || {}),
       ambiguousSiblingIds: kinship.ambiguousSiblingIds,
     };
   }
@@ -190,7 +162,6 @@
     FAMILY_OWNER,
     FAMILY_AMBIGUOUS,
     buildDiagramEdges,
-    buildFlowEdges,
     buildKinshipEdges,
     getKinshipFamilyKey,
   };

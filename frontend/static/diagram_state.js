@@ -14,6 +14,9 @@
       warnings: Array.isArray(state.warnings) ? state.warnings : [],
       shareMode: state.shareMode || "auto",
       engineState: state.engineState || null,
+      engineInput: state.engineInput || null,
+      engineResult: state.engineResult || null,
+      calculationStatus: state.calculationStatus || "calculating",
       updatedAt: state.updatedAt || "",
     };
   }

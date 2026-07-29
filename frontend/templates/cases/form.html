@@ -1233,38 +1233,6 @@ endif %}
     }
 
     /* ── SORTABLE DRAG ── */
-    .drag-ghost {
-
-      opacity: .35;
-
-      background: #dbeafe !important;
-
-      border: 2px dashed #2563eb !important;
-    }
-
-    .drag-chosen {
-
-      cursor: grabbing !important;
-
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .18) !important;
-    }
-
-    .sortable-fallback {
-
-      opacity: .8;
-    }
-
-    .person-row.drag-ghost {
-
-      background: #dbeafe !important;
-    }
-
-    /* ── TIER 4 TRANSITION ── */
-    #tier4-section {
-
-      transition: opacity .3s ease;
-    }
-
     /* ── TOAST ── */
     .dnd-toast {
 
@@ -1352,15 +1320,11 @@ endif %}
         linear-gradient(180deg, #fffdf8 0%, #fff 100%);
     }
 
-    #legacy-tree-wrap {
-
-      display: none;
-    }
   </style>
 
   <div class="case-layout-wrap" style="display: flex; flex-direction: column; gap: 8px; padding: 0 8px 10px 8px;">
 
-    <!--  TẦNG 1: Tài sản + Ngưi tham gia  -->
+    <!--  TẦNG 1: Tài sản + Người tham gia  -->
     <div class="d-flex gap-2 flex-shrink-0" style="border-bottom: 2px solid #e5e7eb; padding-bottom: 8px;">
 
 
@@ -1379,7 +1343,7 @@ endif %}
       <button type="button" class="btn btn-sm btn-outline-warning fw-bold" data-bs-toggle="modal"
 
 
-        data-bs-target="#propertyOcrModal" title="OCR tài sản tự động đin form">
+        data-bs-target="#propertyOcrModal" title="OCR tài sản tự động điền form">
 
 
         <i class="bi bi-camera me-1"></i>OCR Tài sản
@@ -1421,10 +1385,10 @@ endif %}
 
 
 
-        <div class="col-3"><input type="text" class="form-control" id="pr-so-to" placeholder="Số t bản đồ"></div>
+        <div class="col-3"><input type="text" class="form-control" id="pr-so-to" placeholder="Số tờ bản đồ"></div>
 
 
-        <div class="col-12"><input type="text" class="form-control" id="pr-dia-chi" placeholder="ịa chỉ đất *">
+        <div class="col-12"><input type="text" class="form-control" id="pr-dia-chi" placeholder="Địa chỉ đất *">
 
 
         </div>
@@ -1443,7 +1407,7 @@ endif %}
 
 
 
-      <option value="Giấy chứng nhận quyn sử dụng đất">GCN quyn sử dụng đất</option>
+      <option value="Giấy chứng nhận quyền sử dụng đất">GCN quyền sử dụng đất</option>
 
 
 
@@ -1451,7 +1415,7 @@ endif %}
 
 
 
-        value="Giấy chứng nhận quyn sử dụng đất, quyn sở hữu nhà ở và tài sản khác gắn lin với đất">GCN
+        value="Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất">GCN
 
 
 
@@ -1459,11 +1423,11 @@ endif %}
 
 
 
-      <option value="Giấy chứng nhận quyn sử dụng đất, quyn sở hữu tài sản gắn lin với đất">GCN QSD +
+      <option value="Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất">GCN QSD +
 
 
 
-        tài sản gắn lin</option>
+        tài sản gắn liền</option>
 
 
           </select>
@@ -1530,7 +1494,7 @@ endif %}
 
 
 
-          - Loại đất - Thi hạn</div>
+          - Loại đất - Thời hạn</div>
 
 
 
@@ -1571,7 +1535,7 @@ endif %}
 
 
 
-      <th>Thi hạn</th>
+      <th>Thời hạn</th>
 
 
 
@@ -1711,7 +1675,7 @@ endif %}
 
 
 
-        <label class="form-label mb-1" style="font-size:12px;">Danh sách tài sản hồ sơ (chn nhiu)</label>
+        <label class="form-label mb-1" style="font-size:12px;">Danh sách tài sản hồ sơ (chọn nhiều)</label>
 
 
 
@@ -1776,7 +1740,7 @@ endif %}
       </div>
 
 
-      <!-- Ngưi tham gia (~64%) -->
+      <!-- Người tham gia (~64%) -->
 
       <div style="flex: 1; min-width: 0;">
 
@@ -1785,7 +1749,7 @@ endif %}
           <div class="card-header compact-title d-flex justify-content-between align-items-center">
 
 
-      <span><i class="bi bi-person-plus me-1"></i>Ngưi tham gia hồ sơ thừa kế</span>
+      <span><i class="bi bi-person-plus me-1"></i>Người tham gia hồ sơ thừa kế</span>
 
 
       <div class="d-flex gap-2 align-items-center">
@@ -1803,7 +1767,7 @@ endif %}
         <button type="button" class="btn btn-warning mini-btn fw-bold" data-bs-toggle="modal"
 
 
-          data-bs-target="#ocrModal" title="Tải ảnh CCCD/giấy t lên để tự động đin thông tin"><i
+          data-bs-target="#ocrModal" title="Tải ảnh CCCD/giấy tờ lên để tự động điền thông tin"><i
 
 
 
@@ -1838,7 +1802,7 @@ endif %}
         <div id="ocr-staging-area" style="display:none;"></div>
 
 
-        <div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm ngưi vào hồ sơ.</div>
+        <div class="inline-empty">Nhấn <strong>+ Thêm</strong> để thêm người vào hồ sơ.</div>
 
 
       </div>
@@ -1852,7 +1816,7 @@ endif %}
         <button type="button" class="btn btn-sm btn-success" id="btn-save-participants" disabled>
 
 
-          <i class="bi bi-check2-circle me-1"></i>Cap nhat
+          <i class="bi bi-check2-circle me-1"></i>Cập nhật
 
         </button>
 
@@ -1881,7 +1845,7 @@ endif %}
 
         <div class="pool-panel" style="min-height: 60vh;">
 
-          <div class="pool-head">Danh sách ngưi kéo-thả</div>
+          <div class="pool-head">Danh sách người kéo-thả</div>
 
           <div class="px-2 py-2 border-bottom bg-light">
 
@@ -1889,7 +1853,7 @@ endif %}
       <input type="text" id="pool-search-input" class="form-control form-control-sm"
 
 
-        placeholder="Tìm ngưi trong hệ thống..." autocomplete="off">
+        placeholder="Tìm người trong hệ thống..." autocomplete="off">
 
 
       <div class="position-relative">
@@ -1969,7 +1933,7 @@ endif %}
         <button type="submit" class="btn btn-sm btn-gold fw-bold px-3" id="{{ 'btn-submit-case' if obj else 'btn-create-case' }}" data-action="{{ 'save-diagram' if obj else 'create-case' }}">
 
 
-          <i class="bi bi-check-lg me-1"></i>{{ 'Luu so do' if obj else 'Tao ho so' }}
+          <i class="bi bi-check-lg me-1"></i>{{ 'Lưu sơ đồ' if obj else 'Tạo hồ sơ' }}
         </button>
 
 
@@ -2000,329 +1964,6 @@ endif %}
       <div id="react-flow-root"></div>
 
 
-      <div id="legacy-tree-wrap">
-
-
-      <div class="tree-wrap" style="overflow-y: auto; min-height: 55vh;">
-
-
-        <div class="tree-tier">
-
-
-          <div class="tier-title">Tầng 1 - Cha mẹ</div>
-
-
-          <div class="tier-content">
-
-
-
-      <div class="tree-group">
-
-
-
-        <div>
-
-
-
-          <div class="label">Cha mẹ chủ đất</div>
-
-
-
-          <div class="d-flex gap-2">
-
-
-
-
-      <div class="slot" data-slot="owner_father" data-role="Cha"><span class="placeholder">Bố chủ
-
-
-
-
-          đất</span></div>
-
-
-
-
-      <div class="slot" data-slot="owner_mother" data-role="Mẹ"><span class="placeholder">Mẹ chủ
-
-
-
-
-          đất</span></div>
-
-
-
-          </div>
-
-
-
-
-
-        </div>
-
-
-
-
-
-      </div>
-
-
-
-
-
-      <div class="tree-group">
-
-
-
-        <div>
-
-
-
-          <div class="label">Cha mẹ vợ/chồng</div>
-
-
-
-          <div class="d-flex gap-2">
-
-
-
-
-      <div class="slot" data-slot="spouse_father" data-role="Cha_vc"><span class="placeholder">Bố
-
-
-
-
-          vợ/chồng</span></div>
-
-
-
-
-      <div class="slot" data-slot="spouse_mother" data-role="Me_vc"><span class="placeholder">Mẹ
-
-
-
-
-          vợ/chồng</span></div>
-
-
-
-          </div>
-
-
-
-
-
-        </div>
-
-
-
-
-
-      </div>
-
-
-
-
-          </div>
-
-
-
-
-        </div>
-
-
-
-        <div class="tree-tier">
-
-
-          <div class="tier-title">Tầng 2 - Chủ đất và vợ/chồng</div>
-
-
-          <div class="marriage-wrap">
-
-
-
-      <label class="form-label mb-1" style="font-size:12px; font-weight:600">Ngày kết hôn</label>
-
-
-
-      <input type="text" id="marriage-date" class="form-control form-control-sm"
-
-
-
-        placeholder="yyyy hoặc dd/mm/yyyy">
-
-
-          </div>
-
-
-
-
-          <div class="tier-content">
-
-
-
-      <div class="tree-group">
-
-
-
-        <div>
-
-
-
-          <div class="label">Chủ đất</div>
-
-
-
-          <div class="slot" data-slot="owner" data-role="Owner"><span class="placeholder">Kéo chủ đất</span>
-
-
-
-          </div>
-
-
-
-
-
-        </div>
-
-
-
-
-
-      </div>
-
-
-
-
-
-      <div class="family-link">↔</div>
-
-
-
-      <div class="tree-group">
-
-
-
-        <div>
-
-
-
-          <div class="label">Vợ/Chồng</div>
-
-
-
-          <div class="slot" data-slot="spouse" data-role="Vợ/Chồng"><span class="placeholder">Kéo
-
-
-
-
-        vợ/chồng</span></div>
-
-
-
-        </div>
-
-
-
-
-
-      </div>
-
-
-
-
-          </div>
-
-
-
-
-        </div>
-
-
-
-        <div class="tree-tier">
-
-
-          <div class="tier-title">Tầng 3 - Con đẻ</div>
-
-
-          <div class="tier-content">
-
-
-
-      <div class="child-list" id="children-zone">
-
-
-
-        <div class="child-placeholder">Thả con đẻ vào đây</div>
-
-
-
-      </div>
-
-
-
-
-          </div>
-
-
-
-
-        </div>
-
-
-
-        <div class="tree-tier" id="tier4-section" style="display:none">
-
-
-          <div class="tier-title">Tầng 4 - Hàng thừa kế tiếp theo <small
-
-
-
-        style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(hiển thị khi có con
-
-
-
-        đã mất)</small></div>
-
-
-          <div class="tier-content">
-
-
-
-      <div class="grand-list" id="grandchildren-zone">
-
-
-
-        <div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>
-
-
-
-      </div>
-
-
-
-
-          </div>
-
-
-
-
-        </div>
-
-
-
-
-      </div>
-
-
-
-
-      </div>
-
-
-
           </div>
 
         </div>
@@ -2336,7 +1977,7 @@ endif %}
     <div id="participants-hidden"></div>
   </div>
 
-  <!--  Modal OCR Ảnh giấy t  -->
+  <!--  Modal OCR Ảnh giấy tờ  -->
   <div class="modal fade" id="ocrModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
 
@@ -2345,7 +1986,7 @@ endif %}
 
         <div class="modal-header py-2" style="background:linear-gradient(135deg,#1e3a5f,#2563eb);color:#fff;">
 
-          <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Nhập dữ liệu từ ảnh giấy t</h5>
+          <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Nhập dữ liệu từ ảnh giấy tờ</h5>
 
           <div class="d-flex align-items-center gap-3 ms-auto me-3">
 
@@ -2406,7 +2047,7 @@ endif %}
         <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Kéo thả hoặc nhấn để chn</div>
 
 
-        <div style="font-size:11px;color:#64748b;">CCCD, sổ đ, giấy kết hôn...<br>Nhiu ảnh cùng lúc, thứ tự bất
+        <div style="font-size:11px;color:#64748b;">CCCD, sổ đỏ, giấy kết hôn...<br>Nhiều ảnh cùng lúc, thứ tự bất
 
 
           kỳ</div>
@@ -2468,7 +2109,7 @@ endif %}
       <div style="font-size:10px;color:#94a3b8;border-top:1px solid #e5e7eb;padding-top:8px;">
 
 
-        💡 CCCD có QR → miễn phí. Không có QR: Local OCR hoặc AI OCR tùy nút bạn chn.
+        💡 CCCD có QR → miễn phí. Không có QR: Local OCR hoặc AI OCR tùy nút bạn chọn.
 
 
       </div>
@@ -2520,7 +2161,7 @@ endif %}
           <div class="d-flex gap-2">
 
 
-      <button type="button" class="btn btn-sm btn-success" id="ocr-btn-save-results"><i class="bi bi-check2-circle me-1"></i>Luu</button>
+      <button type="button" class="btn btn-sm btn-success" id="ocr-btn-save-results"><i class="bi bi-check2-circle me-1"></i>Lưu</button>
 
           </div>
 
@@ -2582,10 +2223,10 @@ endif %}
         <div style="font-size:28px;margin-bottom:6px;">📄</div>
 
 
-        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Tải ảnh sổ đ/sổ hồng</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Tải ảnh sổ đỏ/sổ hồng</div>
 
 
-        <div style="font-size:11px;color:#64748b;">Tải nhiu ảnh, chn 1 mặt trước + 1 mặt sau bằng radio</div>
+        <div style="font-size:11px;color:#64748b;">Tải nhiều ảnh, chọn 1 mặt trước + 1 mặt sau bằng radio</div>
 
 
       </div>
@@ -2685,7 +2326,7 @@ endif %}
           <h5 class="modal-title" id="importExcelModalLabel"><i class="bi bi-file-earmark-spreadsheet me-2"
 
 
-        style="color:var(--gold)"></i>Import danh sách ngưi từ Excel</h5>
+        style="color:var(--gold)"></i>Import danh sách người từ Excel</h5>
 
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
 
@@ -2698,7 +2339,7 @@ endif %}
           <div class="mb-3">
 
 
-      <p class="text-muted small mb-2">Chn file .xlsx theo mẫu. Ngưi trùng số giấy t sẽ bị b qua.</p>
+      <p class="text-muted small mb-2">Chọn file .xlsx theo mẫu. Người trùng số giấy tờ sẽ bị bỏ qua.</p>
 
 
       <div class="d-flex gap-2 align-items-center">
@@ -2763,7 +2404,7 @@ endif %}
 
       const fileInput = document.getElementById('excel-file-input');
 
-      if (!fileInput.files.length) { alert('Vui lòng chn file Excel.'); return; }
+      if (!fileInput.files.length) { alert('Vui lòng chọn file Excel.'); return; }
 
       const fd = new FormData();
 
@@ -2809,7 +2450,7 @@ endif %}
 
           let html2 = `<div class="alert ${+nErr > 0 ? 'alert-warning' : 'alert-success'}">
 
-        <strong>Xong!</strong> ã thêm: <b>${nAdded}</b> ngưi &nbsp;|&nbsp; B qua (trùng): <b>${nSkip}</b> &nbsp;|&nbsp; Lỗi: <b>${nErr}</b> &nbsp;|&nbsp; Tổng: <b>${nTotal}</b>
+        <strong>Xong!</strong> Đã thêm: <b>${nAdded}</b> người &nbsp;|&nbsp; Bỏ qua (trùng): <b>${nSkip}</b> &nbsp;|&nbsp; Lỗi: <b>${nErr}</b> &nbsp;|&nbsp; Tổng: <b>${nTotal}</b>
 
       </div>`;
 
@@ -2908,7 +2549,7 @@ endif %}
     }
   </script>
 
-  <!-- 
+  <!--
      Modal Quản lý mẫu Word
  -->
   <div class="modal fade" id="manageTemplatesModal" tabindex="-1" aria-hidden="true">
@@ -3136,7 +2777,7 @@ endif %}
         const res = await fetch(`/cases/templates/api/${btn.dataset.id}/activate`, { method: 'POST' }).then(r => r.json());
 
 
-        if (res.ok) { showTplMsg('success', 'ã đặt mẫu mặc định.'); loadTplList(); }
+        if (res.ok) { showTplMsg('success', 'Đã đặt mẫu mặc định.'); loadTplList(); }
 
 
         else showTplMsg('danger', res.err || 'Lỗi');
@@ -3221,7 +2862,7 @@ endif %}
 
         if (!ten) { showTplMsg('warning', 'Vui lòng nhập tên mẫu.'); return; }
 
-        if (!file) { showTplMsg('warning', 'Vui lòng chn file .docx.'); return; }
+        if (!file) { showTplMsg('warning', 'Vui lòng chọn file .docx.'); return; }
 
         if (!file.name.toLowerCase().endsWith('.docx')) { showTplMsg('danger', 'Chỉ hỗ trợ file .docx'); return; }
 
@@ -3519,7 +3160,8 @@ endif %}
     })();
   </script>
 
-  <!-- Modal Xuất văn bản -->
+  {% if false %}
+  <!-- Modal Xuất văn bản legacy -->
   <div class="modal fade" id="exportWordModal" tabindex="-1" aria-labelledby="exportWordModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
 
@@ -3875,6 +3517,91 @@ endif %}
     });
 }) ();
   </script>
+  {% endif %}
+  <!-- Modal Xuất văn bản -->
+  <div class="modal fade" id="exportWordModal" tabindex="-1" aria-labelledby="exportWordModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <h5 class="modal-title" id="exportWordModalLabel"><i class="bi bi-file-word me-2"></i>Xuất Word</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+        </div>
+        <div class="modal-body">
+          <div id="export-template-list">
+            <div class="text-muted small text-center py-3">Đang tải mẫu...</div>
+          </div>
+          <div id="export-template-error" class="alert alert-danger d-none small mb-0 mt-2"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <a href="/cases/templates/manage" target="_blank" class="btn btn-sm btn-outline-secondary me-auto" title="Quản lý mẫu Word">
+            <i class="bi bi-folder2-open"></i>
+          </a>
+          <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          <button type="button" class="btn btn-sm btn-success fw-bold" id="btn-do-export" disabled>
+            <i class="bi bi-download me-1"></i>Xuất
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (() => {
+      let selectedTemplateId = null;
+      const caseId = {{ obj.id if obj else 'null' }};
+      const modal = document.getElementById('exportWordModal');
+      const listEl = document.getElementById('export-template-list');
+      const errorEl = document.getElementById('export-template-error');
+      const exportBtn = document.getElementById('btn-do-export');
+
+      const escapeHtml = (value) => String(value || '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+      }[char]));
+
+      modal.addEventListener('show.bs.modal', async () => {
+        selectedTemplateId = null;
+        exportBtn.disabled = true;
+        errorEl.classList.add('d-none');
+        listEl.innerHTML = '<div class="text-muted small text-center py-3">Đang tải mẫu...</div>';
+        if (!caseId) {
+          listEl.innerHTML = '<div class="alert alert-warning small mb-0">Hãy lưu hồ sơ trước.</div>';
+          return;
+        }
+        try {
+          const response = await fetch('/cases/templates/list-json');
+          if (!response.ok) throw new Error('Không tải được danh sách mẫu.');
+          const data = await response.json();
+          const templateList = data.templates || [];
+          if (!templateList.length) {
+            listEl.innerHTML = '<div class="alert alert-warning small mb-0">Chưa có mẫu Word.</div>';
+            return;
+          }
+          listEl.innerHTML = `<table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Mẫu Word</th><th class="text-center" style="width:52px;">Chọn</th></tr></thead>
+            <tbody>${templateList.map((item, index) => `<tr>
+              <td>${escapeHtml(item.ten_mau)}${item.is_active ? ' <span class="badge bg-success">Mặc định</span>' : ''}</td>
+              <td class="text-center"><input class="form-check-input export-template-radio" type="radio" name="export-template" value="${escapeHtml(item.id)}" data-name="${escapeHtml(item.ten_mau)}" ${item.is_active || (!templateList.some(t => t.is_active) && index === 0) ? 'checked' : ''}></td>
+            </tr>`).join('')}</tbody></table>`;
+          const checked = listEl.querySelector('.export-template-radio:checked');
+          selectTemplate(checked);
+          listEl.querySelectorAll('.export-template-radio').forEach((radio) => radio.addEventListener('change', () => selectTemplate(radio)));
+        } catch (error) {
+          listEl.innerHTML = '';
+          errorEl.textContent = error.message || 'Không tải được danh sách mẫu.';
+          errorEl.classList.remove('d-none');
+        }
+      });
+
+      function selectTemplate(radio) {
+        selectedTemplateId = radio?.value || null;
+        exportBtn.disabled = !caseId || !selectedTemplateId;
+      }
+
+      exportBtn.addEventListener('click', () => {
+        if (!caseId || !selectedTemplateId) return;
+        window.location.href = `/cases/${caseId}/export-word?template_id=${encodeURIComponent(selectedTemplateId)}`;
+      });
+    })();
+  </script>
   <script>
     (() => {
 
@@ -3928,7 +3655,7 @@ endif %}
 
         if (status === 'done') return '<span style="color:#16a34a">✓ OCR xong</span>';
 
-        if (status === 'skipped') return '<span style="color:#64748b">• B qua (không phải tài sản)</span>';
+        if (status === 'skipped') return '<span style="color:#64748b">• Bỏ qua (không phải tài sản)</span>';
 
         if (status === 'error') return '<span style="color:#dc2626">✕ Lỗi OCR</span>';
 
@@ -3961,11 +3688,11 @@ endif %}
 
       function roleValidity() {
 
-        if (!propertyQueue.length) return { ok: false, message: 'Chua co anh tai san.' };
+        if (!propertyQueue.length) return { ok: false, message: 'Chưa có ảnh tài sản.' };
 
         if (!propertyFrontId || !propertyBackId) return { ok: false, message: 'Chon du 1 mat truoc va 1 mat sau.' };
 
-        if (propertyFrontId === propertyBackId) return { ok: false, message: 'Mat truoc va mat sau khong duoc trung.' };
+        if (propertyFrontId === propertyBackId) return { ok: false, message: 'Mặt trước và mặt sau không được trùng.' };
 
         if (!getQueueItem(propertyFrontId) || !getQueueItem(propertyBackId)) return { ok: false, message: 'Cap anh da thay doi, vui long chon lai.' };
 
@@ -4062,7 +3789,7 @@ endif %}
 
 
 
-      Mat truoc
+      Mặt trước
 
 
           </label>
@@ -4076,7 +3803,7 @@ endif %}
 
 
 
-      Mat sau
+      Mặt sau
 
 
           </label>
@@ -4175,7 +3902,7 @@ endif %}
           <div><span style="color:#64748b;">Số t:</span> ${d.so_to_ban_do || '—'}</div>
 
 
-          <div style="grid-column:1/-1;"><span style="color:#64748b;">ịa chỉ:</span> ${d.dia_chi || '—'}</div>
+          <div style="grid-column:1/-1;"><span style="color:#64748b;">Địa chỉ:</span> ${d.dia_chi || '—'}</div>
 
 
         </div>
@@ -4459,7 +4186,7 @@ endif %}
 
         document.getElementById('pr-so-serial')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        if (typeof showToast === 'function') showToast('ã đin dữ liệu tài sản từ OCR', 'success');
+        if (typeof showToast === 'function') showToast('Đã điền dữ liệu tài sản từ OCR', 'success');
 
       };
 
@@ -4651,7 +4378,7 @@ endif %}
           setPropSummary(
 
 
-      `${summary.properties || props.length} tài sản, ${summary.unknowns || skippedFiles.length} b qua, ${errors.length} lỗi`
+      `${summary.properties || props.length} tài sản, ${summary.unknowns || skippedFiles.length} bỏ qua, ${errors.length} lỗi`
 
           );
 
@@ -4802,7 +4529,7 @@ endif %}
 
           const missingFields = Array.isArray(data.missing_fields) ? data.missing_fields : [];
 
-          setPropSummary(`Xong trong ${summary.total_ms || '?'} ms.${missingFields.length ? ` Thieu: ${missingFields.join(', ')}` : ''}`);
+          setPropSummary(`Xong trong ${summary.total_ms || '?'} ms.${missingFields.length ? ` Thiếu: ${missingFields.join(', ')}` : ''}`);
 
           renderPropertyQueue();
 
@@ -4844,80 +4571,6 @@ endif %}
   </script>
   {% endblock %}
   {% block extra_js %}
-
-  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-
-      const editorEl = document.getElementById('live-tinymce-editor');
-
-      if (!editorEl) return;
-
-      // Wrap textarea thành div cho Quill
-
-      const wrapper = document.createElement('div');
-
-      wrapper.id = 'quill-editor-wrapper';
-
-      wrapper.style.cssText = 'width:100%; height:100%; display:flex; flex-direction:column;';
-
-      const editorDiv = document.createElement('div');
-
-      editorDiv.id = 'quill-editor-body';
-
-      editorDiv.style.cssText = 'flex:1; font-family:"Times New Roman",serif; font-size:14pt; line-height:1.5; overflow-y:auto;';
-
-      editorEl.parentNode.insertBefore(wrapper, editorEl);
-
-      wrapper.appendChild(editorDiv);
-
-      editorEl.style.display = 'none';
-
-
-      const quill = new Quill('#quill-editor-body', {
-
-        theme: 'snow',
-
-        modules: {
-
-          toolbar: [
-
-
-      ['bold', 'italic', 'underline'],
-
-
-      [{ align: [] }],
-
-
-      [{ list: 'ordered' }, { list: 'bullet' }],
-
-
-      [{ indent: '-1' }, { indent: '+1' }],
-
-
-      ['clean']
-
-          ]
-
-        }
-
-      });
-
-
-      // Shim API giống TinyMCE để không cần sửa code phía dưới
-
-      window.liveEditor = {
-
-        setContent: (html) => { quill.root.innerHTML = html; },
-
-        getContent: () => quill.root.innerHTML,
-
-        _quill: quill
-
-      };
-    });
-  </script>
 
   <script>
     const existingParticipants = [
@@ -5021,11 +4674,10 @@ endif %}
     window.__INITIAL_ENGINE_STATE__ = persistedEngineState;
     window.__INITIAL_CASE_STATE__ = initialCaseState;
     window.__RESTORED_CASE_WORKSPACE__ = restoredCaseWorkspace;
-    window.__INITIAL_PARTICIPANTS__ = Array.isArray(restoredCaseWorkspace?.treeState?.participants) && restoredCaseWorkspace.treeState.participants.length
-
-      ? restoredCaseWorkspace.treeState.participants
-
-      : existingParticipants;
+    // React hydrates the diagram from the persisted V2 case state. Workspace
+    // storage may restore registry/staging drafts, but must never resurrect a
+    // stale diagram snapshot over the database state.
+    window.__INITIAL_PARTICIPANTS__ = existingParticipants;
     if (persistedEngineState && caseWorkspaceKey) {
       try {
         localStorage.removeItem(caseWorkspaceKey);
@@ -5072,10 +4724,6 @@ endif %}
     window.__ALL_CUSTOMERS_DATA__ = allCustomersData;
     window.allCustomersData = allCustomersData;
     const pool = document.getElementById('people-pool');
-    const slots = document.querySelectorAll('.slot');
-    const childrenZone = document.getElementById('children-zone');
-    const grandchildrenZone = document.getElementById('grandchildren-zone');
-    const marriageInput = document.getElementById('marriage-date');
     const warningBox = document.getElementById('tree-warnings');
     const warningList = document.getElementById('tree-warnings-list');
     const ownerInput = document.getElementById('case-nguoi-chet');
@@ -5215,19 +4863,6 @@ endif %}
     window.collectDraftStageSnapshot = collectDraftStageSnapshot;
     window.persistCommittedStageSnapshot = persistCommittedStageSnapshot;
 
-    window.__FAMILY_TREE_STATE__ = window.__FAMILY_TREE_STATE__ || {
-
-      participants: [],
-
-      warnings: [],
-
-      engineState: persistedEngineState,
-
-      shareMode: 'auto',
-
-      updatedAt: ''
-    };
-
     window.__CUSTOMER_REGISTRY__ = window.__CUSTOMER_REGISTRY__ || {};
     window.__CUSTOMER_WORKFLOW__ = window.__CUSTOMER_WORKFLOW__ || {};
     window.__POOL_DATA_MAP__ = window.__POOL_DATA_MAP__ || {};
@@ -5281,23 +4916,8 @@ endif %}
 
       }
 
-      if (snapshot.treeState && typeof snapshot.treeState === 'object') {
-
-        window.__FAMILY_TREE_STATE__ = {
-
-          participants: Array.isArray(snapshot.treeState.participants) ? snapshot.treeState.participants : [],
-
-          warnings: Array.isArray(snapshot.treeState.warnings) ? snapshot.treeState.warnings : [],
-
-          engineState: snapshot.treeState.engineState || null,
-
-          shareMode: snapshot.treeState.shareMode || 'auto',
-
-          updatedAt: snapshot.treeState.updatedAt || ''
-
-        };
-
-      }
+      // Deliberately do not restore snapshot.treeState. React/API owns the
+      // diagram, and the database case state is authoritative on reload.
     }
 
     function saveCaseWorkspaceSnapshot() {
@@ -5305,8 +4925,6 @@ endif %}
       if (!caseWorkspaceKey) return;
 
       try {
-
-        const treeState = window.__FAMILY_TREE_STATE__ || {};
 
         const stagingKey = typeof _stagingKey === 'function' ? _stagingKey() : '';
 
@@ -5360,25 +4978,6 @@ endif %}
 
       .filter(Boolean),
 
-          treeState: {
-
-
-      participants: Array.isArray(treeState.participants) ? treeState.participants : [],
-
-
-      warnings: Array.isArray(treeState.warnings) ? treeState.warnings : [],
-
-
-      engineState: treeState.engineState || null,
-
-
-      shareMode: treeState.shareMode || 'auto',
-
-
-      updatedAt: treeState.updatedAt || ''
-
-          }
-
         };
 
         localStorage.setItem(caseWorkspaceKey, JSON.stringify(snapshot));
@@ -5427,12 +5026,7 @@ endif %}
       if (!id) return null;
 
       const receiveRaw = raw.receive ?? raw.co_nhan_tai_san ?? raw.willReceive;
-      let inheritanceDecision = raw.inheritanceDecision;
-      if (!inheritanceDecision) {
-        if (receiveRaw === '0' || receiveRaw === false || receiveRaw === 0) inheritanceDecision = 'refuse';
-        else if (receiveRaw === '1' || receiveRaw === true || receiveRaw === 1) inheritanceDecision = 'unset';
-        else inheritanceDecision = 'unset';
-      }
+      const isReceiver = receiveRaw === '1' || receiveRaw === true || receiveRaw === 1 || raw.inheritanceDecision === 'accept';
 
       return {
 
@@ -5478,9 +5072,7 @@ endif %}
 
         share: pickFirstCustomerValue(raw.share, raw.ty_le, '0'),
 
-        receive: receiveRaw === undefined || receiveRaw === null || receiveRaw === '' ? '1' : String(receiveRaw),
-
-        inheritanceDecision,
+        receive: isReceiver ? '1' : '0',
 
         parent_id: pickFirstCustomerValue(raw.parent_id, raw.parentId, raw.parent_customer_id)
 
@@ -5505,7 +5097,7 @@ endif %}
 
         'death', 'ngay_chet', 'address', 'dia_chi', 'issue_date', 'ngay_cap', 'issue_place',
 
-        'noi_cap', 'place_of_origin', 'nguyen_quan', 'role', 'share', 'receive', 'inheritanceDecision', 'parent_id'
+        'noi_cap', 'place_of_origin', 'nguyen_quan', 'role', 'share', 'receive', 'parent_id'
 
       ].forEach((key) => {
 
@@ -6176,7 +5768,7 @@ endif %}
     window.syncParticipantProjectionInDom = syncParticipantProjectionInDom;
 
     // Chỉ đưa vào registry để lookup — KHÔNG set inPool:true cho toàn bộ DB.
-    // Pool chỉ hiện ngưi được stage từ OCR, thêm thủ công, hoặc từ existing case.
+    // Pool chỉ hiện người được stage từ OCR, thêm thủ công, hoặc từ existing case.
     window.addEventListener('caseParticipantRecordUpdated', (evt) => {
 
       const record = syncParticipantProjectionInDom(evt?.detail?.customer || evt?.detail);
@@ -6184,16 +5776,6 @@ endif %}
       if (!record?.id) return;
 
       loadPool();
-
-      if (ownerInput && String(ownerInput.value || '').trim() === String(record.id)) {
-
-        setOwnerFromSelect();
-
-        updateGrandZones();
-
-        recalcShares();
-
-      }
     });
 
     allCustomersData.forEach((item) => upsertCustomerRecord(item));
@@ -6207,7 +5789,17 @@ endif %}
 
     function getFamilyTreeState() {
 
-      const state = getDiagramApi()?.getCommittedState?.() || window.__FAMILY_TREE_STATE__ || {};
+      const initialDiagram = window.__INITIAL_CASE_STATE__?.diagram || {};
+      const state = getDiagramApi()?.getCommittedState?.() || {
+        participants: [],
+        warnings: [],
+        engineState: window.__INITIAL_ENGINE_STATE__ || null,
+        engineInput: initialDiagram.engineInput || window.__INITIAL_ENGINE_STATE__?.engineInput || null,
+        engineResult: initialDiagram.engineResult || window.__INITIAL_ENGINE_STATE__?.engineResult || null,
+        calculationStatus: initialDiagram.engineResult?.status || null,
+        shareMode: 'auto',
+        updatedAt: initialDiagram.updatedAt || ''
+      };
 
       return {
 
@@ -6216,6 +5808,12 @@ endif %}
         warnings: Array.isArray(state.warnings) ? state.warnings : [],
 
         engineState: state.engineState || null,
+
+        engineInput: state.engineInput || state.engineState?.engineInput || null,
+
+        engineResult: state.engineResult || state.engineState?.engineResult || null,
+
+        calculationStatus: state.calculationStatus || state.engineResult?.status || null,
 
         shareMode: state.shareMode || 'auto',
 
@@ -6290,6 +5888,14 @@ endif %}
       warningBox.classList.remove('d-none');
     }
 
+    if (
+      existingParticipants.length > 0 &&
+      !persistedEngineState &&
+      !initialCaseState?.diagram?.engineInput
+    ) {
+      pushRuntimeWarning('Hồ sơ cũ chưa có quan hệ sơ đồ V2. Hãy đặt lại người vào đúng nhánh trước khi lưu.');
+    }
+
     window.addEventListener('onFamilyTreeUpdate', (evt) => {
 
       const api = getDiagramApi();
@@ -6309,7 +5915,7 @@ endif %}
 
       const owner = participants.find(p => p.role === 'Owner');
 
-      if (ownerInput) ownerInput.value = owner ? owner.id : '';
+      if (ownerInput && owner) ownerInput.value = owner.id;
 
       const nextDiagramIds = new Set();
 
@@ -6356,24 +5962,6 @@ endif %}
       evt.dataTransfer.effectAllowed = 'all';
     }
 
-    let dragState = null;
-
-    function onDragStart(evt) {
-
-      const el = evt.item;
-
-      dragState = { el, data: extractDataFromElement(el) };
-
-      el.classList.add('dragging');
-    }
-
-    function onDragEnd(evt) {
-
-      if (evt.item) evt.item.classList.remove('dragging');
-
-      dragState = null;
-    }
-
     // ─── POOL SEARCH ─────────────────────────────────────────────────────────────
     const poolSearchInput = document.getElementById('pool-search-input');
     const poolSearchResults = document.getElementById('pool-search-results');
@@ -6417,9 +6005,9 @@ endif %}
 
         poolSearchResults.innerHTML = matches.map(c => `
 
-        <button type="button" class="list-group-item list-group-item-action py-1 px-2 btn-add-pool" 
+        <button type="button" class="list-group-item list-group-item-action py-1 px-2 btn-add-pool"
 
-          data-id="${c.id}" data-name="${c.name}" data-doc="${c.doc}" data-gender="${c.gender}" 
+          data-id="${c.id}" data-name="${c.name}" data-doc="${c.doc}" data-gender="${c.gender}"
 
           data-birth="${c.birth}" data-death="${c.death}">
 
@@ -6496,7 +6084,7 @@ endif %}
       if (addedToStage) {
 
 
-        showToast('Da dua nguoi vao Stage. Bam Cap nhat de hien trong pool.', 'success');
+        showToast('Đã đưa người vào Stage. Bấm Cập nhật để hiện trong pool.', 'success');
 
 
       } else {
@@ -6547,1528 +6135,9 @@ endif %}
       _toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
     }
 
-    // ─── MOVE VALIDATION ─────────────────────────────────────────────────────────
-    let _lastMoveMsg = '';
-    function validateMove(draggedEl, destContainer) {
-
-      if (draggedEl.classList.contains('child-card') && destContainer.classList.contains('grand-zone')) {
-
-        return { allowed: false, reason: `${draggedEl.dataset.name || 'Ngưi này'} đang là Con trực tiếp — không thể thêm làm Cháu` };
-
-      }
-
-      if (destContainer.classList.contains('grand-spouse-slot')) {
-
-        const group = destContainer.closest('.grand-group');
-
-        if (group) {
-
-          const childCard = document.querySelector(`.child-card[data-id="${group.dataset.parentId}"]`);
-
-          if (childCard) {
-
-
-      const childDeath = parseDate(childCard.dataset.death);
-
-
-      const ownerCard = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-
-      const ownerDeath = ownerCard ? parseDate(ownerCard.dataset.death) : null;
-
-
-      if (deathFlowStatus(childDeath, ownerDeath) !== 'after') {
-
-
-        return { allowed: false, reason: `${childCard.dataset.name} chết trước hoặc cùng ngày chủ đất — nhánh này không có thừa kế thế vị` };
-
-
-      }
-
-          }
-
-        }
-
-      }
-
-      return { allowed: true };
-    }
-    function onMoveValidate(evt) {
-
-      const v = validateMove(evt.dragged, evt.to);
-
-      if (!v.allowed && v.reason !== _lastMoveMsg) { _lastMoveMsg = v.reason; showToast(v.reason); }
-
-      if (v.allowed) _lastMoveMsg = '';
-
-      return v.allowed;
-    }
-
-    function parseDate(s) {
-
-      if (!s) return null;
-
-      const raw = String(s).trim();
-
-      const yyyy = raw.match(/^(\d{4})$/);
-
-      if (yyyy) {
-
-        const d = new Date(Number(yyyy[1]), 0, 1);
-
-        return isNaN(d.getTime()) ? null : d;
-
-      }
-
-      const ddmmyyyy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-
-      if (ddmmyyyy) {
-
-        const d = new Date(Number(ddmmyyyy[3]), Number(ddmmyyyy[2]) - 1, Number(ddmmyyyy[1]));
-
-        return isNaN(d.getTime()) ? null : d;
-
-      }
-
-      const d = new Date(raw);
-
-      return isNaN(d.getTime()) ? null : d;
-    }
-
-    function survivesAt(personDeath, eventDeath) {
-
-      if (!eventDeath) return true;
-
-      if (!personDeath) return true;
-
-      return personDeath.getTime() > eventDeath.getTime();
-    }
-
-    function compareStatus(personDeath, parentDeath, parentLabel) {
-
-      if (!parentDeath || !personDeath || !parentLabel) return '';
-
-      const a = personDeath.getTime();
-
-      const b = parentDeath.getTime();
-
-      if (a < b) return `chết trước ${parentLabel}`;
-
-      if (a > b) return `chết sau ${parentLabel}`;
-
-      return `chết cùng ngày ${parentLabel}`;
-    }
-
-    function getPropertyIssueDate() {
-
-      const sel = document.getElementById('case-tai-san');
-
-      if (!sel || !sel.value) return null;
-
-      // We don't have option data here directly since case-tai-san is hidden.
-
-      return null; // For layout purposes it's fine.
-    }
-
-    function getMarriageDate() {
-
-      return parseDate(marriageInput?.value || '');
-    }
-
-    function isJointAssetByMarriage() {
-
-      const issueDate = getPropertyIssueDate();
-
-      const marriageDate = getMarriageDate();
-
-      if (!issueDate || !marriageDate) return false;
-
-      return issueDate.getTime() >= marriageDate.getTime();
-    }
-
-    function dateDiffYears(olderDate, newerDate) {
-
-      let y = newerDate.getFullYear() - olderDate.getFullYear();
-
-      const m = newerDate.getMonth() - olderDate.getMonth();
-
-      if (m < 0 || (m === 0 && newerDate.getDate() < olderDate.getDate())) y -= 1;
-
-      return y;
-    }
-
-    function clearCardWarnings() {
-
-      document.querySelectorAll('.person-card').forEach(card => {
-
-        card.classList.remove('invalid');
-
-        const w = card.querySelector('.card-warning');
-
-        if (w) w.textContent = '';
-
-      });
-    }
-
-    function addCardWarning(card, msg) {
-
-      if (!card || !msg) return;
-
-      card.classList.add('invalid');
-
-      const w = card.querySelector('.card-warning');
-
-      if (!w) return;
-
-      const prev = w.textContent ? w.textContent.split(' | ') : [];
-
-      if (!prev.includes(msg)) prev.push(msg);
-
-      w.textContent = prev.join(' | ');
-    }
-
-    function validateTreeWarnings() {
-
-      clearCardWarnings();
-
-      const warnings = [];
-
-      const seen = new Set();
-
-      const pushWarn = (msg) => {
-
-        if (!msg || seen.has(msg)) return;
-
-        seen.add(msg);
-
-        warnings.push(msg);
-
-      };
-
-
-      const owner = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-      const spouse = document.querySelector('.slot[data-slot="spouse"] .person-card');
-
-
-      // Rule 1: spouse gender mismatch in spouse pairs
-
-      function validateSpousePair(a, b, labelA, labelB) {
-
-        if (!a || !b) return;
-
-        const ga = (a.dataset.gender || '').trim();
-
-        const gb = (b.dataset.gender || '').trim();
-
-        if (!ga || !gb) return;
-
-        if (ga === gb) {
-
-          const msg = `Lỗi giới tính vợ/chồng: ${labelA} và ${labelB} cùng giới tính.`;
-
-          pushWarn(msg);
-
-          addCardWarning(a, 'Cùng giới tính với vợ/chồng');
-
-          addCardWarning(b, 'Cùng giới tính với vợ/chồng');
-
-        }
-
-      }
-
-      validateSpousePair(owner, spouse, owner?.dataset.name || 'Chủ đất', spouse?.dataset.name || 'Vợ/chồng chủ đất');
-
-
-      // Rule 2: child age vs parents in same branch
-
-      function validateParentChild(parentCard, childCard, parentLabel, childLabel) {
-
-        if (!parentCard || !childCard) return;
-
-        const pd = parseDate(parentCard.dataset.birth);
-
-        const cd = parseDate(childCard.dataset.birth);
-
-        if (!pd || !cd) return;
-
-
-        if (cd.getTime() < pd.getTime()) {
-
-          const msg = `Lỗi ngày sinh: ${childLabel} lớn hơn tuổi ${parentLabel}.`;
-
-          pushWarn(msg);
-
-          addCardWarning(childCard, 'Con lớn hơn tuổi bố/mẹ');
-
-          addCardWarning(parentCard, 'Ngày sinh không hợp lý với con');
-
-        }
-
-
-        const diff = dateDiffYears(pd, cd);
-
-        if (diff >= 0 && diff < 18) {
-
-          const msg = `Lỗi ngày sinh: chênh lệch tuổi ${childLabel} và ${parentLabel} dưới 18.`;
-
-          pushWarn(msg);
-
-          addCardWarning(childCard, 'Chênh lệch tuổi với bố/mẹ < 18');
-
-          addCardWarning(parentCard, 'Chênh lệch tuổi với con < 18');
-
-        }
-
-      }
-
-
-      const tier3Children = Array.from(document.querySelectorAll('.child-card'));
-
-      tier3Children.forEach(child => {
-
-        const childName = child.dataset.name || 'Con';
-
-        if (owner) validateParentChild(owner, child, owner.dataset.name || 'bố', childName);
-
-        if (spouse) validateParentChild(spouse, child, spouse.dataset.name || 'mẹ', childName);
-
-      });
-
-
-      // Tầng 4: cặp vợ/chồng trong nhánh và tuổi con so với bố/mẹ của nhánh
-
-      document.querySelectorAll('.grand-group').forEach(group => {
-
-        const parentId = group.dataset.parentId;
-
-        const branchParent = document.querySelector(`.child-card[data-id="${parentId}"]`);
-
-        const branchSpouse = group.querySelector('.grand-spouse-slot .person-card');
-
-        const branchChildren = Array.from(group.querySelectorAll('.grand-zone .person-card'));
-
-
-        validateSpousePair(branchParent, branchSpouse, branchParent?.dataset.name || 'Ngưi nhánh', branchSpouse?.dataset.name || 'Vợ/chồng');
-
-
-        branchChildren.forEach(c => {
-
-          const childName = c.dataset.name || 'Con';
-
-          if (branchParent) validateParentChild(branchParent, c, branchParent.dataset.name || 'bố/mẹ', childName);
-
-          if (branchSpouse) validateParentChild(branchSpouse, c, branchSpouse.dataset.name || 'bố/mẹ', childName);
-
-        });
-
-      });
-
-
-      renderFamilyTreeWarnings(warnings);
-
-      return warnings;
-    }
-
-    function deathFlowStatus(personDeath, parentDeath) {
-
-      if (!personDeath) return 'alive';
-
-      // If parent death is unknown but this person is dead, allow downstream branch editing.
-
-      if (!parentDeath) return 'after';
-
-      const a = personDeath.getTime();
-
-      const b = parentDeath.getTime();
-
-      if (a < b) return 'before';
-
-      if (a === b) return 'same';
-
-      return 'after';
-    }
-
-    function extractDataFromElement(el) {
-
-      const fallback = {
-
-        id: el?.dataset?.id,
-
-        name: el?.dataset?.name || el?.querySelector('.fw-600')?.textContent || el?.querySelector('.name')?.textContent || '',
-
-        doc: el?.dataset?.doc || el?.querySelector('.text-danger')?.textContent || '',
-
-        gender: el?.dataset?.gender || '',
-
-        birth: el?.dataset?.birth || '',
-
-        death: el?.dataset?.death || '',
-
-        address: el?.dataset?.address || '',
-
-        issue_date: el?.dataset?.issueDate || '',
-
-        issue_place: el?.dataset?.issuePlace || '',
-
-        place_of_origin: el?.dataset?.placeOfOrigin || ''
-
-      };
-
-      return toReactPersonShape(mergeCustomerRecord(resolveCustomerById(fallback.id), fallback));
-    }
-
-    function removeExisting(id) {
-
-      document.querySelectorAll(`[data-id="${id}"]`).forEach(n => {
-
-        if (n.classList.contains('person-row')) {
-
-          setCustomerWorkflowState(id, { inPool: false });
-
-          n.remove();
-
-        }
-
-        if (n.classList.contains('person-card')) {
-
-          setCustomerWorkflowState(id, { inTree: false });
-
-          n.remove();
-
-        }
-
-      });
-
-      document.querySelectorAll('.family-unit').forEach(f => {
-
-        if (!f.querySelector('.child-card')) f.remove();
-
-      });
-
-      grandchildrenZone.querySelectorAll('.grand-group').forEach(g => {
-
-        const parentId = g.dataset.parentId;
-
-        if (!document.querySelector(`.child-card[data-id="${parentId}"]`)) {
-
-          g.querySelectorAll('.person-card').forEach(c => {
-
-
-      if (c.dataset.id !== id) putBackToPool(c, true);
-
-
-      if (c.dataset.id === id) setCustomerWorkflowState(c.dataset.id, { inTree: false });
-
-          });
-
-          g.remove();
-
-        }
-
-      });
-
-      if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
-
-        grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
-
-      }
-    }
-
-    function putDataBackToPool(data, force = false, originalCard = null) {
-
-      const record = upsertCustomerRecord(data);
-
-      if (!record || !pool) return;
-
-      if (!force) {
-
-        // Chỉ put back nếu không còn card nào khác dùng cùng id trong tree
-
-        const stillUsedElsewhere = Array.from(document.querySelectorAll(`.person-card[data-id="${record.id}"]`))
-
-          .some(n => n !== originalCard);
-
-        if (stillUsedElsewhere) return;
-
-      }
-
-      const row = document.createElement('div');
-
-      row.className = 'person-row';
-
-      row.draggable = true;
-
-      row.ondragstart = (e) => window.handleNativeDragStart(e, JSON.stringify({
-
-        id: data.id, name: data.name || '', doc: data.doc || '', gender: data.gender || '', birth: data.birth || '', death: data.death || ''
-
-      }));
-
-      row.dataset.id = data.id;
-
-      row.dataset.name = data.name || '';
-
-      row.dataset.doc = data.doc || '';
-
-      row.dataset.gender = data.gender || '';
-
-      row.dataset.birth = data.birth || '';
-
-      row.dataset.death = data.death || '';
-
-      row.innerHTML = `
-
-      <div class="name">${data.name || ''}</div>
-
-      <div class="meta">Sinh: ${data.birth || '—'} • Chết: ${data.death || '—'}</div>
-    `;
-
-      pool.prepend(row);
-    }
-
-    function putBackToPool(cardEl, force = false) {
-
-      if (!cardEl) return;
-
-      const data = extractDataFromElement(cardEl);
-
-      putDataBackToPool(data, force, cardEl);
-    }
-
-    putDataBackToPool = function (data, force = false, originalCard = null) {
-
-      const record = upsertCustomerRecord(data);
-
-      if (!record || !pool) return;
-
-      if (!force) {
-
-        const stillUsedElsewhere = Array.from(document.querySelectorAll(`.person-card[data-id="${record.id}"]`))
-
-          .some(n => n !== originalCard);
-
-        if (stillUsedElsewhere) return;
-
-      }
-
-      updateCustomerWorkflow(record.id, {
-
-        inPool: true,
-
-        inTree: false
-
-      });
-    };
-
-    function buildPersonCard(data, role, withShare = true, shareVal = '0', receiveVal = '1') {
-
-      const person = toReactPersonShape(upsertCustomerRecord(data), { role, share: shareVal, receive: receiveVal });
-
-      data = person;
-
-      const card = document.createElement('div');
-
-      card.className = 'person-card';
-
-      card.dataset.id = person.id;
-
-      card.dataset.name = person.name;
-
-      card.dataset.doc = person.doc;
-
-      card.dataset.gender = person.gender || '';
-
-      card.dataset.birth = person.birth || '';
-
-      card.dataset.death = person.death || '';
-
-      card.dataset.address = person.address || '';
-
-      card.dataset.issueDate = person.issue_date || '';
-
-      card.dataset.issuePlace = person.issue_place || '';
-
-      card.dataset.placeOfOrigin = person.place_of_origin || '';
-
-      card.dataset.role = role || '';
-
-      card.innerHTML = `
-
-      <button type="button" class="card-remove-btn" title="B chn">×</button>
-
-      <div class="drag-grip" title="Kéo thả"></div>
-
-      <div class="name">${person.name}</div>
-
-      <div class="meta">${data.birth ? 'Sinh: ' + data.birth : 'Sinh: —'}</div>
-
-      <div class="meta">${data.death ? 'Chết: ' + data.death : 'Chết: —'}</div>
-
-      ${withShare ? `
-
-      <div class="mt-1">
-
-        <div class="d-flex align-items-center gap-2">
-
-          <input type="number" class="form-control form-control-sm share-input" value="${shareVal}" min="0" max="100" step="0.1" readonly disabled>
-
-          <div class="form-check m-0 d-flex align-items-center">
-
-          <input class="form-check-input receive-input" type="checkbox" ${receiveVal === '1' ? 'checked' : ''} ${data.death ? 'disabled' : ''}>
-
-          <label class="form-check-label">Nhận</label>
-
-          </div>
-
-
-
-        </div>
-
-      </div>` : ''}
-
-      <div class="card-warning"></div>
-    `;
-
-      const removeBtn = card.querySelector('.card-remove-btn');
-
-      if (removeBtn) {
-
-        removeBtn.addEventListener('mousedown', (ev) => ev.stopPropagation());
-
-        removeBtn.addEventListener('click', (ev) => {
-
-          ev.preventDefault();
-
-          ev.stopPropagation();
-
-          removeCardFromTree(card);
-
-        });
-
-      }
-
-      setCustomerWorkflowState(person.id, {
-
-        inTree: true,
-
-        inPool: false
-
-      });
-
-      loadPool();
-
-      return card;
-    }
-
-    function restoreSlotPlaceholder(slotEl) {
-
-      if (!slotEl || !slotEl.classList.contains('slot')) return;
-
-      const labelMap = {
-
-        owner_father: 'Bố chủ đất',
-
-        owner_mother: 'Mẹ chủ đất',
-
-        spouse_father: 'Bố vợ/chồng',
-
-        spouse_mother: 'Mẹ vợ/chồng',
-
-        owner: 'Kéo chủ đất',
-
-        spouse: 'Kéo vợ/chồng'
-
-      };
-
-      const txt = labelMap[slotEl.dataset.slot] || 'Kéo vào đây';
-
-      slotEl.innerHTML = `<span class="placeholder">${txt}</span>`;
-    }
-
-    function removeCardFromTree(card) {
-
-      if (!card) return;
-
-      const data = extractDataFromElement(card);
-
-      const parent = card.parentElement;
-
-      const family = card.closest('.family-unit');
-
-      const wasChild = card.classList.contains('child-card');
-
-
-      putBackToPool(card, true);
-
-
-      if (parent && parent.classList.contains('slot') && !parent.querySelector('.person-card')) {
-
-        restoreSlotPlaceholder(parent);
-
-      }
-
-      if (parent && parent.classList.contains('grand-spouse-slot') && !parent.querySelector('.person-card')) {
-
-        parent.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
-
-      }
-
-      if (parent && parent.classList.contains('grand-zone') && !parent.querySelector('.person-card')) {
-
-        parent.innerHTML = '<span class="placeholder">Kéo con vào đây</span>';
-
-      }
-
-
-      if (wasChild && data.id) {
-
-        const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${data.id}"]`);
-
-        if (g) {
-
-          g.querySelectorAll('.person-card').forEach(c => {
-
-
-      putBackToPool(c, true);
-
-
-      c.remove();
-
-          });
-
-          g.remove();
-
-        }
-
-      }
-
-      card.remove();
-
-      if (family && !family.querySelector('.person-card')) {
-
-        family.remove();
-
-      }
-
-      if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
-
-        childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
-
-      }
-
-      if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
-
-        grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
-
-      }
-
-
-      updateGrandZones();
-
-      recalcShares();
-    }
-
-    // ─── TIER 4 VISIBILITY ───────────────────────────────────────────────────────
-    function updateTier4Visibility() {
-
-      const tier4 = document.getElementById('tier4-section');
-
-      if (!tier4) return;
-
-      const hasDeadChildren = Array.from(document.querySelectorAll('.child-card')).some(c => !!parseDate(c.dataset.death));
-
-      tier4.style.display = hasDeadChildren ? '' : 'none';
-    }
-
-    // ─── GRAND SLOT & ZONE SORTABLES ─────────────────────────────────────────────
-    function initGrandSpouseSlot(spouseSlot, childCard) {
-
-      Sortable.create(spouseSlot, {
-
-        group: 'tree', sort: false, animation: 150,
-
-        handle: '.drag-grip', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
-
-        onStart: onDragStart, onEnd: onDragEnd,
-
-        onMove: onMoveValidate,
-
-        onRemove: () => {
-
-          if (!spouseSlot.querySelector('.person-card')) {
-
-
-      spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
-
-          }
-
-          recalcShares();
-
-        },
-
-        onAdd: (evt) => {
-
-          const data = dragState ? dragState.data : extractDataFromElement(evt.item);
-
-          evt.item.remove();
-
-          const childDeath = parseDate(childCard.dataset.death);
-
-          const ownerCard = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-          const ownerDeath = ownerCard ? parseDate(ownerCard.dataset.death) : null;
-
-          if (deathFlowStatus(childDeath, ownerDeath) !== 'after') {
-
-
-      showToast(`${childCard.dataset.name} chết trước chủ đất — nhánh này không có thừa kế thế vị`, 'warn');
-
-
-      putDataBackToPool(data, true);
-
-
-      dragState = null;
-
-
-      return;
-
-          }
-
-          const prev = spouseSlot.querySelector('.person-card');
-
-          if (prev) putBackToPool(prev, true);
-
-          removeExisting(data.id);
-
-          spouseSlot.innerHTML = '';
-
-          spouseSlot.appendChild(buildPersonCard(data, 'Vo_chong_con', true));
-
-          updateCustomerWorkflow(data.id, { inTree: true, inPool: false }, { refreshPool: false });
-
-          loadPool();
-
-          dragState = null;
-
-          recalcShares();
-
-        }
-
-      });
-    }
-
-    function initGrandZone(zone, childCard) {
-
-      Sortable.create(zone, {
-
-        group: 'tree', sort: true, animation: 150,
-
-        handle: '.drag-grip', ghostClass: 'drag-ghost', chosenClass: 'drag-chosen',
-
-        onStart: onDragStart, onEnd: onDragEnd,
-
-        onMove: onMoveValidate,
-
-        onRemove: () => {
-
-          if (!zone.querySelector('.person-card')) zone.innerHTML = '<span class="placeholder">Kéo con vào đây</span>';
-
-          recalcShares();
-
-        },
-
-        onAdd: (evt) => {
-
-          const data = dragState ? dragState.data : extractDataFromElement(evt.item);
-
-          if (dragState && dragState.el.classList.contains('child-card')) {
-
-
-      evt.item.remove();
-
-
-      showToast(`${data.name} đang là Con trực tiếp — không thể thêm làm Cháu`, 'warn');
-
-
-      dragState = null;
-
-
-      return;
-
-          }
-
-          evt.item.remove();
-
-          if (zone.querySelector('.placeholder')) zone.innerHTML = '';
-
-          removeExisting(data.id);
-
-          zone.appendChild(buildPersonCard(data, 'Cháu', true));
-
-          dragState = null;
-
-          recalcShares();
-
-        }
-
-      });
-    }
-
-    function getGrandGroup(childCard, createIfMissing = true) {
-
-      if (!childCard) return null;
-
-      const childId = childCard.dataset.id;
-
-      let group = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${childId}"]`);
-
-      if (!group && createIfMissing) {
-
-        const ph = grandchildrenZone.querySelector('.child-placeholder');
-
-        if (ph) ph.remove();
-
-        group = document.createElement('div');
-
-        group.className = 'grand-group';
-
-        group.dataset.parentId = childId;
-
-        group.innerHTML = `
-
-        <div class="label">Hàng thừa kế của ${childCard.dataset.name}</div>
-
-        <div class="grand-head">
-
-          <div class="grand-spouse-wrap">
-
-
-      <div class="slabel">Vợ/chồng</div>
-
-
-      <div class="grand-spouse-slot"><span class="placeholder">Kéo vợ/chồng vào đây</span></div>
-
-          </div>
-
-
-
-          <div class="family-link">↔</div>
-
-          <div class="grand-heirs-wrap">
-
-
-      <div class="hlabel">Con</div>
-
-
-      <div class="grand-zone"><span class="placeholder">Kéo con vào đây</span></div>
-
-          </div>
-
-
-
-        </div>
-
-      `;
-
-        const spouseSlot = group.querySelector('.grand-spouse-slot');
-
-        const zone = group.querySelector('.grand-zone');
-
-
-        initGrandSpouseSlot(spouseSlot, childCard);
-
-        initGrandZone(zone, childCard);
-
-        grandchildrenZone.appendChild(group);
-
-      }
-
-      return group;
-    }
-
-    function createChildCard(data, shareVal = '0', receiveVal = '1') {
-
-      const family = document.createElement('div');
-
-      family.className = 'family-unit';
-
-      family.dataset.childId = data.id;
-
-
-      const pair = document.createElement('div');
-
-      pair.className = 'family-pair';
-
-
-      const card = buildPersonCard(data, 'Con', true, shareVal, receiveVal);
-
-      card.classList.add('child-card');
-
-
-      pair.appendChild(card);
-
-      family.appendChild(pair);
-
-
-      const meta = document.createElement('div');
-
-      meta.className = 'family-meta';
-
-      meta.innerHTML = '<span class="flow-note"></span>';
-
-      family.appendChild(meta);
-
-
-      // Allow child-card to be dragged OUT to other tiers
-
-      Sortable.create(pair, {
-
-        group: { name: 'tree', pull: true, put: false },
-
-        sort: false,
-
-        handle: '.drag-grip',
-
-        ghostClass: 'drag-ghost',
-
-        chosenClass: 'drag-chosen',
-
-        onStart: onDragStart,
-
-        onEnd: onDragEnd,
-
-        onRemove: (evt) => {
-
-          const childId = evt.item.dataset.id;
-
-          family.remove();
-
-          if (!childrenZone.querySelector('.family-unit') && !childrenZone.querySelector('.child-placeholder')) {
-
-
-      childrenZone.innerHTML = '<div class="child-placeholder">Thả con đẻ vào đây</div>';
-
-          }
-
-          const g = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${childId}"]`);
-
-          if (g) {
-
-
-      g.querySelectorAll('.person-card').forEach(c => putBackToPool(c, true));
-
-
-      g.remove();
-
-          }
-
-          if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
-
-
-      grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
-
-          }
-
-          updateGrandZones();
-
-          recalcShares();
-
-        }
-
-      });
-
-      return family;
-    }
-
-    // ─── INIT SLOT SORTABLES ─────────────────────────────────────────────────────
-    function initSlotSortable(slotEl) {
-
-      Sortable.create(slotEl, {
-
-        group: 'tree',
-
-        sort: false,
-
-        animation: 150,
-
-        handle: '.drag-grip',
-
-        ghostClass: 'drag-ghost',
-
-        chosenClass: 'drag-chosen',
-
-        onStart: onDragStart,
-
-        onEnd: onDragEnd,
-
-        onRemove: () => {
-
-          restoreSlotPlaceholder(slotEl);
-
-          if (slotEl.dataset.slot === 'owner') ownerInput.value = '';
-
-          updateGrandZones();
-
-          recalcShares();
-
-        },
-
-        onAdd: (evt) => {
-
-          const data = dragState ? dragState.data : extractDataFromElement(evt.item);
-
-          evt.item.remove();
-
-          const prev = slotEl.querySelector('.person-card');
-
-          if (prev) putBackToPool(prev, true);
-
-          removeExisting(data.id);
-
-          slotEl.innerHTML = '';
-
-          const withShare = slotEl.dataset.role !== 'Cha_vc' && slotEl.dataset.role !== 'Me_vc';
-
-          slotEl.appendChild(buildPersonCard(data, slotEl.dataset.role, withShare));
-
-          if (slotEl.dataset.slot === 'owner') ownerInput.value = data.id;
-
-          dragState = null;
-
-          updateGrandZones();
-
-          recalcShares();
-
-        }
-
-      });
-    }
-    slots.forEach(s => initSlotSortable(s));
-
-    // ─── INIT CHILDREN ZONE ──────────────────────────────────────────────────────
-    Sortable.create(childrenZone, {
-
-      group: { name: 'tree', pull: false, put: true },
-
-      sort: false,
-
-      animation: 150,
-
-      ghostClass: 'drag-ghost',
-
-      // filter prevents childrenZone from intercepting mousedown inside family-pair,
-
-      // which would conflict with family-pair's own Sortable (drag child-card to other tiers)
-
-      filter: '.family-pair',
-
-      preventOnFilter: false,
-
-      onAdd: (evt) => {
-
-        const data = dragState ? dragState.data : extractDataFromElement(evt.item);
-
-        evt.item.remove();
-
-        if (document.querySelector(`.child-card[data-id="${data.id}"]`)) {
-
-          showToast(`${data.name} đã có trong danh sách Con`, 'info');
-
-          dragState = null;
-
-          return;
-
-        }
-
-        const ph = childrenZone.querySelector('.child-placeholder');
-
-        if (ph) ph.remove();
-
-        removeExisting(data.id);
-
-        childrenZone.appendChild(createChildCard(data));
-
-        dragState = null;
-
-        updateGrandZones();
-
-        recalcShares();
-
-      }
-    });
-
-    // ─── INIT POOL ────────────────────────────────────────────────────────────────
-    Sortable.create(pool, {
-
-      group: { name: 'tree', pull: 'clone', put: false },
-
-      sort: false,
-
-      animation: 150,
-
-      ghostClass: 'drag-ghost',
-
-      chosenClass: 'drag-chosen',
-
-      draggable: '.person-row',
-
-      onStart: onDragStart,
-
-      onEnd: onDragEnd,
-
-      setData: function(dataTransfer, dragEl) {
-
-        const data = JSON.stringify({
-
-          customerId: dragEl.dataset.id,
-
-          id: dragEl.dataset.id,
-
-          source: 'pool'
-
-        });
-
-        dataTransfer.setData('application/json', data);
-
-        dataTransfer.setData('Text', data);
-
-      }
-    });
-
-    function updateGrandZones() {
-
-      const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-      const spouseSlotMain = document.querySelector('.slot[data-slot="spouse"] .person-card');
-
-      const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
-
-      const spouseDeath = spouseSlotMain ? parseDate(spouseSlotMain.dataset.death) : null;
-
-      document.querySelectorAll('.child-card').forEach(child => {
-
-        const childDeath = parseDate(child.dataset.death);
-
-        const status = deathFlowStatus(childDeath, ownerDeath);
-
-        child.dataset.flowStatus = status;
-
-
-        const family = child.closest('.family-unit');
-
-        const flowNote = family ? family.querySelector('.flow-note') : null;
-
-
-        if (flowNote) {
-
-          const lines = [];
-
-          const withFather = compareStatus(childDeath, ownerDeath, 'bố');
-
-          const withMother = compareStatus(childDeath, spouseDeath, 'mẹ');
-
-          if (withFather) lines.push(withFather);
-
-          if (withMother) lines.push(withMother);
-
-          flowNote.innerHTML = lines.join('<br>');
-
-        }
-
-
-        const needGrandBranch = !!childDeath;
-
-        if (!needGrandBranch) {
-
-          const oldGroup = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${child.dataset.id}"]`);
-
-          if (oldGroup) {
-
-
-      oldGroup.querySelectorAll('.person-card').forEach(c => {
-
-
-        putBackToPool(c, true);
-
-
-        c.remove();
-
-
-      });
-
-
-      oldGroup.remove();
-
-          }
-
-        }
-
-        const group = getGrandGroup(child, needGrandBranch);
-
-        if (!group) return;
-
-        group.style.display = '';
-
-        const spouseSlot = group.querySelector('.grand-spouse-slot');
-
-        if (spouseSlot && !spouseSlot.querySelector('.person-card')) {
-
-          spouseSlot.innerHTML = '<span class="placeholder">Kéo vợ/chồng vào đây</span>';
-
-        }
-
-      });
-
-
-      if (!grandchildrenZone.querySelector('.grand-group') && !grandchildrenZone.querySelector('.child-placeholder')) {
-
-        grandchildrenZone.innerHTML = '<div class="child-placeholder">Cháu sẽ hiển thị theo từng nhánh con đã chết</div>';
-
-      }
-
-      updateTier4Visibility();
-    }
-
-    document.addEventListener('change', (e) => {
-
-      if (e.target && e.target.classList && e.target.classList.contains('receive-input')) {
-
-        recalcShares();
-
-      }
-    });
-    marriageInput?.addEventListener('input', recalcShares);
-
-    function setOwnerFromSelect() {
-
-      if (!ownerInput || !ownerInput.value) return;
-
-      const data = toReactPersonShape(resolveCustomerById(ownerInput.value));
-
-      if (!data) return;
-
-      const ownerSlot = document.querySelector('.slot[data-slot="owner"]');
-
-      if (ownerSlot) {
-
-        removeExisting(data.id);
-
-        ownerSlot.innerHTML = '';
-
-        ownerSlot.appendChild(buildPersonCard(data, 'Owner', true));
-
-      }
-    }
-
-    function placeExistingParticipants() {
-
-      const delayedSpouses = [];
-
-      const delayedGrand = [];
-
-
-      const seededParticipants = Array.isArray(window.__INITIAL_PARTICIPANTS__) ? window.__INITIAL_PARTICIPANTS__ : existingParticipants;
-
-      seededParticipants.forEach(p => {
-
-        const data = toReactPersonShape(upsertCustomerRecord(p), { role: p.role, share: p.share, receive: p.receive, parent_id: p.parent_id });
-
-        // Ngưi đã chết: mặc định checkbox=checked (h nhận nếu còn sống khi owner mất)
-
-        const effectiveReceive = data.death ? '1' : p.receive;
-
-
-        if (p.role === 'Cha') {
-
-          const slot = document.querySelector('.slot[data-slot="owner_father"]');
-
-          if (slot && !slot.querySelector('.person-card')) {
-
-
-      slot.innerHTML = '';
-
-
-      slot.appendChild(buildPersonCard(data, 'Cha', true, p.share, effectiveReceive));
-
-
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
-
-
-      return;
-
-          }
-
-        }
-
-        if (p.role === 'Mẹ') {
-
-          const slot = document.querySelector('.slot[data-slot="owner_mother"]');
-
-          if (slot && !slot.querySelector('.person-card')) {
-
-
-      slot.innerHTML = '';
-
-
-      slot.appendChild(buildPersonCard(data, 'Mẹ', true, p.share, effectiveReceive));
-
-
-      return;
-
-          }
-
-        }
-
-        if (p.role === 'Cha_vc') {
-
-          const slot = document.querySelector('.slot[data-slot="spouse_father"]');
-
-          if (slot && !slot.querySelector('.person-card')) {
-
-
-      slot.innerHTML = '';
-
-
-      slot.appendChild(buildPersonCard(data, 'Cha_vc', false, p.share, effectiveReceive));
-
-
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
-
-
-      return;
-
-          }
-
-        }
-
-        if (p.role === 'Me_vc') {
-
-          const slot = document.querySelector('.slot[data-slot="spouse_mother"]');
-
-          if (slot && !slot.querySelector('.person-card')) {
-
-
-      slot.innerHTML = '';
-
-
-      slot.appendChild(buildPersonCard(data, 'Me_vc', false, p.share, effectiveReceive));
-
-
-      setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
-
-
-      return;
-
-          }
-
-        }
-
-        if (p.role === 'Vợ/Chồng') {
-
-          const slot = document.querySelector('.slot[data-slot="spouse"]');
-
-          if (slot) {
-
-
-      slot.innerHTML = '';
-
-
-      slot.appendChild(buildPersonCard(data, 'Vợ/Chồng', true, p.share, effectiveReceive));
-
-
-      return;
-
-          }
-
-        }
-
-        if (p.role === 'Con') {
-
-          const ph = childrenZone.querySelector('.child-placeholder');
-
-          if (ph) ph.remove();
-
-          const card = createChildCard(data, p.share, effectiveReceive);
-
-          childrenZone.appendChild(card);
-
-          setCustomerWorkflowState(data.id, { inTree: true, inPool: false });
-
-          return;
-
-        }
-
-        if (p.role === 'Con_dau_re') {
-
-          delayedSpouses.push({ data });
-
-          return;
-
-        }
-
-        if (p.role === 'Cháu') {
-
-          delayedGrand.push({ data, share: p.share, receive: effectiveReceive });
-
-          return;
-
-        }
-
-        setCustomerWorkflowState(data.id, { inTree: false, inPool: true });
-
-      });
-
-
-      delayedSpouses.forEach(({ data }) => {
-
-        const targetSlot = Array.from(document.querySelectorAll('.grand-group .grand-spouse-slot'))
-
-          .find(s => s && !s.querySelector('.person-card') && !String(s.textContent || '').includes('Không áp dụng'));
-
-        if (!targetSlot) return;
-
-        const prev = targetSlot.querySelector('.person-card');
-
-        if (prev) putBackToPool(prev);
-
-        targetSlot.innerHTML = '';
-
-        const sp = buildPersonCard(data, 'Vo_chong_con', true);
-
-        targetSlot.appendChild(sp);
-
-      });
-
-
-      delayedGrand.forEach(({ data, share, receive }) => {
-
-        const deadChild = Array.from(document.querySelectorAll('.child-card'))
-
-          .find(ch => !!parseDate(ch.dataset.death));
-
-        if (!deadChild) return;
-
-        const group = getGrandGroup(deadChild, true);
-
-        const zone = group.querySelector('.grand-zone');
-
-        if (zone.querySelector('.placeholder')) zone.innerHTML = '';
-
-        zone.appendChild(buildPersonCard(data, 'Cháu', true, share, receive));
-
-      });
-    }
-
-    setOwnerFromSelect();
-    updateGrandZones();
-    placeExistingParticipants();
-    // loadStagingFromStorage (snapshot-based) được gi sau khi được định nghĩa phía dưới
-    updateGrandZones();
-    recalcShares();
     loadPool();
 
-    // ── Inline add person (editable row, like land table) ──
+    // Inline add person (editable Stage row)
     function addPersonEditRow() {
 
       if (typeof window.addToOcrStaging === 'function') {
@@ -8194,7 +6263,6 @@ endif %}
 
       syncPrimaryPropertySelection();
 
-      recalcShares();
     });
 
     document.getElementById('pr-properties-multi')?.addEventListener('change', () => {
@@ -8320,289 +6388,35 @@ endif %}
     });
 
     // Build hidden participant inputs on submit
-    function recalcShares() {
-
-      const ownerSlot = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-      const ownerDeath = ownerSlot ? parseDate(ownerSlot.dataset.death) : null;
-
-
-      function setCardShare(card, val) {
-
-        if (!card) return;
-
-        const share = card.querySelector('.share-input');
-
-        const recv = card.querySelector('.receive-input');
-
-        if (share) share.value = val;
-
-        if (recv) {
-
-          // Ngưi đã chết: disable checkbox (không thể tự opt-out), nhưng KHÔNG force uncheck
-
-          // — việc h có nhận hay không do survivesAt() + checkbox ban đầu quyết định
-
-          const isDead = !!card.dataset.death;
-
-          if (isDead) recv.disabled = true;
-
-        }
-
-      }
-
-
-      function isOptedIn(card) {
-
-        if (!card) return false;
-
-        // Không dùng card.dataset.death để loại — ngưi chết sau owner vẫn được nhận
-
-        // survivesAt() trong recalcShares() mới là nơi kiểm tra điu kiện sống sót
-
-        const recv = card.querySelector('.receive-input');
-
-        return !!recv && recv.checked;
-
-      }
-
-
-      const allShareCards = Array.from(document.querySelectorAll('.person-card')).filter(c => c.querySelector('.share-input'));
-
-      allShareCards.forEach(c => setCardShare(c, '0'));
-
-
-      const father = document.querySelector('.slot[data-slot="owner_father"] .person-card');
-
-      const mother = document.querySelector('.slot[data-slot="owner_mother"] .person-card');
-
-      const spouse = document.querySelector('.slot[data-slot="spouse"] .person-card');
-
-      const owner = document.querySelector('.slot[data-slot="owner"] .person-card');
-
-      const childCards = Array.from(document.querySelectorAll('.child-card'));
-
-      const jointAsset = isJointAssetByMarriage();
-
-
-      const eligibleParents = [father, mother].filter(c => c && survivesAt(parseDate(c.dataset.death), ownerDeath) && isOptedIn(c));
-
-      const eligibleSpouse = spouse && survivesAt(parseDate(spouse.dataset.death), ownerDeath) && isOptedIn(spouse) ? [spouse] : [];
-
-
-      function uniqCards(cards) {
-
-        const seen = new Set();
-
-        return cards.filter(c => {
-
-          if (!c || !c.dataset.id || seen.has(c.dataset.id)) return false;
-
-          seen.add(c.dataset.id);
-
-          return true;
-
-        });
-
-      }
-
-
-      function collectFallbackRecipients(child, childDeath) {
-
-        const fallback = [];
-
-        if (owner && owner.dataset.id !== child.dataset.id && survivesAt(parseDate(owner.dataset.death), childDeath) && isOptedIn(owner)) {
-
-          fallback.push(owner);
-
-        }
-
-        if (spouse && spouse.dataset.id !== child.dataset.id && survivesAt(parseDate(spouse.dataset.death), childDeath) && isOptedIn(spouse)) {
-
-          fallback.push(spouse);
-
-        }
-
-        if (fallback.length > 0) return uniqCards(fallback);
-
-
-        const siblingsAlive = childCards.filter(s => s.dataset.id !== child.dataset.id && survivesAt(parseDate(s.dataset.death), childDeath) && isOptedIn(s));
-
-        if (siblingsAlive.length > 0) return uniqCards(siblingsAlive);
-
-
-        const niecesNephews = [];
-
-        childCards.filter(s => s.dataset.id !== child.dataset.id && !!parseDate(s.dataset.death)).forEach(sib => {
-
-          const sibDeath = parseDate(sib.dataset.death);
-
-          const sgroup = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${sib.dataset.id}"]`);
-
-          if (!sgroup) return;
-
-          const heirs = Array.from(sgroup.querySelectorAll('.grand-zone .person-card'));
-
-          heirs.forEach(h => {
-
-
-      if (survivesAt(parseDate(h.dataset.death), sibDeath) && isOptedIn(h)) niecesNephews.push(h);
-
-          });
-
-        });
-
-        return uniqCards(niecesNephews);
-
-      }
-
-
-      const branchUnits = [];
-
-      childCards.forEach(child => {
-
-        const childDeath = parseDate(child.dataset.death);
-
-        const status = child.dataset.flowStatus || deathFlowStatus(childDeath, ownerDeath);
-
-        const group = grandchildrenZone.querySelector(`.grand-group[data-parent-id="${child.dataset.id}"]`);
-
-        const branchSpouse = group ? group.querySelector('.grand-spouse-slot .person-card') : null;
-
-        const branchHeirs = group ? Array.from(group.querySelectorAll('.grand-zone .person-card')) : [];
-
-        const eligibleHeirs = branchHeirs.filter(g => survivesAt(parseDate(g.dataset.death), childDeath) && isOptedIn(g));
-
-        const recipients = [];
-
-
-        if (status === 'alive') {
-
-          if (isOptedIn(child)) branchUnits.push([child]);
-
-          return;
-
-        }
-
-
-        if (status === 'after') {
-
-          if (branchSpouse && survivesAt(parseDate(branchSpouse.dataset.death), childDeath) && isOptedIn(branchSpouse)) recipients.push(branchSpouse);
-
-          recipients.push(...eligibleHeirs);
-
-        } else {
-
-          recipients.push(...eligibleHeirs);
-
-        }
-
-
-        const branchRecipients = uniqCards(recipients);
-
-        if (branchRecipients.length > 0) {
-
-          branchUnits.push(branchRecipients);
-
-        } else {
-
-          const fb = collectFallbackRecipients(child, childDeath);
-
-          if (fb.length > 0) branchUnits.push(fb);
-
-        }
-
-      });
-
-
-      const estatePool = jointAsset ? 50 : 100;
-
-      const spouseBase = (jointAsset && spouse && survivesAt(parseDate(spouse.dataset.death), ownerDeath)) ? 50 : 0;
-
-      const totalUnits = eligibleParents.length + eligibleSpouse.length + branchUnits.length;
-
-      const alloc = new Map();
-
-      function addAlloc(card, amount) {
-
-        if (!card || !card.dataset.id || amount <= 0) return;
-
-        const prev = alloc.get(card.dataset.id) || { card, amount: 0 };
-
-        prev.amount += amount;
-
-        alloc.set(card.dataset.id, prev);
-
-      }
-
-
-      if (spouseBase > 0) addAlloc(spouse, spouseBase);
-
-      if (totalUnits > 0 && estatePool > 0) {
-
-        const unit = estatePool / totalUnits;
-
-        eligibleParents.forEach(c => addAlloc(c, unit));
-
-        eligibleSpouse.forEach(c => addAlloc(c, unit));
-
-        branchUnits.forEach(unitRecipients => {
-
-          const each = unit / unitRecipients.length;
-
-          unitRecipients.forEach(c => addAlloc(c, each));
-
-        });
-
-      }
-
-
-      alloc.forEach(({ card, amount }) => {
-
-        setCardShare(card, amount.toFixed(1));
-
-      });
-
-      validateTreeWarnings();
-    }
 
     function collectCaseStateSnapshot(latestEngineState = null, treeState = null) {
       const stage = getCommittedStageSnapshot();
+      const ownerId = String(ownerInput?.value || '').trim();
+      if (ownerId && !stage.some((item) => String(item?.id || '').trim() === ownerId)) {
+        const ownerRecord = normalizeCommittedStageRecord(resolveCustomerById(ownerId));
+        if (ownerRecord) stage.unshift(ownerRecord);
+      }
       const stageIds = new Set(stage.map((item) => String(item.id || '').trim()).filter(Boolean));
-      const assignments = {};
-      const nodes = Array.isArray(latestEngineState?.nodes)
-        ? latestEngineState.nodes.filter((node) => {
+      const rawEngineInput = treeState?.engineInput || latestEngineState?.engineInput || null;
+      const rawEngineResult = treeState?.engineResult || latestEngineState?.engineResult || null;
+      const nodes = Array.isArray(rawEngineInput?.nodes)
+        ? rawEngineInput.nodes.filter((node) => {
           const personId = String(node?.personId || node?.person?.id || '').trim();
           return !personId || stageIds.has(personId);
         })
         : [];
-      const nodeIds = new Set(nodes.map((node) => String(node?.id || '').trim()).filter(Boolean));
-      const prunedEngineState = latestEngineState
-        ? {
-          ...latestEngineState,
-          nodes,
-          edges: Array.isArray(latestEngineState.edges)
-            ? latestEngineState.edges.filter((edge) => {
-              const source = String(edge?.source || edge?.sourceId || '').trim();
-              const target = String(edge?.target || edge?.targetId || '').trim();
-              return (!source || nodeIds.has(source)) && (!target || nodeIds.has(target));
-            })
-            : latestEngineState.edges,
-        }
-        : null;
-      nodes.forEach((node) => {
-        const slotId = String(node?.id || '').trim();
-        const personId = String(node?.personId || '').trim();
-        if (slotId && personId) assignments[slotId] = personId;
-      });
+      const engineInput = rawEngineInput ? { ...rawEngineInput, version: 2, nodes } : null;
+      const updatedAt = treeState?.updatedAt || new Date().toISOString();
       return {
-        schemaVersion: 1,
+        version: 2,
+        schemaVersion: 2,
         caseId: String(document.getElementById('case-id-hidden')?.value || '').trim() || null,
+        updatedAt,
         stage,
         diagram: {
-          assignments,
-          engineState: prunedEngineState,
-          updatedAt: treeState?.updatedAt || new Date().toISOString(),
+          engineInput,
+          engineResult: rawEngineResult,
+          updatedAt,
         },
       };
     }
@@ -8632,6 +6446,27 @@ endif %}
         return;
 
       }
+
+      form.dataset.submitting = '1';
+      try {
+        if (window.__PENDING_CUSTOMER_UPDATES__.size > 0) {
+          showToast('Đang đồng bộ thông tin người trước khi lưu...', 'info');
+          const customerSync = await waitForPendingCustomerUpdates(10000);
+          if (!customerSync.ok) {
+            const reason = customerSync.timedOut
+              ? 'Đồng bộ thông tin người quá 10 giây. Kiểm tra kết nối rồi thử lại.'
+              : 'Có thông tin người chưa lưu được. Sửa lỗi trên dòng tương ứng rồi thử lại.';
+            showToast(reason, 'warning');
+            form.dataset.submitting = '0';
+            return;
+          }
+        }
+      } catch (error) {
+        showToast(`Không thể đồng bộ thông tin người: ${error?.message || error}`, 'danger');
+        form.dataset.submitting = '0';
+        return;
+      }
+      form.dataset.submitting = '0';
 
       const sel = document.getElementById('pr-tai-san-select');
 
@@ -8665,7 +6500,7 @@ endif %}
 
       let treeParticipants = Array.isArray(treeState?.participants) ? treeState.participants : [];
 
-      const warns = treeParticipants.length ? (treeState.warnings || []) : validateTreeWarnings();
+      const warns = Array.from(new Set([...(treeState.warnings || []), ...getRuntimeWarnings()]));
 
       if (warns.length > 0) {
 
@@ -8679,6 +6514,12 @@ endif %}
 
       treeParticipants = Array.isArray(treeState?.participants) ? treeState.participants : [];
 
+      const latestEngineResult = treeState.engineResult || treeState.engineState?.engineResult || null;
+      if (!latestEngineResult || latestEngineResult.status !== 'complete') {
+        showToast('Kết quả thừa kế chưa hoàn tất. Kiểm tra từng cảnh báo trên sơ đồ trước khi lưu.', 'warning');
+        return;
+      }
+
       const holder = document.getElementById('participants-hidden');
 
       if (holder) {
@@ -8691,9 +6532,6 @@ endif %}
 
           if (!pid || p?.role === 'Owner') return;
 
-          const decision = p.inheritanceDecision || (p.willReceive === false ? 'refuse' : 'unset');
-          if (decision === 'unset') return;
-
           holder.insertAdjacentHTML('beforeend', `
 
         <input type="hidden" name="participant_id" value="${pid}">
@@ -8702,7 +6540,7 @@ endif %}
 
         <input type="hidden" name="participant_share" value="${p.sharePercent || p.share || '0'}">
 
-        <input type="hidden" name="participant_receive" value="${decision === 'accept' ? '1' : '0'}">
+        <input type="hidden" name="participant_receive" value="${p.willReceive === true ? '1' : '0'}">
 
         <input type="hidden" name="participant_parent_id" value="${p.parentId || ''}">
 
@@ -8712,15 +6550,11 @@ endif %}
 
       }
 
-      const owner = treeParticipants.find((p) => p.role === 'Owner');
-
-      if (ownerInput) ownerInput.value = owner ? owner.id : '';
-
-      const latestEngineState = treeState.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
+      const latestEngineState = treeState.engineState || null;
 
       if (engineStateInput) {
 
-        engineStateInput.value = latestEngineState ? JSON.stringify(latestEngineState) : '';
+        engineStateInput.value = '';
 
       }
 
@@ -8728,19 +6562,7 @@ endif %}
 
       if (diagramPayloadInput) {
 
-        const hasNodes = Array.isArray(latestEngineState?.nodes) && latestEngineState.nodes.length > 0;
-
-        const payload = hasNodes ? {
-
-          version: 2,
-
-          updatedAt: treeState.updatedAt || new Date().toISOString(),
-
-          engineState: latestEngineState
-
-        } : null;
-
-        diagramPayloadInput.value = payload ? JSON.stringify(payload) : '';
+        diagramPayloadInput.value = '';
 
       }
       if (caseStateInput) {
@@ -8761,7 +6583,7 @@ endif %}
           HTMLFormElement.prototype.submit.call(form);
           return;
         }
-        showToast('Can Tao ho so truoc khi Luu so do', 'warning');
+        showToast('Cần tạo hồ sơ trước khi Lưu sơ đồ', 'warning');
         form.dataset.submitting = '0';
         if (api.setSaving) api.setSaving(false);
         return;
@@ -8770,8 +6592,6 @@ endif %}
       try {
         const body = new URLSearchParams({
           case_state_json: caseStateInput?.value || JSON.stringify(collectCaseStateSnapshot(latestEngineState, treeState)),
-          diagram_payload: diagramPayloadInput?.value || '',
-          engine_state_json: engineStateInput?.value || '',
         });
         const resp = await fetch(`/cases/${caseId}/diagram-update`, { method: 'POST', body });
         const json = await resp.json().catch(() => ({}));
@@ -8779,11 +6599,9 @@ endif %}
           throw new Error(json.error || 'diagram_update_failed');
         }
         if (json.case_state_json && caseStateInput) caseStateInput.value = json.case_state_json;
-        if (engineStateInput) engineStateInput.value = json.engine_state_json || '';
-        if (diagramPayloadInput) diagramPayloadInput.value = json.diagram_payload || '';
-        showToast('Da luu trang thai so do', 'success');
+        showToast('Đã lưu trạng thái sơ đồ', 'success');
       } catch (e) {
-        showToast(`Khong the luu so do: ${e?.message || e}`, 'danger');
+        showToast(`Không thể lưu sơ đồ: ${e?.message || e}`, 'danger');
       } finally {
         form.dataset.submitting = '0';
         if (api.setSaving) api.setSaving(false);
@@ -8796,177 +6614,18 @@ endif %}
   <script src="/static/vendor/react.production.min.js"></script>
   <script src="/static/vendor/react-dom.production.min.js"></script>
   <script src="/static/vendor/babel.min.js"></script>
-  <script src="/static/inheritance_engine.js?v=20260430a"></script>
   <script src="/static/diagram_state.js?v=20260511a"></script>
   <script src="/static/diagram_edges.js?v=20260511a"></script>
   <script type="text/babel" data-presets="react" 
-src="/static/ReactFlowApp.jsx?v=20260703b"></script>
+src="/static/ReactFlowApp.jsx?v=20260722a"></script>
 
-  <script>
-    // ─── LIVE PREVIEW ─────────────────────────────────────────────────────────────
-    async function loadLivePreview() {
-
-      const emptyState = document.getElementById('preview-empty-state');
-
-
-      // Thu thập dữ liệu từ pool và form hiện tại
-
-      const payload = new URLSearchParams({
-
-        ngay_lap_ho_so: document.querySelector('input[name="ngay_lap_ho_so"]')?.value || '',
-
-        loai_van_ban: document.querySelector('select[name="loai_van_ban"]')?.value || '',
-
-        tai_san_id: document.getElementById('case-tai-san')?.value || '',
-
-        ghi_chu: document.querySelector('input[name="ghi_chu"]')?.value || ''
-
-      });
-
-
-      // c payload từ React Flow
-
-      const treeState = getFamilyTreeState();
-
-      const treePayload = treeState.participants && treeState.participants.length
-
-        ? treeState.participants
-
-        : (window.__CURRENT_TREE_PAYLOAD__ || []);
-
-
-      treePayload.forEach(p => {
-
-        const decision = p.inheritanceDecision || (p.willReceive === false ? 'refuse' : 'unset');
-
-        if (decision === 'unset') return;
-
-        payload.append('participant_id', p.id);
-
-        payload.append('participant_role', p.role);
-
-        payload.append('participant_share', p.sharePercent || p.share || '0');
-
-        payload.append('participant_receive', decision === 'accept' ? '1' : '0');
-
-        payload.append('participant_parent_id', p.parentId || '');
-
-      });
-
-
-      if (emptyState) emptyState.style.display = 'none';
-
-
-      try {
-
-        const response = await fetch('/cases/live-preview', {
-
-          method: 'POST',
-
-          body: payload,
-
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-
-        });
-
-
-        if (response.ok) {
-
-          const data = await response.json();
-
-          if (data.html_content && window.liveEditor) {
-
-
-      window.liveEditor.setContent(data.html_content);
-
-          } else if (emptyState) {
-
-
-      emptyState.style.display = 'flex';
-
-
-      emptyState.innerHTML = '<p class="text-danger">Không tạo được nội dung xem trước.</p>';
-
-          }
-
-        }
-
-      } catch (err) {
-
-        console.error('Lỗi khi tải preview', err);
-
-      }
-    }
-
-    let __familyTreePreviewTimer = null;
-    window.addEventListener('onFamilyTreeUpdate', () => {
-
-      clearTimeout(__familyTreePreviewTimer);
-
-      __familyTreePreviewTimer = setTimeout(() => {
-
-        if (typeof loadLivePreview === 'function' && window.liveEditor) {
-
-          loadLivePreview();
-
-        }
-
-      }, 350);
-    });
-
-    if (getFamilyTreeState().participants.length && window.liveEditor) {
-
-      loadLivePreview();
-    }
-
-    function exportDraftWord() {
-
-      if (!window.liveEditor) return;
-
-      const content = window.liveEditor.getContent();
-
-      if (!content) {
-
-        alert("Chưa có nội dung văn bản. Vui lòng nhấn Cập nhật bản nháp trước.");
-
-        return;
-
-      }
-
-      const form = document.createElement('form');
-
-      form.method = 'POST';
-
-      form.action = '/cases/export-draft';
-
-      form.style.display = 'none';
-
-
-      const input = document.createElement('input');
-
-      input.type = 'hidden';
-
-      input.name = 'html_content';
-
-      input.value = content;
-
-
-      form.appendChild(input);
-
-      document.body.appendChild(form);
-
-      form.submit();
-
-      setTimeout(() => form.remove(), 1000);
-    }
-  </script>
 
   <!-- jsQR: quét QR code phía client (miễn phí, không tốn token) -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
   <script>
     // 
-    //  OCR MODULE — Nhập dữ liệu từ ảnh giấy t
+    //  OCR MODULE — Nhập dữ liệu từ ảnh giấy tờ
     // 
 
     const OCR = (() => {
@@ -11475,7 +9134,7 @@ overlay._previewItems = previewItems;
 
           html += `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:8px;">
 
-        <i class="bi bi-people me-1"></i>Ngưi (${persons.length})
+        <i class="bi bi-people me-1"></i>Người (${persons.length})
 
         <span style="font-size:10px;font-weight:400;text-transform:none;color:#94a3b8;margin-left:8px;">Tên ưu tiên QR/mặt trước. Chỉnh trực tiếp nếu cần.</span>
 
@@ -11538,7 +9197,7 @@ overlay._previewItems = previewItems;
 
         document.getElementById('ocr-summary-text').textContent =
 
-          `${persons.length} ngưi, ${properties.length} tài sản`;
+          `${persons.length} người, ${properties.length} tài sản`;
 
       }
 
@@ -11805,7 +9464,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         } else if (warningFields.has('missing_front') || srcKey.includes('cccd_backonly') || srcKey.includes('cccdbackonly')) {
 
-          suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt trước CCCD (lấy tên + địa chỉ)"><i class="bi bi-camera"></i> Bổ sung</button>`;
+          suppBtn = `<button class="btn btn-sm btn-outline-warning ocr-suppl-btn" onclick="ocrSupplementCard(${idx},'front')" style="font-size:11px;padding:2px 7px;flex-shrink:0;" title="Bổ sung mặt trước CCCD (lấy tên + Địa chỉ)"><i class="bi bi-camera"></i> Bổ sung</button>`;
 
         }
 
@@ -11883,7 +9542,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         ${sourceBadgeHtml}
 
-        ${inp('ho_ten', displayName, 'H tên', 'flex:2;min-width:110px;')}
+        ${inp('ho_ten', displayName, 'Họ và tên', 'flex:2;min-width:110px;')}
 
         ${genderSel}
 
@@ -11901,7 +9560,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       <div style="margin-top:5px;">
 
-        ${inp('dia_chi', d.dia_chi, 'ịa chỉ thưng trú', 'flex:1;width:100%;')}
+        ${inp('dia_chi', d.dia_chi, 'Địa chỉ thường trú', 'flex:1;width:100%;')}
 
       </div>
 
@@ -11976,7 +9635,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       <div style="margin-top:8px;font-size:11px;color:#94a3b8;">
 
-        💡 Thông tin hôn nhân — bổ sung quan hệ sau khi thêm ngưi vào pool
+        💡 Thông tin hôn nhân — bổ sung quan hệ sau khi thêm người vào pool
 
       </div>
     </div>`;
@@ -12007,7 +9666,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         <div><span style="color:#64748b;">Ngày cấp:</span> ${d.ngay_cap || '—'}</div>
 
-        <div style="grid-column:1/-1;"><span style="color:#64748b;">ịa chỉ:</span> ${d.dia_chi || '—'}</div>
+        <div style="grid-column:1/-1;"><span style="color:#64748b;">Địa chỉ:</span> ${d.dia_chi || '—'}</div>
 
       </div>
 
@@ -12131,7 +9790,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           if (!allowMissingSides && hasBlockingWarnings) continue;
 
-          if (!d.ho_ten) continue;  // B qua nếu không có tên
+          if (!d.ho_ten) continue;  // Bỏ qua nếu không có tên
 
           r._staged = true;
 
@@ -12221,9 +9880,9 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
         const result = autoStageOcrResults({ allowMissingSides: true, allowDuplicates: true });
 
         if ((result?.stagedCount || 0) > 0) {
-          showToast(`Da day ${result.stagedCount} dong OCR xuong stage`, 'success');
+          showToast(`Đã đẩy ${result.stagedCount} dòng OCR xuống Stage`, 'success');
         } else {
-          showToast('Chua co dong OCR nguoi nao de luu', 'warning');
+          showToast('Chưa có dòng OCR người nào để lưu', 'warning');
         }
 
         return result;
@@ -12262,7 +9921,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         row.innerHTML = `
 
-      <input class="form-control" data-key="ho_ten" value="${escVal(c.ho_ten)}" placeholder="H tên">
+      <input class="form-control" data-key="ho_ten" value="${escVal(c.ho_ten)}" placeholder="Họ và tên">
 
       <select class="form-select" data-key="gioi_tinh">
 
@@ -12282,13 +9941,13 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(c.ngay_cap))}"  placeholder="dd/mm/yyyy">
 
-      <input class="form-control" data-key="dia_chi" value="${escVal(c.dia_chi)}" placeholder="ịa chỉ thưng trú">
+      <input class="form-control" data-key="dia_chi" value="${escVal(c.dia_chi)}" placeholder="Địa chỉ thường trú">
 
       <div class="row-actions">
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
-        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xóa người này khỏi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
 
       </div>`;
 
@@ -12410,9 +10069,9 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       }
 
 
-      // ── Thêm ngưi thủ công vào pool (từ inline-create button) ─────────────
+      // ── Thêm người thủ công vào pool (từ inline-create button) ─────────────
 
-      // Giữ lại để tương thích với flow thêm ngưi thủ công (nút Thêm trong card)
+      // Giữ lại để tương thích với flow thêm người thủ công (nút Thêm trong card)
 
       window.ocrAddPersonToPool = async function (idx) {
 
@@ -12662,7 +10321,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         row.innerHTML = `
 
-      <input class="form-control" data-key="ho_ten" value="${escVal(record.ho_ten)}" placeholder="H tên">
+      <input class="form-control" data-key="ho_ten" value="${escVal(record.ho_ten)}" placeholder="Họ và tên">
 
       <select class="form-select" data-key="gioi_tinh">
 
@@ -12682,13 +10341,13 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       <input class="form-control" data-key="ngay_cap"  value="${escVal(_fmtDate(record.ngay_cap))}"  placeholder="dd/mm/yyyy">
 
-      <input class="form-control" data-key="dia_chi" value="${escVal(record.dia_chi)}" placeholder="ịa chỉ thưng trú">
+      <input class="form-control" data-key="dia_chi" value="${escVal(record.dia_chi)}" placeholder="Địa chỉ thường trú">
 
       <div class="row-actions">
 
         <span class="staged-save-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
-        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xóa người này khỏi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
 
         <button type="button" class="btn btn-xs btn-primary stage-pool-disabled d-none" title="disabled legacy pool action" tabindex="-1" aria-hidden="true">+</button>
 
@@ -13006,7 +10665,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         document.getElementById('pr-so-serial')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-        showToast('✅ ã đin thông tin tài sản', 'success');
+        showToast('✅ Đã điền thông tin tài sản', 'success');
 
       };
 
@@ -13052,7 +10711,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       });
 
 
-      // ── Khi đóng modal: đẩy ngưi chưa thêm ra staging area ──
+      // ── Khi đóng modal: đẩy người chưa thêm ra staging area ──
 
       const CASE_DEBUG_MAX_EVENTS = 200;
 
@@ -13339,7 +10998,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           });
 
-          showToast('Da copy debug snapshot', 'success');
+          showToast('Đã copy debug snapshot', 'success');
 
           return snapshot;
 
@@ -13352,7 +11011,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           });
 
-          showToast('Khong copy duoc debug snapshot', 'danger');
+          showToast('Không copy được debug snapshot', 'danger');
 
           throw error;
 
@@ -13551,27 +11210,6 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
       }
 
 
-      async function flushPendingDebounces() {
-
-        const timers = Array.from(window.__PENDING_CUSTOMER_UPDATE_TIMERS__.values());
-
-        window.__PENDING_CUSTOMER_UPDATE_TIMERS__.clear();
-
-        for (const entry of timers) {
-
-          if (entry?.timerId) clearTimeout(entry.timerId);
-
-          if (entry?.row) {
-
-            await _saveStagingRow(entry.row, entry.customerId, entry.statusEl);
-
-          }
-
-        }
-
-      }
-
-
       async function waitForPendingCustomerUpdates(timeoutMs = 10000) {
 
         const pending = Array.from(window.__PENDING_CUSTOMER_UPDATES__.values());
@@ -13743,7 +11381,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         row.innerHTML = `
 
-      <input type="text" class="form-control" value="${_escHtml(data.ho_ten)}" data-key="ho_ten" placeholder="H và tên">
+      <input type="text" class="form-control" value="${_escHtml(data.ho_ten)}" data-key="ho_ten" placeholder="Họ và tên">
 
       <select class="form-select" data-key="gioi_tinh">
 
@@ -13763,13 +11401,13 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
       <input type="text" class="form-control" value="${_escHtml(_fmtDate(data.ngay_cap))}" data-key="ngay_cap" placeholder="dd/mm/yyyy">
 
-      <input type="text" class="form-control" value="${_escHtml(data.dia_chi)}" data-key="dia_chi" placeholder="ịa chỉ">
+      <input type="text" class="form-control" value="${_escHtml(data.dia_chi)}" data-key="dia_chi" placeholder="Địa chỉ">
 
       <div class="row-actions">
 
         <span class="draft-row-status" style="font-size:10px;color:#64748b;flex-shrink:0;min-width:12px;"></span>
 
-        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xoa nguoi nay khoi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
+        <button type="button" class="btn btn-xs btn-outline-danger stage-remove-btn" title="Xóa người này khỏi stage" style="font-size:14px;padding:0 4px;line-height:1;">&times;</button>
 
       </div>
     `;
@@ -13839,6 +11477,12 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
         if (!Array.isArray(existingParticipants) || !existingParticipants.length) return;
 
+        const stagedIds = new Set(
+          Array.from(document.querySelectorAll('#ocr-staging-area .ocr-staged-row'))
+            .map((row) => String(row.dataset.cid || '').trim())
+            .filter(Boolean)
+        );
+
         const treeIds = new Set(
 
           (getFamilyTreeState().participants || [])
@@ -13857,9 +11501,13 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           if (!record?.id) return;
 
-          window.addToOcrStaging(record, { source: 'existing', skipDuplicateGuard: true });
+          const recordId = String(record.id);
+          if (!stagedIds.has(recordId)) {
+            window.addToOcrStaging(record, { source: 'existing', skipDuplicateGuard: true });
+            stagedIds.add(recordId);
+          }
 
-          const isPlacedInTree = treeIds.has(String(record.id));
+          const isPlacedInTree = treeIds.has(recordId);
 
           updateCustomerWorkflow(record.id, {
 
@@ -13897,13 +11545,13 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
           if (!skipEmptyWarning) {
 
 
-      showToast('Chua co nguoi nao de luu', 'warning');
+      showToast('Chưa có người nào để lưu', 'warning');
 
           }
 
           return { savedCount: 0, failedCount: 0, rowCount: 0 };
 
-          showToast('Chưa có ngưi nào để lưu', 'warning');
+          showToast('Chưa có người nào để lưu', 'warning');
 
           return;
 
@@ -14207,7 +11855,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           const treeState = typeof getFamilyTreeState === 'function' ? getFamilyTreeState() : null;
 
-          const latestEngineState = treeState?.engineState || window.__FAMILY_TREE_STATE__?.engineState || null;
+          const latestEngineState = treeState?.engineState || null;
 
           if (typeof window.persistCommittedStageSnapshot === 'function') {
 
@@ -14225,7 +11873,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           failedCount += 1;
 
-          showToast('Khong the cap nhat Stage. OCR tam van duoc giu lai de doi chieu.', 'warning');
+          showToast('Không thể cập nhật Stage. OCR tạm vẫn được giữ lại để đối chiếu.', 'warning');
 
           if (typeof window.__pushCaseDebugEvent__ === 'function') {
 
@@ -14260,7 +11908,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           loadPool();
 
-          showToast(`Da cap nhat ${savedCount} nguoi tu Stage`, 'success');
+          showToast(`Đã cập nhật ${savedCount} người từ Stage`, 'success');
 
         }
 
@@ -14283,7 +11931,7 @@ const sourceTagForRaw = String(result?.source_type || result?.source || d.source
 
           saveBtn.disabled = n === 0;
 
-          saveBtn.innerHTML = `<i class="bi bi-check2-circle me-1"></i>Cap nhat${n ? ` (${n})` : ''}`;
+          saveBtn.innerHTML = `<i class="bi bi-check2-circle me-1"></i>Cập nhật${n ? ` (${n})` : ''}`;
 
         }
 

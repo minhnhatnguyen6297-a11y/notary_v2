@@ -9,18 +9,23 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.responses import JSONResponse
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 import database
-from models import Customer, InheritanceCase, Property
+from models import Customer, InheritanceCase, InheritanceParticipant, Property
 from routers.cases import (
     DiagramPayloadValidationError,
     _derive_case_state_json_from_participants,
     _merge_case_state_diagram,
+    _merge_case_state_stage,
     _normalize_case_state_json,
     _normalize_diagram_payload,
     _parse_case_diagram_payload,
     _resolve_posted_participants,
+    _resolve_v2_case_state,
     _validate_case_refs,
+    calculate_diagram,
     create,
     edit,
     update_diagram,
@@ -152,7 +157,7 @@ class CaseStatePayloadTests(unittest.TestCase):
 
         self.assertIn("khong co trong stage", str(exc.exception))
 
-    def test_normalize_case_state_json_prunes_orphan_edges_outside_engine_nodes(self):
+    def test_normalize_case_state_json_drops_legacy_edges(self):
         raw = json.dumps({
             "schemaVersion": 1,
             "stage": [
@@ -175,12 +180,9 @@ class CaseStatePayloadTests(unittest.TestCase):
 
         normalized = json.loads(_normalize_case_state_json(raw))
 
-        self.assertEqual(
-            [edge["id"] for edge in normalized["diagram"]["engineState"]["edges"]],
-            ["keep-edge"],
-        )
+        self.assertNotIn("edges", normalized["diagram"]["engineState"])
 
-    def test_normalize_case_state_json_preserves_supplemental_engine_state_fields(self):
+    def test_normalize_case_state_json_keeps_render_metadata_but_drops_legacy_output(self):
         raw = json.dumps({
             "schemaVersion": 1,
             "stage": [
@@ -211,9 +213,10 @@ class CaseStatePayloadTests(unittest.TestCase):
         normalized = json.loads(_normalize_case_state_json(raw))
         normalized_engine_state = normalized["diagram"]["engineState"]
 
-        self.assertEqual(normalized_engine_state["allocations"]["2"]["displayPercent"], "50.00")
-        self.assertEqual(normalized_engine_state["warnings"][0]["code"], "demo_warning")
-        self.assertEqual(normalized_engine_state["trace"][0]["to"], "2")
+        self.assertNotIn("edges", normalized_engine_state)
+        self.assertNotIn("allocations", normalized_engine_state)
+        self.assertNotIn("warnings", normalized_engine_state)
+        self.assertNotIn("trace", normalized_engine_state)
         self.assertEqual(normalized_engine_state["viewport"]["zoom"], 0.85)
         self.assertEqual(normalized_engine_state["layoutMeta"]["laneOffsets"]["children"], 240)
         self.assertEqual(normalized_engine_state["layoutMeta"]["collapsedBranches"][0], "child_2")
@@ -256,7 +259,7 @@ class CaseStatePayloadTests(unittest.TestCase):
         with self.assertRaises(DiagramPayloadValidationError):
             _merge_case_state_diagram(existing, submitted)
 
-    def test_merge_case_state_diagram_preserves_submitted_engine_state_supplemental_fields(self):
+    def test_merge_case_state_diagram_drops_legacy_output_and_keeps_render_metadata(self):
         existing = json.dumps({
             "schemaVersion": 1,
             "stage": [{"id": "10", "ho_ten": "Stage source"}],
@@ -289,9 +292,9 @@ class CaseStatePayloadTests(unittest.TestCase):
 
         self.assertEqual(merged["stage"][0]["ho_ten"], "Stage source")
         self.assertEqual(merged["diagram"]["assignments"], {"owner": "10"})
-        self.assertEqual(merged_engine_state["allocations"]["10"]["displayPercent"], "100.00")
-        self.assertEqual(merged_engine_state["warnings"][0]["code"], "new_warning")
-        self.assertEqual(merged_engine_state["trace"][0]["to"], "owner")
+        self.assertNotIn("allocations", merged_engine_state)
+        self.assertNotIn("warnings", merged_engine_state)
+        self.assertNotIn("trace", merged_engine_state)
         self.assertEqual(merged_engine_state["viewport"]["zoom"], 0.9)
         self.assertEqual(merged_engine_state["layoutMeta"]["laneOffsets"]["children"], 220)
 
@@ -1202,7 +1205,7 @@ class CaseStatePayloadTests(unittest.TestCase):
             ["child_anchor", "child_2"],
         )
 
-    def test_update_diagram_preserves_flow_from_on_reused_node(self):
+    def test_update_diagram_drops_legacy_flow_from_metadata(self):
         case = SimpleNamespace(
             id=94,
             is_locked=False,
@@ -1295,10 +1298,10 @@ class CaseStatePayloadTests(unittest.TestCase):
         self.assertTrue(fake_db.committed)
         self.assertEqual(captured["case_id"], 94)
         self.assertEqual(captured["participant_ids"], [2])
-        self.assertEqual(saved_case_state["diagram"]["engineState"]["nodes"][0]["flowFrom"], ["owner", "spouse_mother"])
-        self.assertEqual(json.loads(case.engine_state_json)["nodes"][0]["flowFrom"], ["owner", "spouse_mother"])
+        self.assertNotIn("flowFrom", saved_case_state["diagram"]["engineState"]["nodes"][0])
+        self.assertNotIn("flowFrom", json.loads(case.engine_state_json)["nodes"][0])
 
-    def test_update_diagram_merges_flow_from_into_kept_canonical_duplicate_node(self):
+    def test_update_diagram_drops_duplicate_legacy_flow_metadata(self):
         case = SimpleNamespace(
             id=95,
             is_locked=False,
@@ -1425,14 +1428,8 @@ class CaseStatePayloadTests(unittest.TestCase):
             [node["id"] for node in saved_case_state["diagram"]["engineState"]["nodes"]],
             ["child_anchor", "child_2"],
         )
-        self.assertEqual(
-            saved_case_state["diagram"]["engineState"]["nodes"][1]["flowFrom"],
-            ["owner", "child_anchor", "spouse_mother"],
-        )
-        self.assertEqual(
-            json.loads(case.engine_state_json)["nodes"][1]["flowFrom"],
-            ["owner", "child_anchor", "spouse_mother"],
-        )
+        self.assertNotIn("flowFrom", saved_case_state["diagram"]["engineState"]["nodes"][1])
+        self.assertNotIn("flowFrom", json.loads(case.engine_state_json)["nodes"][1])
 
     def test_update_diagram_prunes_empty_slot_attached_to_removed_duplicate_branch(self):
         case = SimpleNamespace(
@@ -1587,7 +1584,6 @@ class CaseStatePayloadTests(unittest.TestCase):
         saved_nodes = saved_case_state["diagram"]["engineState"]["nodes"]
         saved_assignments = saved_case_state["diagram"]["assignments"]
         saved_node_ids = [node["id"] for node in saved_nodes]
-        saved_edges = saved_case_state["diagram"]["engineState"]["edges"]
         self.assertTrue(fake_db.committed)
         self.assertEqual(captured["case_id"], 95_1)
         self.assertEqual(captured["participant_ids"], [3, 2])
@@ -1595,15 +1591,15 @@ class CaseStatePayloadTests(unittest.TestCase):
         self.assertEqual(saved_node_ids, ["child_anchor", "child_2"])
         self.assertNotIn("grandchild_dup", saved_node_ids)
         self.assertNotIn("branch_spouse_orphan", saved_node_ids)
-        self.assertEqual(saved_edges, [])
+        self.assertNotIn("edges", saved_case_state["diagram"]["engineState"])
         self.assertNotIn(
             "branch_spouse_orphan",
             [node["id"] for node in json.loads(case.engine_state_json)["nodes"]],
         )
-        self.assertEqual(json.loads(case.engine_state_json)["edges"], [])
-        self.assertEqual(json.loads(result["diagram_payload"])["edges"], [])
+        self.assertNotIn("edges", json.loads(case.engine_state_json))
+        self.assertNotIn("edges", json.loads(result["diagram_payload"]))
 
-    def test_update_diagram_preserves_valid_edges_and_prunes_edges_to_removed_nodes(self):
+    def test_update_diagram_drops_legacy_edges_even_when_endpoints_are_valid(self):
         case = SimpleNamespace(
             id=96,
             is_locked=False,
@@ -1733,23 +1729,14 @@ class CaseStatePayloadTests(unittest.TestCase):
             )
 
         saved_case_state = json.loads(result["case_state_json"])
-        saved_edges = saved_case_state["diagram"]["engineState"]["edges"]
         self.assertTrue(fake_db.committed)
         self.assertEqual(captured["case_id"], 96)
         self.assertEqual(captured["participant_ids"], [3, 2])
-        self.assertEqual(len(saved_edges), 1)
-        self.assertEqual(saved_edges[0]["id"], "keep-edge")
-        self.assertEqual(saved_edges[0]["label"], "Nhanh hop le")
-        self.assertEqual(saved_edges[0]["markerEnd"]["type"], "arrowclosed")
-        self.assertEqual(saved_edges[0]["style"]["strokeWidth"], 2)
-        self.assertEqual(json.loads(case.engine_state_json)["edges"][0]["id"], "keep-edge")
-        self.assertEqual(json.loads(case.engine_state_json)["edges"][0]["label"], "Nhanh hop le")
-        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["id"], "keep-edge")
-        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["label"], "Nhanh hop le")
-        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["markerEnd"]["type"], "arrowclosed")
-        self.assertEqual(json.loads(result["diagram_payload"])["edges"][0]["style"]["strokeWidth"], 2)
+        self.assertNotIn("edges", saved_case_state["diagram"]["engineState"])
+        self.assertNotIn("edges", json.loads(case.engine_state_json))
+        self.assertNotIn("edges", json.loads(result["diagram_payload"]))
 
-    def test_update_diagram_preserves_engine_state_allocations_warnings_and_trace(self):
+    def test_update_diagram_drops_legacy_allocations_warnings_and_trace(self):
         case = SimpleNamespace(
             id=97,
             is_locked=False,
@@ -1851,16 +1838,10 @@ class CaseStatePayloadTests(unittest.TestCase):
         self.assertTrue(fake_db.committed)
         self.assertEqual(captured["case_id"], 97)
         self.assertEqual(captured["participant_ids"], [2])
-        self.assertIn("allocations", saved_engine_state)
-        self.assertIn("warnings", saved_engine_state)
-        self.assertIn("trace", saved_engine_state)
-        self.assertEqual(saved_engine_state["allocations"]["2"]["baseShare"], "1/2")
-        self.assertEqual(saved_engine_state["warnings"][0]["code"], "demo_warning")
-        self.assertEqual(saved_engine_state["trace"][0]["fraction"], "1/2")
-        self.assertEqual(json.loads(case.engine_state_json)["trace"][0]["to"], "2")
-        self.assertEqual(json.loads(result["diagram_payload"])["allocations"]["2"]["baseShare"], "1/2")
-        self.assertEqual(json.loads(result["diagram_payload"])["warnings"][0]["code"], "demo_warning")
-        self.assertEqual(json.loads(result["diagram_payload"])["trace"][0]["to"], "2")
+        for key in ("allocations", "warnings", "trace"):
+            self.assertNotIn(key, saved_engine_state)
+            self.assertNotIn(key, json.loads(case.engine_state_json))
+            self.assertNotIn(key, json.loads(result["diagram_payload"]))
 
     def test_update_diagram_preserves_supplemental_render_metadata(self):
         case = SimpleNamespace(
@@ -2940,6 +2921,208 @@ class CaseStatePayloadTests(unittest.TestCase):
 
 
 class DiagramPayloadParserTests(unittest.TestCase):
+    @staticmethod
+    def _v2_case_state(*, receive=True, fake_result=None):
+        diagram = {
+            "engineInput": {
+                "version": 2,
+                "nodes": [
+                    {
+                        "id": "owner",
+                        "personId": "1",
+                        "relationType": "person",
+                        "roleLabel": "Chủ đất",
+                        "parentSlotIds": [],
+                        "spouseSlotId": None,
+                        "isLandOwner": True,
+                        "willReceive": False,
+                        "hidden": False,
+                        "deleted": False,
+                    },
+                    {
+                        "id": "child",
+                        "personId": "2",
+                        "relationType": "child",
+                        "roleLabel": "Con",
+                        "parentSlotIds": ["owner"],
+                        "spouseSlotId": None,
+                        "isLandOwner": False,
+                        "willReceive": receive,
+                        "hidden": False,
+                        "deleted": False,
+                    },
+                ],
+            },
+        }
+        if fake_result is not None:
+            diagram["engineResult"] = fake_result
+        return json.dumps({
+            "schemaVersion": 2,
+            "stage": [{"id": "1"}, {"id": "2"}],
+            "diagram": diagram,
+        })
+
+    def test_v2_case_state_recomputes_result_and_projects_backend_percentage(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        child = _customer(2, "Child")
+
+        resolved = _resolve_v2_case_state(
+            self._v2_case_state(fake_result={"allocations": {"2": {"finalShare": "0"}}}),
+            customers_by_id={"1": owner, "2": child},
+            deceased_customer_id="1",
+        )
+
+        self.assertIsNotNone(resolved)
+        normalized, participants, participant_ids, result = resolved
+        saved = json.loads(normalized)
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual(saved["schemaVersion"], 2)
+        self.assertTrue(saved["updatedAt"].endswith("Z"))
+        self.assertEqual(result["allocations"]["2"]["finalShare"], "1")
+        self.assertEqual(saved["diagram"]["engineResult"], result)
+        self.assertEqual(participant_ids, {2})
+        self.assertEqual(participants[0].ty_le, 100.0)
+        self.assertEqual(participants[0].parent_customer_id, 1)
+
+    def test_v2_case_state_drops_legacy_diagram_mirrors_on_save(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        child = _customer(2, "Child")
+        payload = json.loads(self._v2_case_state())
+        payload["diagram"].update({
+            "assignments": {"child": "2"},
+            "engineState": {
+                "nodes": [{"id": "child", "personId": "2"}],
+                "allocations": {"2": {"finalShare": "999"}},
+                "trace": [{"from": "1", "to": "2"}],
+            },
+        })
+
+        normalized, _participants, _participant_ids, _result = _resolve_v2_case_state(
+            json.dumps(payload),
+            customers_by_id={"1": owner, "2": child},
+            deceased_customer_id="1",
+        )
+
+        saved_diagram = json.loads(normalized)["diagram"]
+        self.assertEqual(set(saved_diagram), {"engineInput", "engineResult"})
+
+
+    def test_v2_participant_projection_uses_exact_engine_share_instead_of_hardcoded_value(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        first_child = _customer(2, "First child")
+        second_child = _customer(3, "Second child")
+        payload = json.loads(self._v2_case_state())
+        payload["stage"].append({"id": "3"})
+        payload["diagram"]["engineInput"]["nodes"].append({
+            "id": "child_2",
+            "personId": "3",
+            "relationType": "child",
+            "roleLabel": "Con",
+            "parentSlotIds": ["owner"],
+            "spouseSlotId": None,
+            "isLandOwner": False,
+            "willReceive": True,
+            "hidden": False,
+            "deleted": False,
+        })
+
+        resolved = _resolve_v2_case_state(
+            json.dumps(payload),
+            customers_by_id={"1": owner, "2": first_child, "3": second_child},
+            deceased_customer_id="1",
+        )
+
+        self.assertIsNotNone(resolved)
+        _normalized, participants, participant_ids, result = resolved
+        shares = {participant.customer_id: participant.ty_le for participant in participants}
+        self.assertEqual(participant_ids, {2, 3})
+        self.assertEqual(result["allocations"]["2"]["finalShare"], "1/2")
+        self.assertEqual(result["allocations"]["3"]["finalShare"], "1/2")
+        self.assertEqual(shares, {2: 50.0, 3: 50.0})
+
+    def test_v2_case_state_invalid_or_incomplete_never_falls_back_to_legacy(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        child = _customer(2, "Child")
+
+        with self.assertRaises(DiagramPayloadValidationError) as exc:
+            _resolve_v2_case_state(
+                self._v2_case_state(receive=False),
+                customers_by_id={"1": owner, "2": child},
+                deceased_customer_id="1",
+            )
+
+        self.assertIn("chưa có người nhận", str(exc.exception))
+
+    def test_v2_marker_without_engine_input_is_rejected_instead_of_falling_back(self):
+        raw = json.dumps({
+            "version": 2,
+            "schemaVersion": 2,
+            "stage": [{"id": "1"}],
+            "diagram": {"engineResult": {"status": "complete"}},
+        })
+
+        with self.assertRaises(DiagramPayloadValidationError) as exc:
+            _resolve_v2_case_state(raw, customers_by_id={"1": _customer(1, "Owner")}, deceased_customer_id="1")
+
+        self.assertIn("thiếu engineInput", str(exc.exception))
+
+    def test_v2_stage_update_preserves_authoritative_diagram_result(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        child = _customer(2, "Child")
+        existing, _participants, _ids, result = _resolve_v2_case_state(
+            self._v2_case_state(),
+            customers_by_id={"1": owner, "2": child},
+            deceased_customer_id="1",
+        )
+        submitted = json.loads(existing)
+        submitted["stage"][1]["ho_ten"] = "Child edited"
+        submitted["diagram"]["engineResult"] = {"status": "complete", "allocations": {"2": {"finalShare": "0"}}}
+
+        merged = json.loads(_merge_case_state_stage(existing, json.dumps(submitted)))
+
+        self.assertEqual(merged["stage"][1]["ho_ten"], "Child edited")
+        self.assertEqual(merged["diagram"]["engineResult"], result)
+
+    def test_calculate_diagram_uses_database_people_without_committing(self):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        child = _customer(2, "Child")
+
+        class Query:
+            def all(self):
+                return [owner, child]
+
+        class ReadOnlyDb:
+            def query(self, model):
+                self.queried_model = model
+                return Query()
+
+        db = ReadOnlyDb()
+        engine_input = json.loads(self._v2_case_state())["diagram"]["engineInput"]
+        result = calculate_diagram({
+            "engineInput": engine_input,
+            "allocations": {"2": {"finalShare": "999/1", "displayPercent": "99900.00"}},
+        }, db=db)
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["allocations"]["2"]["finalShare"], "1")
+        self.assertEqual(result["allocations"]["2"]["displayPercent"], "100.00")
+        self.assertFalse(hasattr(db, "committed"))
+
+    def test_normalize_case_state_rejects_v2_person_outside_stage(self):
+        payload = json.loads(self._v2_case_state())
+        payload["stage"] = [{"id": "1"}]
+
+        with self.assertRaises(DiagramPayloadValidationError) as exc:
+            _normalize_case_state_json(json.dumps(payload))
+
+        self.assertIn("engineInput", str(exc.exception))
+
     def test_normalize_diagram_payload_accepts_nullable_relation_fields(self):
         payload = _payload([
             {
@@ -2963,7 +3146,7 @@ class DiagramPayloadParserTests(unittest.TestCase):
         self.assertIsNone(normalized["nodes"][0]["parentSlotId"])
         self.assertIsNone(normalized["nodes"][0]["parentPersonId"])
 
-    def test_normalize_diagram_payload_preserves_flow_from_list(self):
+    def test_normalize_diagram_payload_drops_legacy_flow_from_list(self):
         payload = _payload([
             {
                 "id": "child_1",
@@ -2977,9 +3160,9 @@ class DiagramPayloadParserTests(unittest.TestCase):
 
         normalized = _normalize_diagram_payload(payload)
 
-        self.assertEqual(normalized["nodes"][0]["flowFrom"], ["owner", "spouse_mother", "5"])
+        self.assertNotIn("flowFrom", normalized["nodes"][0])
 
-    def test_normalize_diagram_payload_preserves_edges_list(self):
+    def test_normalize_diagram_payload_drops_legacy_edges_list(self):
         payload = json.dumps({
             "version": 2,
             "updatedAt": "2026-05-11T10:00:00.000Z",
@@ -3014,14 +3197,9 @@ class DiagramPayloadParserTests(unittest.TestCase):
 
         normalized = _normalize_diagram_payload(payload)
 
-        self.assertEqual(normalized["edges"][0]["id"], "edge-1")
-        self.assertEqual(normalized["edges"][0]["source"], "owner")
-        self.assertEqual(normalized["edges"][0]["target"], "child_1")
-        self.assertEqual(normalized["edges"][0]["label"], "Quan he")
-        self.assertEqual(normalized["edges"][0]["markerEnd"]["type"], "arrowclosed")
-        self.assertEqual(normalized["edges"][0]["style"]["strokeWidth"], 2)
+        self.assertNotIn("edges", normalized)
 
-    def test_normalize_diagram_payload_preserves_supplemental_engine_state_fields(self):
+    def test_normalize_diagram_payload_keeps_render_metadata_but_drops_legacy_output(self):
         payload = json.dumps({
             "version": 2,
             "updatedAt": "2026-05-11T10:00:00.000Z",
@@ -3046,9 +3224,9 @@ class DiagramPayloadParserTests(unittest.TestCase):
 
         normalized = _normalize_diagram_payload(payload)
 
-        self.assertEqual(normalized["allocations"]["2"]["displayPercent"], "50.00")
-        self.assertEqual(normalized["warnings"][0]["code"], "demo_warning")
-        self.assertEqual(normalized["trace"][0]["to"], "2")
+        self.assertNotIn("allocations", normalized)
+        self.assertNotIn("warnings", normalized)
+        self.assertNotIn("trace", normalized)
         self.assertEqual(normalized["viewport"]["zoom"], 0.85)
         self.assertEqual(normalized["layoutMeta"]["laneOffsets"]["children"], 240)
         self.assertEqual(normalized["layoutMeta"]["collapsedBranches"][0], "child_1")
@@ -3073,7 +3251,7 @@ class DiagramPayloadParserTests(unittest.TestCase):
         self.assertFalse(participants[1].co_nhan_tai_san)
         self.assertEqual(json.loads(engine_state)["nodes"][0]["id"], "owner")
 
-    def test_parse_case_diagram_payload_filters_unset_decision(self):
+    def test_parse_case_diagram_payload_reads_legacy_decision_without_persisting_it(self):
         customers = {
             "1": _customer(1, "Owner"),
             "2": _customer(2, "Accept"),
@@ -3089,12 +3267,16 @@ class DiagramPayloadParserTests(unittest.TestCase):
 
         participants, participant_ids, engine_state = _parse_case_diagram_payload(payload, customers, "1")
 
-        self.assertEqual(participant_ids, {2, 3})
+        self.assertEqual(participant_ids, {2, 3, 4})
         self.assertTrue(participants[0].co_nhan_tai_san)
         self.assertFalse(participants[1].co_nhan_tai_san)
+        self.assertFalse(participants[2].co_nhan_tai_san)
         normalized = json.loads(engine_state)
         self.assertEqual(len(normalized["nodes"]), 4)
-        self.assertEqual(normalized["nodes"][3].get("inheritanceDecision"), "unset")
+        self.assertNotIn("inheritanceDecision", normalized["nodes"][1])
+        self.assertTrue(normalized["nodes"][1]["willReceive"])
+        self.assertFalse(normalized["nodes"][2]["willReceive"])
+        self.assertFalse(normalized["nodes"][3]["willReceive"])
 
     def test_parse_case_diagram_payload_rejects_owner_mismatch(self):
         customers = {"1": _customer(1, "Dead"), "2": _customer(2, "Wrong Owner")}
@@ -3177,6 +3359,120 @@ class DiagramPayloadParserTests(unittest.TestCase):
         self.assertEqual(participants[0].parent_customer_id, 1)
         self.assertIsNone(engine_state)
         self.assertEqual(raw_payload, "")
+
+
+class AtomicPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.engine = create_engine(f"sqlite:///{Path(self.tmp.name) / 'atomic.db'}")
+        database.Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def tearDown(self):
+        self.engine.dispose()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _case_state() -> str:
+        return DiagramPayloadParserTests._v2_case_state()
+
+    @staticmethod
+    def _seed_people_and_property(db):
+        owner = _customer(1, "Owner")
+        owner.ngay_chet = date(2020, 1, 1)
+        db.add_all([owner, _customer(2, "New child"), _customer(3, "Old child"), _property(10)])
+        db.commit()
+
+    @staticmethod
+    def _fail_after_participant_replacement(db, case_id, participants):
+        from routers.cases import _replace_case_participants
+
+        _replace_case_participants(db, case_id, participants)
+        db.flush()
+        raise RuntimeError("forced participant replacement failure")
+
+    def test_create_rolls_back_case_when_participant_replacement_fails(self):
+        db = self.Session()
+        self._seed_people_and_property(db)
+
+        with (
+            patch("routers.cases._replace_case_participants", self._fail_after_participant_replacement),
+            patch("routers.cases._render_case_form", return_value=SimpleNamespace(status_code=422)),
+        ):
+            response = create(
+                request=SimpleNamespace(),
+                nguoi_chet_id="1",
+                tai_san_id="10",
+                property_ids=["10"],
+                participant_id=None,
+                participant_role=None,
+                participant_share=None,
+                participant_receive=None,
+                participant_parent_id=None,
+                diagram_payload="",
+                engine_state_json="",
+                case_state_json=self._case_state(),
+                db=db,
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(db.query(InheritanceCase).count(), 0)
+        self.assertEqual(db.query(InheritanceParticipant).count(), 0)
+        db.close()
+
+    def test_edit_rolls_back_case_and_participants_when_replacement_fails(self):
+        db = self.Session()
+        self._seed_people_and_property(db)
+        case = InheritanceCase(
+            nguoi_chet_id=1,
+            tai_san_id=10,
+            ngay_lap_ho_so=date(2026, 1, 1),
+            noi_niem_yet="old value",
+        )
+        db.add(case)
+        db.flush()
+        db.add(InheritanceParticipant(
+            ho_so_id=case.id,
+            customer_id=3,
+            vai_tro="Con",
+            hang_thua_ke=1,
+            ty_le=100.0,
+            co_nhan_tai_san=True,
+        ))
+        db.commit()
+        case_id = case.id
+
+        with (
+            patch("routers.cases._replace_case_participants", self._fail_after_participant_replacement),
+            patch("routers.cases._render_case_form", return_value=SimpleNamespace(status_code=422)),
+        ):
+            response = edit(
+                cid=case_id,
+                request=SimpleNamespace(),
+                nguoi_chet_id="1",
+                tai_san_id="10",
+                property_ids=["10"],
+                noi_niem_yet="new value",
+                participant_id=None,
+                participant_role=None,
+                participant_share=None,
+                participant_receive=None,
+                participant_parent_id=None,
+                diagram_payload="",
+                engine_state_json="",
+                case_state_json=self._case_state(),
+                db=db,
+            )
+
+        db.expire_all()
+        saved_case = db.query(InheritanceCase).filter(InheritanceCase.id == case_id).one()
+        saved_participants = db.query(InheritanceParticipant).filter(
+            InheritanceParticipant.ho_so_id == case_id
+        ).all()
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(saved_case.noi_niem_yet, "old value")
+        self.assertEqual([item.customer_id for item in saved_participants], [3])
+        db.close()
 
 
 if __name__ == "__main__":

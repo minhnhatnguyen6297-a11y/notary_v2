@@ -20,6 +20,7 @@ from services.word_engine import (
     list_public_builtin_templates,
     replace_in_doc,
 )
+from services.inheritance_engine import run_inheritance_case
 
 router = APIRouter()
 templates = Jinja2Templates(directory="frontend/templates")
@@ -167,11 +168,10 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
     version = payload_root.get("version", payload.get("version"))
     updated_at = _clean_text(payload_root.get("updatedAt", payload.get("updatedAt")))
     nodes_raw = payload_root.get("nodes")
-    edges_raw = payload_root.get("edges")
-    extra_state = {
-        key: value
-        for key, value in payload_root.items()
-        if key not in {"version", "updatedAt", "nodes", "edges"}
+    render_state = {
+        key: payload_root[key]
+        for key in ("viewport", "layoutMeta")
+        if key in payload_root
     }
 
     errors: list[str] = []
@@ -181,8 +181,6 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
         errors.append("diagram_payload.updatedAt là bắt buộc.")
     if not isinstance(nodes_raw, list):
         errors.append("diagram_payload.nodes phải là danh sách.")
-    if edges_raw is not None and not isinstance(edges_raw, list):
-        errors.append("diagram_payload.edges phải là danh sách.")
     if errors:
         raise DiagramPayloadValidationError(errors)
 
@@ -202,15 +200,7 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
         seen_node_ids.add(node_id)
         person_id = _clean_nullable_text(raw_node.get("personId") or (raw_node.get("person") or {}).get("id"))
         relation_type = _clean_text(raw_node.get("relationType"))
-        raw_flow_from = raw_node.get("flowFrom")
-        normalized_flow_from = None
-        if isinstance(raw_flow_from, list):
-            normalized_items = [
-                _clean_text(item)
-                for item in raw_flow_from
-                if _clean_text(item)
-            ]
-            normalized_flow_from = normalized_items or None
+        legacy_decision = _clean_text(raw_node.get("inheritanceDecision"))
         normalized_nodes.append({
             "id": node_id,
             "kind": _clean_text(raw_node.get("kind")) or "person",
@@ -225,9 +215,7 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
             "parentSlotId": _clean_nullable_text(raw_node.get("parentSlotId")),
             "familyGroupId": _clean_nullable_text(raw_node.get("familyGroupId")),
             "sourceId": _clean_nullable_text(raw_node.get("sourceId")),
-            "flowFrom": normalized_flow_from,
-            "willReceive": _coerce_bool(raw_node.get("willReceive"), True),
-            "inheritanceDecision": _clean_text(raw_node.get("inheritanceDecision")) or ("refuse" if _coerce_bool(raw_node.get("willReceive")) is False else "accept"),
+            "willReceive": _coerce_bool(raw_node.get("willReceive"), legacy_decision == "accept"),
             "hidden": _coerce_bool(raw_node.get("hidden"), False),
             "deleted": _coerce_bool(raw_node.get("deleted"), False),
             "isLandOwner": _coerce_bool(raw_node.get("isLandOwner"), False),
@@ -236,36 +224,11 @@ def _normalize_diagram_payload(raw_payload: str) -> dict[str, Any]:
     if errors:
         raise DiagramPayloadValidationError(errors)
 
-    normalized_edges: list[dict[str, Any]] = []
-    for idx, raw_edge in enumerate(edges_raw or []):
-        if not isinstance(raw_edge, dict):
-            errors.append(f"Edge #{idx + 1} không hợp lệ.")
-            continue
-        source = _clean_nullable_text(raw_edge.get("source") or raw_edge.get("sourceId"))
-        target = _clean_nullable_text(raw_edge.get("target") or raw_edge.get("targetId"))
-        normalized_edge = dict(raw_edge)
-        edge_id = _clean_text(raw_edge.get("id"))
-        if edge_id:
-            normalized_edge["id"] = edge_id
-        if source is not None or "source" in raw_edge or "sourceId" in raw_edge:
-            normalized_edge["source"] = source
-            if "sourceId" in raw_edge:
-                normalized_edge["sourceId"] = source
-        if target is not None or "target" in raw_edge or "targetId" in raw_edge:
-            normalized_edge["target"] = target
-            if "targetId" in raw_edge:
-                normalized_edge["targetId"] = target
-        normalized_edges.append(normalized_edge)
-
-    if errors:
-        raise DiagramPayloadValidationError(errors)
-
     return {
         "version": 2,
         "updatedAt": updated_at,
         "nodes": normalized_nodes,
-        "edges": normalized_edges,
-        **extra_state,
+        **render_state,
     }
 
 
@@ -309,15 +272,12 @@ def _extract_diagram_participants(
             continue
         seen_participant_ids.add(person_id)
         customer = customers_by_id[person_id]
-        decision = _clean_text(node.get("inheritanceDecision")) or ("refuse" if _coerce_bool(node.get("willReceive")) is False else "unset")
-        if decision == "unset":
-            continue
         participants.append(SimpleNamespace(
             customer_id=customer.id,
             customer=customer,
             vai_tro=role,
             ty_le=0.0,
-            co_nhan_tai_san=decision == "accept",
+            co_nhan_tai_san=_coerce_bool(node.get("willReceive"), False),
             parent_customer_id=int(parent_person_id) if parent_person_id and parent_person_id.isdigit() else None,
         ))
 
@@ -522,6 +482,133 @@ def _replace_case_participants(db: Session, case_id: int, participants: list[Sim
         )
 
 
+def _v2_participant_projection(
+    engine_input: dict[str, Any],
+    engine_result: dict[str, Any],
+    customers_by_id: dict[str, Customer],
+    deceased_customer_id: str,
+) -> tuple[list[SimpleNamespace], set[int]]:
+    active_nodes = {
+        _clean_text(node.get("id")): node
+        for node in engine_input.get("nodes", [])
+        if isinstance(node, dict)
+        and _clean_text(node.get("id"))
+        and _clean_text(node.get("personId"))
+        and not node.get("hidden")
+        and not node.get("deleted")
+    }
+    person_by_slot = {
+        slot_id: _clean_text(node.get("personId"))
+        for slot_id, node in active_nodes.items()
+    }
+    allocations = engine_result.get("allocations", {})
+    participants: list[SimpleNamespace] = []
+
+    for slot_id, node in active_nodes.items():
+        person_id = person_by_slot[slot_id]
+        if person_id == deceased_customer_id:
+            continue
+        customer = customers_by_id.get(person_id)
+        if customer is None:
+            continue
+        parent_customer_id = None
+        for parent_slot_id in node.get("parentSlotIds") or []:
+            parent_person_id = person_by_slot.get(_clean_text(parent_slot_id))
+            if parent_person_id and parent_person_id.isdigit():
+                parent_customer_id = int(parent_person_id)
+                break
+        role = _clean_text(node.get("roleLabel"))
+        if not role:
+            role = "Chủ đất" if node.get("isLandOwner") else _normalize_role("", node.get("relationType"))
+        display_percent = _clean_text((allocations.get(person_id) or {}).get("displayPercent")) or "0"
+        participants.append(SimpleNamespace(
+            customer_id=customer.id,
+            customer=customer,
+            vai_tro=role,
+            ty_le=float(display_percent),
+            co_nhan_tai_san=node.get("willReceive") is True,
+            parent_customer_id=parent_customer_id,
+        ))
+
+    return participants, {participant.customer_id for participant in participants}
+
+
+def _resolve_v2_case_state(
+    raw_case_state: str,
+    *,
+    customers_by_id: dict[str, Customer],
+    deceased_customer_id: str,
+) -> Optional[tuple[str, list[SimpleNamespace], set[int], dict[str, Any]]]:
+    normalized_case_state = _normalize_case_state_json(raw_case_state)
+    if not normalized_case_state:
+        return None
+    payload = json.loads(normalized_case_state)
+    diagram = payload.get("diagram") if isinstance(payload.get("diagram"), dict) else {}
+    if "engineInput" not in diagram:
+        if payload.get("version") == 2 or payload.get("schemaVersion") == 2:
+            raise DiagramPayloadValidationError(["Diagram V2 thiếu engineInput."])
+        return None
+    engine_input = diagram.get("engineInput")
+    if not isinstance(engine_input, dict):
+        raise DiagramPayloadValidationError(["case_state_json.diagram.engineInput phải là object JSON."])
+
+    stage_ids = {
+        _clean_text(item.get("id"))
+        for item in payload.get("stage", [])
+        if isinstance(item, dict) and _clean_text(item.get("id"))
+    }
+    referenced_ids = {
+        _clean_text(node.get("personId"))
+        for node in engine_input.get("nodes", [])
+        if isinstance(node, dict)
+        and _clean_text(node.get("personId"))
+        and not node.get("hidden")
+        and not node.get("deleted")
+    }
+    outside_stage = sorted(referenced_ids - stage_ids)
+    if outside_stage:
+        raise DiagramPayloadValidationError([
+            f"Diagram V2 có người không thuộc Stage: {', '.join(outside_stage)}."
+        ])
+
+    engine_result = run_inheritance_case(engine_input, customers_by_id)
+    if engine_result.get("status") in {"invalid", "incomplete", "unsupported"}:
+        messages = [
+            _clean_text(item.get("message")) or _clean_text(item.get("code"))
+            for item in engine_result.get("errors", [])
+            if isinstance(item, dict)
+        ]
+        messages.extend(
+            f"Di sản của người #{item.get('sourcePersonId')} chưa có người nhận hợp lệ."
+            for item in engine_result.get("unresolvedEstates", [])
+            if isinstance(item, dict)
+        )
+        raise DiagramPayloadValidationError(messages or ["Kết quả thừa kế chưa hoàn tất."])
+
+    participants, participant_ids = _v2_participant_projection(
+        engine_input,
+        engine_result,
+        customers_by_id,
+        deceased_customer_id,
+    )
+    payload["version"] = 2
+    payload["schemaVersion"] = 2
+    payload["updatedAt"] = datetime.utcnow().isoformat() + "Z"
+    payload["diagram"] = {
+        "engineInput": engine_input,
+        "engineResult": engine_result,
+    }
+    normalized = _normalize_case_state_json(json.dumps(payload, ensure_ascii=False))
+    return normalized, participants, participant_ids, engine_result
+
+
+@router.post("/diagram/calculate")
+def calculate_diagram(payload: dict[str, Any], db: Session = Depends(get_db)):
+    engine_input = payload.get("engineInput") if isinstance(payload.get("engineInput"), dict) else payload
+    customers_by_id = {str(customer.id): customer for customer in db.query(Customer).all()}
+    return run_inheritance_case(engine_input, customers_by_id)
+
+
 @router.get("/")
 def list_cases(request: Request, db: Session = Depends(get_db), q: str = ""):
     cases = db.query(InheritanceCase).order_by(InheritanceCase.id.desc()).all()
@@ -598,21 +685,31 @@ def create(
         field_errors=field_errors,
         errors=errors,
     )
+    using_v2 = False
     try:
-        posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
-            all_customers=all_customers,
-            deceased_customer_id=form["nguoi_chet_id"],
-            diagram_payload=form["diagram_payload"],
-            participant_id=participant_id,
-            participant_role=participant_role,
-            participant_share=participant_share,
-            participant_receive=participant_receive,
-            participant_parent_id=participant_parent_id,
-            engine_state_json=form["engine_state_json"],
-        )
-        form["engine_state_json"] = normalized_engine_state or ""
-        form["diagram_payload"] = normalized_payload or ""
         form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
+        v2_state = _resolve_v2_case_state(
+            form["case_state_json"],
+            customers_by_id=customers_by_id,
+            deceased_customer_id=form["nguoi_chet_id"],
+        )
+        if v2_state is not None:
+            using_v2 = True
+            form["case_state_json"], posted_participants, posted_participant_ids, _engine_result = v2_state
+        else:
+            posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
+                all_customers=all_customers,
+                deceased_customer_id=form["nguoi_chet_id"],
+                diagram_payload=form["diagram_payload"],
+                participant_id=participant_id,
+                participant_role=participant_role,
+                participant_share=participant_share,
+                participant_receive=participant_receive,
+                participant_parent_id=participant_parent_id,
+                engine_state_json=form["engine_state_json"],
+            )
+            form["engine_state_json"] = normalized_engine_state or ""
+            form["diagram_payload"] = normalized_payload or ""
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -645,7 +742,7 @@ def create(
             ngay_lap_ho_so=_date.today(),
             loai_van_ban="khai_nhan",
             ghi_chu=None,
-            engine_state_json=form["engine_state_json"] or None,
+            engine_state_json=None if using_v2 else (form["engine_state_json"] or None),
             case_state_json=form["case_state_json"] or None,
         )
         db.add(case)
@@ -772,21 +869,31 @@ def edit(
         field_errors=field_errors,
         errors=errors,
     )
+    using_v2 = False
     try:
-        posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
-            all_customers=all_customers,
-            deceased_customer_id=form["nguoi_chet_id"],
-            diagram_payload=form["diagram_payload"],
-            participant_id=participant_id,
-            participant_role=participant_role,
-            participant_share=participant_share,
-            participant_receive=participant_receive,
-            participant_parent_id=participant_parent_id,
-            engine_state_json=form["engine_state_json"],
-        )
-        form["engine_state_json"] = normalized_engine_state or ""
-        form["diagram_payload"] = normalized_payload or ""
         form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
+        v2_state = _resolve_v2_case_state(
+            form["case_state_json"],
+            customers_by_id=customers_by_id,
+            deceased_customer_id=form["nguoi_chet_id"],
+        )
+        if v2_state is not None:
+            using_v2 = True
+            form["case_state_json"], posted_participants, posted_participant_ids, _engine_result = v2_state
+        else:
+            posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
+                all_customers=all_customers,
+                deceased_customer_id=form["nguoi_chet_id"],
+                diagram_payload=form["diagram_payload"],
+                participant_id=participant_id,
+                participant_role=participant_role,
+                participant_share=participant_share,
+                participant_receive=participant_receive,
+                participant_parent_id=participant_parent_id,
+                engine_state_json=form["engine_state_json"],
+            )
+            form["engine_state_json"] = normalized_engine_state or ""
+            form["diagram_payload"] = normalized_payload or ""
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -815,7 +922,8 @@ def edit(
         case.nguoi_chet_id = int(form["nguoi_chet_id"])
         case.tai_san_id = int(form["tai_san_id"])
         case.noi_niem_yet = form["noi_niem_yet"] or None
-        case.engine_state_json = form["engine_state_json"] or None
+        if not using_v2:
+            case.engine_state_json = form["engine_state_json"] or None
         case.case_state_json = form["case_state_json"] or None
         if selected_property_ids:
             _sync_case_property_links(db, case.id, selected_property_ids, int(form["tai_san_id"]))
@@ -846,7 +954,7 @@ def update_stage(cid: int, case_state_json: str = Form(...), db: Session = Depen
     if not case or case.is_locked:
         raise HTTPException(400)
     try:
-        normalized = _normalize_case_state_json(case_state_json)
+        normalized = _merge_case_state_stage(case.case_state_json or "", case_state_json)
     except DiagramPayloadValidationError as exc:
         return JSONResponse(
             {"ok": False, "error": "; ".join(exc.errors), "errors": exc.errors},
@@ -871,6 +979,23 @@ def update_diagram(
 
     try:
         normalized_case_state = _merge_case_state_diagram(case.case_state_json or "", case_state_json)
+        customers_by_id = {str(customer.id): customer for customer in db.query(Customer).all()}
+        v2_state = _resolve_v2_case_state(
+            normalized_case_state,
+            customers_by_id=customers_by_id,
+            deceased_customer_id=str(case.nguoi_chet_id or ""),
+        )
+        if v2_state is not None:
+            normalized_case_state, participants, _participant_ids, engine_result = v2_state
+            case.case_state_json = normalized_case_state
+            _replace_case_participants(db, case.id, participants)
+            db.commit()
+            return {
+                "ok": True,
+                "case_state_json": normalized_case_state,
+                "engine_result": engine_result,
+            }
+
         case_state_payload = _case_state_payload(normalized_case_state)
         allowed_stage_ids = {
             _clean_text((person or {}).get("id"))
@@ -936,14 +1061,6 @@ def update_diagram(
                     source_id = _clean_text(node.get("sourceId"))
                     is_active_person = bool(person_id) and not node.get("hidden") and not node.get("deleted")
                     if is_active_person and person_id in seen_active_people:
-                        kept_node = kept_active_people.get(person_id)
-                        if kept_node is not None:
-                            kept_flow_from = list(kept_node.get("flowFrom") or [])
-                            for flow_id in list(node.get("flowFrom") or []):
-                                normalized_flow_id = _clean_text(flow_id)
-                                if normalized_flow_id and normalized_flow_id not in kept_flow_from:
-                                    kept_flow_from.append(normalized_flow_id)
-                            kept_node["flowFrom"] = kept_flow_from or None
                         changed = True
                         continue
                     if parent_person_id and parent_person_id not in active_person_ids:
@@ -962,30 +1079,10 @@ def update_diagram(
                 filtered_nodes = pruned_nodes
                 if not changed:
                     break
-            filtered_node_ids = {
-                _clean_text(node.get("id"))
-                for node in filtered_nodes
-                if _clean_text(node.get("id"))
-            }
-            filtered_edges = [
-                edge for edge in normalized_state.get("edges", [])
-                if (
-                    (
-                        not _clean_text(edge.get("source") or edge.get("sourceId"))
-                        or _clean_text(edge.get("source") or edge.get("sourceId")) in filtered_node_ids
-                    )
-                    and (
-                        not _clean_text(edge.get("target") or edge.get("targetId"))
-                        or _clean_text(edge.get("target") or edge.get("targetId")) in filtered_node_ids
-                    )
-                )
-            ]
             raw_payload = json.dumps({
                 **normalized_state,
                 "nodes": filtered_nodes,
-                "edges": filtered_edges,
             }, ensure_ascii=False)
-            customers_by_id = {str(c.id): c for c in db.query(Customer).all()}
             participants, _participant_ids, normalized_engine_state = _parse_case_diagram_payload(
                 raw_payload,
                 customers_by_id=customers_by_id,
@@ -1571,27 +1668,26 @@ def _normalize_case_state_json(raw_payload: str) -> str:
             person_id = _clean_text(node.get("personId") or nested_person.get("id"))
             if person_id and person_id not in stage_ids:
                 errors.append(f"case_state_json.diagram.engineState node reference {person_id} khong co trong stage.")
+    engine_input = diagram.get("engineInput")
+    if engine_input is not None and not isinstance(engine_input, dict):
+        errors.append("case_state_json.diagram.engineInput phải là object JSON.")
+    engine_input_nodes = engine_input.get("nodes", []) if isinstance(engine_input, dict) else []
+    if isinstance(engine_input, dict) and not isinstance(engine_input_nodes, list):
+        errors.append("case_state_json.diagram.engineInput.nodes phải là danh sách.")
+    if isinstance(engine_input_nodes, list):
+        for node in engine_input_nodes:
+            if not isinstance(node, dict):
+                continue
+            person_id = _clean_text(node.get("personId"))
+            if person_id and person_id not in stage_ids:
+                errors.append(f"case_state_json.diagram.engineInput node reference {person_id} khong co trong stage.")
     if errors:
         raise DiagramPayloadValidationError(errors)
-    if isinstance(engine_state, dict) and isinstance(nodes, list):
-        node_ids = {
-            _clean_text((node or {}).get("id"))
-            for node in nodes
-            if isinstance(node, dict) and _clean_text((node or {}).get("id"))
-        }
-        if isinstance(engine_state.get("edges"), list):
-            engine_state["edges"] = [
-                edge for edge in engine_state["edges"]
-                if isinstance(edge, dict)
-                and (
-                    not _clean_text(edge.get("source") or edge.get("sourceId"))
-                    or _clean_text(edge.get("source") or edge.get("sourceId")) in node_ids
-                )
-                and (
-                    not _clean_text(edge.get("target") or edge.get("targetId"))
-                    or _clean_text(edge.get("target") or edge.get("targetId")) in node_ids
-                )
-            ]
+    if isinstance(engine_state, dict):
+        # Legacy browser output is never authoritative. Keep only migration
+        # input and optional render metadata until the case is saved as V2.
+        for key in ("edges", "allocations", "warnings", "trace"):
+            engine_state.pop(key, None)
     return json.dumps(payload, ensure_ascii=False)
 
 
@@ -1783,6 +1879,21 @@ def export_word(cid: int, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+def _merge_case_state_stage(existing_raw: str, submitted_raw: str) -> str:
+    submitted = _case_state_payload(submitted_raw)
+    if not _clean_text(existing_raw):
+        return _normalize_case_state_json(json.dumps(submitted, ensure_ascii=False))
+    existing = _case_state_payload(existing_raw)
+    if existing.get("version") != 2 and existing.get("schemaVersion") != 2:
+        return _normalize_case_state_json(json.dumps(submitted, ensure_ascii=False))
+    merged = {
+        **existing,
+        "stage": submitted.get("stage", []),
+        "diagram": existing.get("diagram", {}),
+    }
+    return _normalize_case_state_json(json.dumps(merged, ensure_ascii=False))
 
 
 @router.get("/{cid}/export-word")

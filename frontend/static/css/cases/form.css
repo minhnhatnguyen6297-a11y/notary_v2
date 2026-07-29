@@ -755,31 +755,6 @@
       }
     }
 
-    /* ── SORTABLE DRAG ── */
-    .drag-ghost {
-      opacity: .35;
-      background: #dbeafe !important;
-      border: 2px dashed #2563eb !important;
-    }
-
-    .drag-chosen {
-      cursor: grabbing !important;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .18) !important;
-    }
-
-    .sortable-fallback {
-      opacity: .8;
-    }
-
-    .person-row.drag-ghost {
-      background: #dbeafe !important;
-    }
-
-    /* ── TIER 4 TRANSITION ── */
-    #tier4-section {
-      transition: opacity .3s ease;
-    }
-
     /* ── TOAST ── */
     .dnd-toast {
       position: fixed;
