@@ -59,7 +59,7 @@ class Property(Base):
     __tablename__ = "properties"
 
     id                = Column(Integer, primary_key=True, index=True)
-    so_serial         = Column(String(100), nullable=False, unique=True)
+    so_serial         = Column(String(100), nullable=False)
     so_vao_so         = Column(String(100), nullable=True)
     so_thua_dat       = Column(String(100), nullable=True)
     so_to_ban_do      = Column(String(100), nullable=True)

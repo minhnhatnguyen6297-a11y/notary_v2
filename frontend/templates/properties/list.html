@@ -2,73 +2,231 @@
 {% block title %}Tài sản / Sổ đỏ{% endblock %}
 {% block topbar_title %}Tài sản / Sổ đỏ{% endblock %}
 
-{% block content %}
-<div class="page-header">
-  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản / Sổ đỏ</h2>
-  <a href="/properties/create" class="btn btn-gold">
-    <i class="bi bi-plus-circle me-1"></i>Thêm tài sản mới
-  </a>
-</div>
+{% macro asset_column(p=None, rows=[]) %}
+{% set is_new = p is none %}
+{% set prefix = 'new' if is_new else p.id|string %}
+{% set action = '/properties/create' if is_new else '/properties/' + p.id|string + '/edit' %}
+<form class="asset-column" method="post" action="{{ action }}" data-asset-form data-property-id="{{ '' if is_new else p.id }}">
+  {% if not is_new %}<input type="hidden" name="return_to" value="/properties">{% endif %}
+  <input type="hidden" name="land_rows" value="" data-land-rows-value>
 
-<div class="card mb-3">
-  <div class="card-body py-3">
-    <form method="get" class="d-flex gap-2">
-      <input type="text" name="q" value="{{ q }}" class="form-control"
-             placeholder="🔍  Tìm theo số serial, số thửa, địa chỉ...">
-      <button class="btn btn-primary px-4">Tìm</button>
-      {% if q %}<a href="/properties" class="btn btn-outline-secondary">Xoá bộ lọc</a>{% endif %}
-    </form>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header">Tổng số: <strong>{{ properties|length }}</strong> tài sản</div>
-  <div class="card-body p-0">
-    {% if properties %}
-    <div class="table-responsive">
-      <table class="table table-hover mb-0">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Số Serial</th>
-            <th>Số thửa</th>
-            <th>Tờ bản đồ</th>
-            <th>Địa chỉ</th>
-            <th>Loại đất</th>
-            <th>Ngày cấp</th>
-            <th style="width:100px">Thao tác</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in properties %}
-          <tr>
-            <td class="text-muted" style="font-size:12px">{{ p.id }}</td>
-            <td><a href="/properties/{{ p.id }}" style="color:var(--navy)" class="fw-bold text-decoration-none"><code>{{ p.so_serial }}</code></a></td>
-            <td>{{ p.so_thua_dat or '—' }}</td>
-            <td>{{ p.so_to_ban_do or '—' }}</td>
-            <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="{{ p.dia_chi }}">{{ p.dia_chi }}</td>
-            <td>{{ p.loai_dat or '—' }}</td>
-            <td>{{ p.ngay_cap.strftime('%d/%m/%Y') if p.ngay_cap else '—' }}</td>
-            <td>
-              <a href="/properties/{{ p.id }}/edit" class="btn btn-sm btn-outline-primary me-1"><i class="bi bi-pencil"></i></a>
-              <button class="btn btn-sm btn-outline-danger"
-                onclick="if(confirm('Xoá tài sản này?')) document.getElementById('del-p-{{ p.id }}').submit()">
-                <i class="bi bi-trash"></i>
-              </button>
-              <form id="del-p-{{ p.id }}" action="/properties/{{ p.id }}/delete" method="post" style="display:none"></form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="asset-column-header">
+    <div>
+      <div class="asset-column-title">{{ 'Tài sản mới' if is_new else 'Tài sản #' ~ p.id }}</div>
+      <div class="asset-column-subtitle">{{ 'Chưa lưu' if is_new else (p.so_serial or '') }}</div>
     </div>
-    {% else %}
-    <div class="text-center py-5">
-      <i class="bi bi-house-door" style="font-size:48px; color:#d1d5db"></i>
-      <div class="mt-3 text-muted">{% if q %}Không tìm thấy kết quả{% else %}Chưa có tài sản nào{% endif %}</div>
-      <a href="/properties/create" class="btn btn-gold mt-3">Thêm tài sản đầu tiên</a>
-    </div>
+    {% if not is_new %}
+    <a href="/properties/{{ p.id }}" class="btn btn-sm btn-outline-secondary asset-icon-btn" title="Xem chi tiết">
+      <i class="bi bi-eye"></i>
+    </a>
     {% endif %}
   </div>
+
+  <div class="asset-field">
+    <label for="asset-serial-{{ prefix }}">Số serial</label>
+    <input id="asset-serial-{{ prefix }}" type="text" name="so_serial" class="form-control" value="{{ '' if is_new else (p.so_serial or '') }}" required>
+  </div>
+  <div class="asset-field">
+    <label for="asset-book-{{ prefix }}">Số vào sổ</label>
+    <input id="asset-book-{{ prefix }}" type="text" name="so_vao_so" class="form-control" value="{{ '' if is_new else (p.so_vao_so or '') }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-certificate-{{ prefix }}">Loại giấy chứng nhận</label>
+    <select id="asset-certificate-{{ prefix }}" name="loai_so" class="form-select">
+      <option value="">Chọn loại giấy chứng nhận</option>
+      {% set selected_certificate = '' if is_new else (p.loai_so or '') %}
+      {% for certificate in [
+        'Giấy chứng nhận quyền sử dụng đất',
+        'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất',
+        'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất'
+      ] %}
+      <option value="{{ certificate }}" {{ 'selected' if selected_certificate == certificate }}>{{ certificate }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="asset-field">
+    <label for="asset-issued-{{ prefix }}">Ngày cấp</label>
+    <input id="asset-issued-{{ prefix }}" type="date" name="ngay_cap" class="form-control" value="{{ '' if is_new or not p.ngay_cap else p.ngay_cap.isoformat() }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-authority-{{ prefix }}">Cơ quan cấp</label>
+    <input id="asset-authority-{{ prefix }}" type="text" name="co_quan_cap" class="form-control" value="{{ '' if is_new else (p.co_quan_cap or '') }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-address-{{ prefix }}">Địa chỉ đất</label>
+    <textarea id="asset-address-{{ prefix }}" name="dia_chi" class="form-control" rows="3" required>{{ '' if is_new else (p.dia_chi or '') }}</textarea>
+  </div>
+  <div class="asset-field">
+    <label for="asset-parcel-{{ prefix }}">Số thửa đất</label>
+    <input id="asset-parcel-{{ prefix }}" type="text" name="so_thua_dat" class="form-control" value="{{ '' if is_new else (p.so_thua_dat or '') }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-map-{{ prefix }}">Số tờ bản đồ</label>
+    <input id="asset-map-{{ prefix }}" type="text" name="so_to_ban_do" class="form-control" value="{{ '' if is_new else (p.so_to_ban_do or '') }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-use-{{ prefix }}">Hình thức sử dụng</label>
+    <input id="asset-use-{{ prefix }}" type="text" name="hinh_thuc_su_dung" class="form-control" value="{{ '' if is_new else (p.hinh_thuc_su_dung or '') }}">
+  </div>
+  <div class="asset-field">
+    <label for="asset-origin-{{ prefix }}">Nguồn gốc sử dụng</label>
+    <textarea id="asset-origin-{{ prefix }}" name="nguon_goc" class="form-control" rows="2">{{ '' if is_new else (p.nguon_goc or '') }}</textarea>
+  </div>
+
+  <div class="asset-land-section">
+    <div class="asset-land-header">
+      <span>Loại đất</span>
+      <button type="button" class="btn btn-sm btn-outline-primary asset-icon-btn" data-add-land-row title="Thêm loại đất">
+        <i class="bi bi-plus-lg"></i>
+      </button>
+    </div>
+    <div class="asset-land-rows" data-land-rows>
+      {% for row in rows if row.loai_dat or row.dien_tich or row.thoi_han %}
+      <div class="asset-land-row">
+        <input type="text" class="form-control" data-land-type value="{{ row.loai_dat }}" placeholder="Loại đất">
+        <input type="number" min="0" step="0.01" class="form-control" data-land-area value="{{ row.dien_tich }}" placeholder="Diện tích m²">
+        <input type="text" class="form-control" data-land-term value="{{ row.thoi_han }}" placeholder="Thời hạn">
+        <button type="button" class="btn btn-sm btn-outline-danger asset-icon-btn" data-remove-land-row title="Xóa loại đất">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+      {% else %}
+      <div class="asset-land-row">
+        <input type="text" class="form-control" data-land-type placeholder="Loại đất">
+        <input type="number" min="0" step="0.01" class="form-control" data-land-area placeholder="Diện tích m²">
+        <input type="text" class="form-control" data-land-term placeholder="Thời hạn">
+        <button type="button" class="btn btn-sm btn-outline-danger asset-icon-btn" data-remove-land-row title="Xóa loại đất">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="asset-actions">
+    {% if not is_new %}
+    <button type="submit" class="btn btn-sm btn-outline-danger asset-icon-btn" formaction="/properties/{{ p.id }}/delete" onclick="return confirm('Xóa tài sản này?')" title="Xóa tài sản">
+      <i class="bi bi-trash"></i>
+    </button>
+    {% endif %}
+    <button type="submit" class="btn btn-primary flex-grow-1" data-save-asset>
+      <i class="bi bi-check-lg me-1"></i>{{ 'Thêm tài sản' if is_new else 'Lưu' }}
+    </button>
+  </div>
+</form>
+{% endmacro %}
+
+{% block content %}
+<style>
+  .asset-toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+  .asset-toolbar form { display:flex; gap:8px; flex:1; min-width:0; }
+  .asset-sheet { display:flex; align-items:flex-start; overflow-x:auto; border:1px solid #d9dee7; background:#eef1f5; min-height:360px; }
+  .asset-column { flex:0 0 310px; padding:12px; background:#fff; border-right:1px solid #d9dee7; }
+  .asset-column[hidden] { display:none; }
+  #new-asset-column:not([hidden]) { display:contents; }
+  .asset-column-header { min-height:52px; display:flex; justify-content:space-between; align-items:flex-start; padding-bottom:10px; border-bottom:2px solid #d9dee7; margin-bottom:10px; }
+  .asset-column-title { font-size:14px; font-weight:700; color:#243247; }
+  .asset-column-subtitle { font-size:12px; color:#687386; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:230px; }
+  .asset-field { margin-bottom:10px; }
+  .asset-field label { display:block; margin-bottom:4px; font-size:12px; font-weight:600; color:#4b5565; }
+  .asset-field .form-control, .asset-field .form-select, .asset-land-row .form-control { font-size:13px; }
+  .asset-land-section { padding-top:10px; border-top:1px solid #d9dee7; }
+  .asset-land-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; font-size:12px; font-weight:700; color:#4b5565; }
+  .asset-land-row { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:8px 34px 8px 8px; margin-bottom:8px; border:1px solid #d9dee7; border-radius:6px; background:#f8f9fb; }
+  .asset-land-row [data-land-term] { grid-column:1 / -1; }
+  .asset-land-row [data-remove-land-row] { position:absolute; top:8px; right:4px; }
+  .asset-icon-btn { width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+  .asset-actions { display:flex; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid #d9dee7; }
+  @media (max-width: 575.98px) {
+    .sidebar { display:none; }
+    .main-wrap { margin-left:0; min-width:0; }
+    .topbar { padding:0 12px; }
+    .content { padding:16px 12px; }
+    .asset-toolbar { align-items:stretch; flex-direction:column; }
+    .asset-toolbar form { width:100%; }
+    .asset-toolbar input { min-width:0; }
+    .asset-sheet { width:100%; min-width:0; }
+    .asset-column { flex-basis:min(86vw, 330px); }
+  }
+</style>
+
+<div class="page-header">
+  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>Tài sản / Sổ đỏ</h2>
+  <button type="button" class="btn btn-gold" id="add-asset-column">
+    <i class="bi bi-plus-lg me-1"></i>Thêm cột
+  </button>
 </div>
+
+<div class="asset-toolbar">
+  <form method="get">
+    <input type="search" name="q" value="{{ q }}" class="form-control" placeholder="Tìm theo serial, số thửa, địa chỉ">
+    <button class="btn btn-primary"><i class="bi bi-search"></i><span class="visually-hidden">Tìm</span></button>
+    {% if q %}<a href="/properties" class="btn btn-outline-secondary"><i class="bi bi-x-lg"></i><span class="visually-hidden">Xóa bộ lọc</span></a>{% endif %}
+  </form>
+  <span class="text-muted small">{{ properties|length }} tài sản</span>
+</div>
+
+<div class="asset-sheet" id="asset-sheet" data-asset-sheet>
+  {% for p in properties %}
+    {{ asset_column(p, property_land_rows.get(p.id, [])) }}
+  {% endfor %}
+  <div id="new-asset-column" hidden>
+    {{ asset_column() }}
+  </div>
+</div>
+
+<script>
+  (() => {
+    const sheet = document.querySelector('[data-asset-sheet]');
+    const newColumnHolder = document.getElementById('new-asset-column');
+
+    function makeLandRow() {
+      const row = document.createElement('div');
+      row.className = 'asset-land-row';
+      row.innerHTML = `
+        <input type="text" class="form-control" data-land-type placeholder="Loại đất">
+        <input type="number" min="0" step="0.01" class="form-control" data-land-area placeholder="Diện tích m²">
+        <input type="text" class="form-control" data-land-term placeholder="Thời hạn">
+        <button type="button" class="btn btn-sm btn-outline-danger asset-icon-btn" data-remove-land-row title="Xóa loại đất">
+          <i class="bi bi-trash"></i>
+        </button>`;
+      return row;
+    }
+
+    function serializeLandRows(form) {
+      const rows = Array.from(form.querySelectorAll('.asset-land-row')).map((row) => ({
+        loai_dat: row.querySelector('[data-land-type]')?.value.trim() || '',
+        dien_tich: row.querySelector('[data-land-area]')?.value.trim() || '',
+        thoi_han: row.querySelector('[data-land-term]')?.value.trim() || '',
+      })).filter((row) => row.loai_dat || row.dien_tich || row.thoi_han);
+      form.querySelector('[data-land-rows-value]').value = JSON.stringify(rows);
+    }
+
+    sheet?.addEventListener('click', (event) => {
+      const addButton = event.target.closest('[data-add-land-row]');
+      if (addButton) {
+        addButton.closest('[data-asset-form]').querySelector('[data-land-rows]').appendChild(makeLandRow());
+        return;
+      }
+      const removeButton = event.target.closest('[data-remove-land-row]');
+      if (removeButton) {
+        const rows = removeButton.closest('[data-land-rows]');
+        removeButton.closest('.asset-land-row').remove();
+        if (!rows.children.length) rows.appendChild(makeLandRow());
+      }
+    });
+
+    sheet?.addEventListener('submit', (event) => {
+      if (event.submitter?.matches('[data-save-asset]')) serializeLandRows(event.target);
+    });
+
+    document.getElementById('add-asset-column')?.addEventListener('click', () => {
+      if (!newColumnHolder) return;
+      newColumnHolder.hidden = false;
+      const form = newColumnHolder.querySelector('[data-asset-form]');
+      form?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'end' });
+      form?.querySelector('input[name="so_serial"]')?.focus();
+    });
+  })();
+</script>
 {% endblock %}

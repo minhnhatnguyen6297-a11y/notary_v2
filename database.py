@@ -84,6 +84,68 @@ def migrate_properties_schema():
         "land_rows_json": "TEXT",
     })
     con.commit()
+
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='properties'")
+    if cur.fetchone() is not None:
+        cur.execute("PRAGMA index_list(properties)")
+        unique_serial = False
+        for index_row in cur.fetchall():
+            if not index_row[2]:
+                continue
+            cur.execute(f"PRAGMA index_info('{index_row[1]}')")
+            if [column[2] for column in cur.fetchall()] == ["so_serial"]:
+                unique_serial = True
+                break
+
+        if unique_serial:
+            con.execute("PRAGMA foreign_keys=OFF")
+            try:
+                cur.executescript(
+                    """
+                    BEGIN;
+                    CREATE TABLE properties_new (
+                        id INTEGER NOT NULL,
+                        so_serial VARCHAR(100) NOT NULL,
+                        so_vao_so VARCHAR(100),
+                        so_thua_dat VARCHAR(100),
+                        so_to_ban_do VARCHAR(100),
+                        dia_chi TEXT NOT NULL,
+                        loai_dat VARCHAR(100),
+                        hinh_thuc_su_dung VARCHAR(100),
+                        thoi_han VARCHAR(100),
+                        nguon_goc TEXT,
+                        ngay_cap DATE,
+                        co_quan_cap VARCHAR(200),
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        dien_tich FLOAT,
+                        loai_so VARCHAR(200),
+                        land_rows_json TEXT,
+                        PRIMARY KEY (id)
+                    );
+                    INSERT INTO properties_new (
+                        id, so_serial, so_vao_so, so_thua_dat, so_to_ban_do,
+                        dia_chi, loai_dat, hinh_thuc_su_dung, thoi_han,
+                        nguon_goc, ngay_cap, co_quan_cap, created_at,
+                        dien_tich, loai_so, land_rows_json
+                    )
+                    SELECT
+                        id, so_serial, so_vao_so, so_thua_dat, so_to_ban_do,
+                        dia_chi, loai_dat, hinh_thuc_su_dung, thoi_han,
+                        nguon_goc, ngay_cap, co_quan_cap, created_at,
+                        dien_tich, loai_so, land_rows_json
+                    FROM properties;
+                    DROP TABLE properties;
+                    ALTER TABLE properties_new RENAME TO properties;
+                    CREATE INDEX ix_properties_id ON properties(id);
+                    COMMIT;
+                    """
+                )
+            except Exception:
+                con.rollback()
+                raise
+            finally:
+                con.execute("PRAGMA foreign_keys=ON")
+
     con.close()
 
 

@@ -7,109 +7,136 @@
 {% set fe = field_errors or {} %}
 {% set f = form or {} %}
 
+<style>
+  .property-form { max-width:720px; }
+  .property-form-field { margin-bottom:14px; }
+  .property-form-field label { display:block; margin-bottom:5px; font-size:13px; font-weight:600; color:#4b5565; }
+  .property-land-row { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px 42px 10px 10px; margin-bottom:8px; border:1px solid #d9dee7; border-radius:6px; background:#f8f9fb; }
+  .property-land-row [data-land-term] { grid-column:1 / -1; }
+  .property-land-row [data-remove-land-row] { position:absolute; top:10px; right:6px; width:32px; height:32px; padding:0; }
+</style>
+
 <div class="page-header">
-  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>{{ 'Sửa tài sản' if obj else 'Thêm Giấy CN QSDĐ mới' }}</h2>
+  <h2><i class="bi bi-house-door me-2" style="color:var(--gold)"></i>{{ 'Sửa tài sản #' ~ obj.id if obj else 'Thêm tài sản mới' }}</h2>
   <a href="/properties" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
 </div>
 
 {% if errors %}
-<div class="alert alert-danger">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+<div class="alert alert-danger property-form">{% for error in errors %}<div>{{ error }}</div>{% endfor %}</div>
 {% endif %}
 
-<div class="card">
-  <div class="card-header"><i class="bi bi-file-earmark-text me-2" style="color:var(--gold)"></i>Thông tin Giấy chứng nhận QSDĐ (Sổ đỏ)</div>
-  <div class="card-body">
-    <form method="post" action="{{ action }}">
+<form method="post" action="{{ action }}" class="property-form" data-property-form>
+  <input type="hidden" name="land_rows" value="{{ f.get('land_rows', '[]') }}" data-land-rows-value>
 
-      <div class="row g-3">
-        <div class="col-12"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN GIẤY CHỨNG NHẬN</h6></div>
-
-        <div class="col-md-4">
-          <label class="form-label required">Số Serial (Số phát hành GCN)</label>
-          <input type="text" name="so_serial" class="form-control {% if fe.so_serial %}is-invalid{% endif %}" value="{{ f.get('so_serial','') if f else (obj.so_serial if obj else '') }}" placeholder="Ví dụ: AQ123456" required>
-          {% if fe.so_serial %}<div class="invalid-feedback">{{ fe.so_serial }}</div>{% endif %}
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Số vào sổ cấp GCN</label>
-          <input type="text" name="so_vao_so" class="form-control" value="{{ f.get('so_vao_so','') if f else (obj.so_vao_so if obj else '') }}" placeholder="Số vào sổ">
-        </div>
-        <div class="col-md-4">
-          <label class="form-label">Ngày cấp GCN</label>
-          <input type="date" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}" value="{{ f.get('ngay_cap','') if f else (obj.ngay_cap.isoformat() if obj and obj.ngay_cap else '') }}">
-          {% if fe.ngay_cap %}<div class="invalid-feedback">{{ fe.ngay_cap }}</div>{% endif %}
-        </div>
-
-        <div class="col-md-6">
-          <label class="form-label">Cơ quan cấp</label>
-          <input type="text" name="co_quan_cap" class="form-control" value="{{ f.get('co_quan_cap','') if f else (obj.co_quan_cap if obj else '') }}" placeholder="Ví dụ: UBND huyện Ý Yên, tỉnh Nam Định">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Nguồn gốc sử dụng đất</label>
-          <input type="text" name="nguon_goc" class="form-control" value="{{ f.get('nguon_goc','') if f else (obj.nguon_goc if obj else '') }}" placeholder="Ví dụ: Do nhà nước giao không thu tiền">
-        </div>
-
-        <div class="col-12">
-          <label class="form-label">Loại Giấy chứng nhận</label>
-          <select name="loai_so" class="form-select">
-            <option value="">-- Chọn loại GCN --</option>
-            {% set _loai_so_val = f.get('loai_so','') if f else (obj.loai_so if obj else '') %}
-            {% for ls in [
-              'Giấy chứng nhận quyền sử dụng đất',
-              'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất',
-              'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất'
-            ] %}
-            <option value="{{ ls }}" {{ 'selected' if _loai_so_val == ls }}>{{ ls }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="col-12 mt-2"><h6 class="text-muted" style="font-size:12px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid #eee; padding-bottom:8px;">THÔNG TIN THỬa ĐẤT</h6></div>
-
-        <div class="col-md-3">
-          <label class="form-label">Số thửa đất</label>
-          <input type="text" name="so_thua_dat" class="form-control" value="{{ f.get('so_thua_dat','') if f else (obj.so_thua_dat if obj else '') }}" placeholder="Ví dụ: 156">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Số tờ bản đồ</label>
-          <input type="text" name="so_to_ban_do" class="form-control" value="{{ f.get('so_to_ban_do','') if f else (obj.so_to_ban_do if obj else '') }}" placeholder="Ví dụ: 08">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Diện tích (m²)</label>
-          <input type="number" step="0.1" min="0" name="dien_tich" class="form-control" value="{{ f.get('dien_tich','') if f else (obj.dien_tich if obj and obj.dien_tich is not none else '') }}" placeholder="Ví dụ: 120.5">
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Loại đất</label>
-          <select name="loai_dat" class="form-select">
-            <option value="">-- Chọn --</option>
-            {% for l in ['Đất ở tại nông thôn', 'Đất ở tại đô thị', 'Đất nông nghiệp', 'Đất lâm nghiệp', 'Đất trồng lúa', 'Đất trồng cây hàng năm', 'Đất trồng cây lâu năm', 'Khác'] %}
-            <option value="{{ l }}" {{ 'selected' if (f.get('loai_dat') == l) or (obj and obj.loai_dat == l and not f.get('loai_dat')) }}>{{ l }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-3">
-          <label class="form-label">Hình thức sử dụng</label>
-          <input type="text" name="hinh_thuc_su_dung" class="form-control" value="{{ f.get('hinh_thuc_su_dung','') if f else (obj.hinh_thuc_su_dung if obj else '') }}" placeholder="Ví dụ: Riêng / Chung vợ chồng">
-        </div>
-
-        <div class="col-md-6 required">
-          <label class="form-label">Địa chỉ thửa đất</label>
-          <textarea name="dia_chi" class="form-control {% if fe.dia_chi %}is-invalid{% endif %}" rows="2" placeholder="Thôn/xóm, xã/phường, huyện/quận, tỉnh" required>{{ f.get('dia_chi','') if f else (obj.dia_chi if obj else '') }}</textarea>
-          {% if fe.dia_chi %}<div class="invalid-feedback">{{ fe.dia_chi }}</div>{% endif %}
-        </div>
-        <div class="col-md-6">
-          <label class="form-label">Thời hạn sử dụng</label>
-          <input type="text" name="thoi_han" class="form-control" value="{{ f.get('thoi_han','') if f else (obj.thoi_han if obj else '') }}" placeholder="Ví dụ: Lâu dài / 50 năm đến 15/10/2060">
-        </div>
-      </div>
-
-      <hr class="divider">
-      <div class="d-flex gap-2 justify-content-end">
-        <a href="/properties" class="btn btn-outline-secondary">Huỷ</a>
-        <button type="submit" class="btn btn-gold px-4">
-          <i class="bi bi-check-lg me-1"></i>{{ 'Lưu thay đổi' if obj else 'Thêm tài sản' }}
-        </button>
-      </div>
-    </form>
+  <div class="property-form-field">
+    <label for="property-serial">Số serial</label>
+    <input id="property-serial" type="text" name="so_serial" class="form-control {% if fe.so_serial %}is-invalid{% endif %}" value="{{ f.get('so_serial', '') }}" required>
+    {% if fe.so_serial %}<div class="invalid-feedback">{{ fe.so_serial }}</div>{% endif %}
   </div>
-</div>
+  <div class="property-form-field">
+    <label for="property-book">Số vào sổ</label>
+    <input id="property-book" type="text" name="so_vao_so" class="form-control" value="{{ f.get('so_vao_so', '') }}">
+  </div>
+  <div class="property-form-field">
+    <label for="property-certificate">Loại giấy chứng nhận</label>
+    <select id="property-certificate" name="loai_so" class="form-select">
+      <option value="">Chọn loại giấy chứng nhận</option>
+      {% for certificate in [
+        'Giấy chứng nhận quyền sử dụng đất',
+        'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu nhà ở và tài sản khác gắn liền với đất',
+        'Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất'
+      ] %}
+      <option value="{{ certificate }}" {{ 'selected' if f.get('loai_so') == certificate }}>{{ certificate }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="property-form-field">
+    <label for="property-issued">Ngày cấp</label>
+    <input id="property-issued" type="date" name="ngay_cap" class="form-control {% if fe.ngay_cap %}is-invalid{% endif %}" value="{{ f.get('ngay_cap', '') }}">
+    {% if fe.ngay_cap %}<div class="invalid-feedback">{{ fe.ngay_cap }}</div>{% endif %}
+  </div>
+  <div class="property-form-field">
+    <label for="property-authority">Cơ quan cấp</label>
+    <input id="property-authority" type="text" name="co_quan_cap" class="form-control" value="{{ f.get('co_quan_cap', '') }}">
+  </div>
+  <div class="property-form-field">
+    <label for="property-address">Địa chỉ đất</label>
+    <textarea id="property-address" name="dia_chi" class="form-control {% if fe.dia_chi %}is-invalid{% endif %}" rows="3" required>{{ f.get('dia_chi', '') }}</textarea>
+    {% if fe.dia_chi %}<div class="invalid-feedback">{{ fe.dia_chi }}</div>{% endif %}
+  </div>
+  <div class="property-form-field">
+    <label for="property-parcel">Số thửa đất</label>
+    <input id="property-parcel" type="text" name="so_thua_dat" class="form-control" value="{{ f.get('so_thua_dat', '') }}">
+  </div>
+  <div class="property-form-field">
+    <label for="property-map">Số tờ bản đồ</label>
+    <input id="property-map" type="text" name="so_to_ban_do" class="form-control" value="{{ f.get('so_to_ban_do', '') }}">
+  </div>
+  <div class="property-form-field">
+    <label for="property-use">Hình thức sử dụng</label>
+    <input id="property-use" type="text" name="hinh_thuc_su_dung" class="form-control" value="{{ f.get('hinh_thuc_su_dung', '') }}">
+  </div>
+  <div class="property-form-field">
+    <label for="property-origin">Nguồn gốc sử dụng</label>
+    <textarea id="property-origin" name="nguon_goc" class="form-control" rows="2">{{ f.get('nguon_goc', '') }}</textarea>
+  </div>
+
+  <div class="property-form-field">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <label class="mb-0">Loại đất</label>
+      <button type="button" class="btn btn-sm btn-outline-primary" data-add-land-row title="Thêm loại đất"><i class="bi bi-plus-lg"></i></button>
+    </div>
+    <div data-land-rows></div>
+    {% if fe.land_rows %}<div class="text-danger small">{{ fe.land_rows }}</div>{% endif %}
+  </div>
+
+  <div class="d-flex gap-2 justify-content-end pt-3 border-top">
+    <a href="/properties" class="btn btn-outline-secondary">Hủy</a>
+    <button type="submit" class="btn btn-primary px-4"><i class="bi bi-check-lg me-1"></i>Lưu</button>
+  </div>
+</form>
+
+<script>
+  (() => {
+    const form = document.querySelector('[data-property-form]');
+    const rowsRoot = form?.querySelector('[data-land-rows]');
+    const hidden = form?.querySelector('[data-land-rows-value]');
+
+    function addRow(data = {}) {
+      const row = document.createElement('div');
+      row.className = 'property-land-row';
+      row.innerHTML = `
+        <input type="text" class="form-control" data-land-type placeholder="Loại đất">
+        <input type="number" min="0" step="0.01" class="form-control" data-land-area placeholder="Diện tích m²">
+        <input type="text" class="form-control" data-land-term placeholder="Thời hạn">
+        <button type="button" class="btn btn-sm btn-outline-danger" data-remove-land-row title="Xóa loại đất"><i class="bi bi-trash"></i></button>`;
+      row.querySelector('[data-land-type]').value = data.loai_dat || '';
+      row.querySelector('[data-land-area]').value = data.dien_tich || '';
+      row.querySelector('[data-land-term]').value = data.thoi_han || '';
+      rowsRoot.appendChild(row);
+    }
+
+    let initialRows = [];
+    try { initialRows = JSON.parse(hidden?.value || '[]'); } catch (_) { initialRows = []; }
+    (initialRows.length ? initialRows : [{}]).forEach(addRow);
+
+    form?.addEventListener('click', (event) => {
+      if (event.target.closest('[data-add-land-row]')) addRow();
+      const removeButton = event.target.closest('[data-remove-land-row]');
+      if (removeButton) {
+        removeButton.closest('.property-land-row').remove();
+        if (!rowsRoot.children.length) addRow();
+      }
+    });
+
+    form?.addEventListener('submit', () => {
+      const rows = Array.from(rowsRoot.querySelectorAll('.property-land-row')).map((row) => ({
+        loai_dat: row.querySelector('[data-land-type]').value.trim(),
+        dien_tich: row.querySelector('[data-land-area]').value.trim(),
+        thoi_han: row.querySelector('[data-land-term]').value.trim(),
+      })).filter((row) => row.loai_dat || row.dien_tich || row.thoi_han);
+      hidden.value = JSON.stringify(rows);
+    });
+  })();
+</script>
 {% endblock %}
