@@ -7,7 +7,9 @@ from docx import Document
 
 from services.word_engine import (
     WordExportValidationError,
+    build_word_context,
     build_template_mapping,
+    find_unresolved_placeholders,
     list_public_builtin_templates,
     replace_in_doc,
 )
@@ -94,16 +96,35 @@ def _case_state(*people, nodes=None):
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _node(person_id, *, role="Khac", decision="unset", is_land_owner=False):
-    return {
+def _case_state_v2(*people, nodes, allocations):
+    import json
+
+    payload = json.loads(_case_state(*people))
+    payload["version"] = 2
+    payload["diagram"] = {
+        "engineInput": {"version": 2, "nodes": nodes},
+        "engineResult": {
+            "status": "complete",
+            "allocations": allocations,
+        },
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _node(person_id, *, role="Khac", will_receive=False, is_land_owner=False, legacy_decision=None):
+    node = {
         "id": f"node_{person_id}",
         "personId": str(person_id),
         "role": role,
-        "inheritanceDecision": decision,
         "isLandOwner": is_land_owner,
         "hidden": False,
         "deleted": False,
     }
+    if will_receive is not None:
+        node["willReceive"] = will_receive
+    if legacy_decision is not None:
+        node["inheritanceDecision"] = legacy_decision
+    return node
 
 
 def _make_case(owner, participants=None, *, properties=None, case_state=None):
@@ -139,6 +160,8 @@ def test_build_template_mapping_exposes_standard_vietnamese_placeholders_and_leg
     mapping = build_template_mapping(case, today=date(2026, 7, 3))
 
     assert mapping["[Họ tên chủ đất]"] == "Nguyễn Văn Chủ"
+    assert mapping["[Chủ đất chết 1 - Họ tên]"] == "Nguyễn Văn Chủ"
+    assert mapping["[Người nhận 1 - Họ tên]"] == "Nguyễn Văn Con"
     assert mapping["[Số serial]"] == "BM 1451111"
     assert mapping["[Ngày lập hồ sơ]"] == "03/07/2026"
     assert mapping["[Tên 1]"] == "Nguyễn Văn Chủ"
@@ -158,7 +181,7 @@ def test_build_template_mapping_resolves_role_and_data_only_snippets():
     mapping = build_template_mapping(case, today=date(2026, 7, 3))
 
     assert mapping["[Họ tên vợ/chồng]"] == "Trần Thị Vợ"
-    assert "Nguyễn Văn Con" in mapping["[Danh sách ngườ thừa kế]"]
+    assert "Nguyễn Văn Con" in mapping["[Danh sách người thừa kế]"]
 
 
 def test_replace_in_doc_replaces_split_runs_tables_headers_and_footers():
@@ -187,6 +210,15 @@ def test_replace_in_doc_replaces_split_runs_tables_headers_and_footers():
     assert doc.sections[0].footer.paragraphs[0].text == "Nguyễn Văn Chủ"
 
 
+def test_find_unresolved_placeholders_reports_only_unknown_tokens():
+    doc = Document()
+    doc.add_paragraph("[Đã map] [Chưa map]")
+
+    replace_in_doc(doc, {"[Đã map]": "x"})
+
+    assert find_unresolved_placeholders(doc) == ["[Chưa map]"]
+
+
 def test_list_public_builtin_templates_hides_reference_and_snake_case_templates(tmp_path):
     (tmp_path / "xa_PCDS_template.docx").write_bytes(b"doc")
     (tmp_path / "system_placeholder_reference.docx").write_bytes(b"doc")
@@ -201,10 +233,10 @@ def test_list_public_builtin_templates_hides_reference_and_snake_case_templates(
 def test_placeholder_catalog_documents_vietnamese_contract_without_snake_case_public_contract():
     catalog = Path("word_templates/placeholder_mapping.md").read_text(encoding="utf-8")
 
-    assert "[Họ tên chủ đất]" in catalog
-    assert "[Danh sách ngườ nhận và chưa chọn]" in catalog
-    assert "[Đoạn phân chia di sản]" in catalog
-    assert "chu_dat" in catalog
+    assert "[Người N - Họ tên]" in catalog
+    assert "[Người nhận N - Họ tên]" in catalog
+    assert "[Dòng người từ chối N]" in catalog
+    assert "người chưa chọn" not in catalog.lower()
     assert "[ho_ten_1_chu_dat]" not in catalog
 
 
@@ -225,14 +257,43 @@ def test_one_deceased_landowner_spouse_alive_not_landowner():
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
                 _node(2, role="Vợ/Chồng"),
-                _node(3, role="Con", decision="accept"),
+                _node(3, role="Con", will_receive=True),
             ],
         ),
     )
     mapping = build_template_mapping(case)
-    assert mapping["[Cụm ngườ để lại di sản]"] == "ông Nguyễn Văn A"
-    assert "Trần Thị B" not in mapping["[Cụm ngườ để lại di sản]"]
-    assert "Nguyễn Văn C" in mapping["[Danh sách ngườ nhận và chưa chọn]"]
+    assert mapping["[Cụm chủ đất chết]"] == "ông Nguyễn Văn A"
+    assert mapping["[Người nhận 1 - Họ tên]"] == "Nguyễn Văn C"
+    assert mapping["[Người từ chối 1 - Họ tên]"] == ""
+    assert mapping["[Người 2 - Trạng thái]"] == "Người không nhận"
+
+
+def test_word_context_reads_v2_engine_input_and_exact_engine_result_shares():
+    owner = _person(1, "X", dead=date(2024, 2, 3))
+    receiver = _person(2, "M")
+    case = _make_case(
+        owner,
+        properties=[_prop()],
+        case_state=_case_state_v2(
+            owner,
+            receiver,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Con", will_receive=True),
+            ],
+            allocations={
+                "1": {"finalShare": "0"},
+                "2": {"finalShare": "1/3"},
+            },
+        ),
+    )
+
+    context = build_word_context(case)
+    mapping = build_template_mapping(case)
+
+    assert [person.ho_ten for person in context.receivers] == ["M"]
+    assert context.receivers[0].share == "1/3"
+    assert mapping["[Người nhận 1 - Tỷ lệ]"] == "1/3"
 
 
 def test_two_deceased_landowners_both_in_estate_cluster():
@@ -247,16 +308,17 @@ def test_two_deceased_landowners_both_in_estate_cluster():
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
                 _node(2, role="Vợ/Chồng", is_land_owner=True),
-                _node(3, role="Con", decision="accept"),
+                _node(3, role="Con", will_receive=True),
             ],
         ),
     )
     mapping = build_template_mapping(case)
-    assert "ông Nguyễn Văn A" in mapping["[Cụm ngườ để lại di sản]"]
-    assert "bà Trần Thị B" in mapping["[Cụm ngườ để lại di sản]"]
+    assert mapping["[Chủ đất chết 1 - Họ tên]"] == "Nguyễn Văn A"
+    assert mapping["[Chủ đất chết 2 - Họ tên]"] == "Trần Thị B"
+    assert mapping["[Nối chủ đất chết 2]"] == " và "
 
 
-def test_two_landowners_one_alive_unset_donates_private_share():
+def test_living_landowner_nonreceiver_keeps_base_without_implicit_gift():
     owner1 = _person(1, "Nguyễn Văn A", gender="Nam", born=date(1950, 1, 1), dead=date(2024, 2, 3), doc_no="001")
     owner2 = _person(2, "Trần Thị B", gender="Nữ", born=date(1952, 3, 4), doc_no="002")
     child = _person(3, "Nguyễn Văn C", gender="Nam", born=date(1980, 8, 9), doc_no="003")
@@ -267,18 +329,21 @@ def test_two_landowners_one_alive_unset_donates_private_share():
             owner1, owner2, child,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Vợ/Chồng", is_land_owner=True, decision="unset"),
-                _node(3, role="Con", decision="accept"),
+                _node(2, role="Vợ/Chồng", is_land_owner=True),
+                _node(3, role="Con", will_receive=True),
             ],
         ),
     )
     mapping = build_template_mapping(case)
-    assert mapping["[Cụm ngườ để lại di sản]"] == "ông Nguyễn Văn A"
-    assert "Trần Thị B" in mapping["[Đoạn phân chia di sản]"]
-    assert "phần quyền sử dụng đất thuộc quyền sử dụng của mình" in mapping["[Đoạn phân chia di sản]"]
+    assert mapping["[Cụm chủ đất chết]"] == "ông Nguyễn Văn A"
+    assert mapping["[Chủ đất sống 1 - Họ tên]"] == "Trần Thị B"
+    assert mapping["[Người từ chối 1 - Họ tên]"] == ""
+    assert "Trần Thị B" not in mapping["[Đoạn phân chia di sản]"]
+    assert "tặng cho" not in mapping["[Đoạn phân chia di sản]"]
+    assert mapping["[Dòng chủ đất sống tặng cho 1]"] == ""
 
 
-def test_refuse_person_not_in_opening_but_has_refusal_line():
+def test_nonreceiver_does_not_create_a_legal_refusal_statement():
     owner = _person(1, "Nguyễn Văn A", gender="Nam", born=date(1950, 1, 1), dead=date(2024, 2, 3), doc_no="001")
     child_accept = _person(2, "Nguyễn Văn B", gender="Nam", born=date(1980, 8, 9), doc_no="002")
     child_refuse = _person(3, "Nguyễn Thị C", gender="Nữ", born=date(1982, 10, 11), doc_no="003")
@@ -289,18 +354,19 @@ def test_refuse_person_not_in_opening_but_has_refusal_line():
             owner, child_accept, child_refuse,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Con", decision="accept"),
-                _node(3, role="Con", decision="refuse"),
+                _node(2, role="Con", will_receive=True),
+                _node(3, role="Con"),
             ],
         ),
     )
     mapping = build_template_mapping(case)
-    assert "Nguyễn Thị C" not in mapping["[Danh sách ngườ nhận và chưa chọn]"]
+    assert mapping["[Người từ chối 1 - Họ tên]"] == ""
+    assert mapping["[Dòng người từ chối 1]"] == ""
     assert "Nguyễn Thị C" in mapping["[Đoạn quan hệ gia đình]"]
-    assert "từ chối di sản" in mapping["[Đoạn quan hệ gia đình]"]
+    assert "từ chối di sản" not in mapping["[Đoạn quan hệ gia đình]"]
 
 
-def test_unset_person_in_opening_and_donation_paragraph():
+def test_nonreceiver_is_not_in_division_clause_or_legal_refusal_group():
     owner = _person(1, "Nguyễn Văn A", gender="Nam", born=date(1950, 1, 1), dead=date(2024, 2, 3), doc_no="001")
     unset = _person(2, "Trần Thị B", gender="Nữ", born=date(1955, 4, 5), doc_no="002")
     receiver = _person(3, "Nguyễn Văn C", gender="Nam", born=date(1980, 8, 9), doc_no="003")
@@ -311,15 +377,15 @@ def test_unset_person_in_opening_and_donation_paragraph():
             owner, unset, receiver,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Vợ/Chồng", decision="unset"),
-                _node(3, role="Con", decision="accept"),
+                _node(2, role="Vợ/Chồng"),
+                _node(3, role="Con", will_receive=True),
             ],
         ),
     )
     mapping = build_template_mapping(case)
-    assert "Trần Thị B" in mapping["[Danh sách ngườ nhận và chưa chọn]"]
-    assert "Trần Thị B" in mapping["[Đoạn phân chia di sản]"]
-    assert "tự nguyện tặng cho toàn bộ quyền hưởng" in mapping["[Đoạn phân chia di sản]"]
+    assert mapping["[Người từ chối 1 - Họ tên]"] == ""
+    assert "Trần Thị B" not in mapping["[Đoạn phân chia di sản]"]
+    assert "chưa chọn" not in mapping["[Đoạn phân chia di sản]"].lower()
 
 
 def test_multiple_receivers_listed_in_accept_paragraph():
@@ -333,8 +399,8 @@ def test_multiple_receivers_listed_in_accept_paragraph():
             owner, r1, r2,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Con", decision="accept"),
-                _node(3, role="Con", decision="accept"),
+                _node(2, role="Con", will_receive=True),
+                _node(3, role="Con", will_receive=True),
             ],
         ),
     )
@@ -342,6 +408,81 @@ def test_multiple_receivers_listed_in_accept_paragraph():
     assert "Nguyễn Văn B" in mapping["[Đoạn phân chia di sản]"]
     assert "Nguyễn Thị C" in mapping["[Đoạn phân chia di sản]"]
     assert "đồng ý nhận phần di sản" in mapping["[Đoạn phân chia di sản]"]
+
+
+def test_word_context_keeps_legal_refusal_empty_and_allows_owner_receiver_overlap():
+    owner_dead = _person(1, "Nguyễn Văn A", dead=date(2024, 2, 3))
+    owner_alive = _person(2, "Trần Thị B", gender="Nữ")
+    receiver = _person(3, "Nguyễn Văn C")
+    refused = _person(4, "Nguyễn Thị D", gender="Nữ")
+    case = _make_case(
+        owner_dead,
+        properties=[_prop()],
+        case_state=_case_state(
+            owner_dead,
+            owner_alive,
+            receiver,
+            refused,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Vợ/Chồng", is_land_owner=True, will_receive=True),
+                _node(3, role="Con", will_receive=True),
+                _node(4, role="Con"),
+            ],
+        ),
+    )
+
+    context = build_word_context(case)
+
+    assert [person.ho_ten for person in context.landowners] == ["Nguyễn Văn A", "Trần Thị B"]
+    assert [person.ho_ten for person in context.receivers] == ["Trần Thị B", "Nguyễn Văn C"]
+    assert context.legal_refusal_people == []
+
+
+def test_legacy_accept_is_read_only_when_will_receive_is_missing():
+    owner = _person(1, "Nguyễn Văn A", dead=date(2024, 2, 3))
+    receiver = _person(2, "Nguyễn Văn B")
+    case = _make_case(
+        owner,
+        properties=[_prop()],
+        case_state=_case_state(
+            owner,
+            receiver,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Con", will_receive=None, legacy_decision="accept"),
+            ],
+        ),
+    )
+
+    mapping = build_template_mapping(case)
+
+    assert mapping["[Người nhận 1 - Họ tên]"] == "Nguyễn Văn B"
+
+
+def test_empty_numbered_slots_clear_the_whole_tier_two_block():
+    owner = _person(1, "Nguyễn Văn A", dead=date(2024, 2, 3))
+    receiver = _person(2, "Nguyễn Văn B")
+    case = _make_case(
+        owner,
+        properties=[_prop()],
+        case_state=_case_state(
+            owner,
+            receiver,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Con", will_receive=True),
+            ],
+        ),
+    )
+
+    mapping = build_template_mapping(case)
+
+    assert mapping["[Người nhận 2 - Họ tên]"] == ""
+    assert mapping["[Dòng người nhận 2]"] == ""
+    assert mapping["[Nối chủ đất chết 2]"] == ""
+    assert mapping["[Chủ đất chết 2 - Họ tên]"] == ""
+    assert mapping["[Dòng tài sản 2]"] == ""
 
 
 def test_five_properties_numbering():
@@ -361,17 +502,85 @@ def test_five_properties_numbering():
             owner, receiver,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Con", decision="accept"),
+                _node(2, role="Con", will_receive=True),
             ],
         ),
     )
     mapping = build_template_mapping(case)
     desc = mapping["[Đoạn mô tả di sản]"]
+    assert desc.startswith("Các quyền sử dụng đất như sau:\n1. Quyền sử dụng đất tại: Đất 1")
     assert "1. Quyền sử dụng đất tại: Đất 1" in desc
     assert "1.1. ONT: 80" in desc
     assert "1.2. CLN: 20" in desc
     assert "2.1. NTS: 50" in desc
     assert mapping["[Serial tài sản 5]"] == "S5"
+    assert mapping["[Tài sản 5 - Serial]"] == "S5"
+    assert mapping["[Dòng tài sản 5]"].startswith("5. Quyền sử dụng đất tại: Đất 5")
+
+
+def test_multiple_properties_use_primary_first_then_stable_link_order():
+    owner = _person(1, "Nguyễn Văn A", gender="Nam", dead=date(2024, 2, 3))
+    receiver = _person(2, "Nguyễn Văn B", gender="Nam")
+    primary = _prop(dia_chi="Tài sản chính", so_serial="PRIMARY")
+    linked_first = _prop(dia_chi="Tài sản liên kết trước", so_serial="LINK-1")
+    linked_second = _prop(dia_chi="Tài sản liên kết sau", so_serial="LINK-2")
+    case = _make_case(
+        owner,
+        properties=[primary, linked_first, linked_second],
+        case_state=_case_state(
+            owner,
+            receiver,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Con", will_receive=True),
+            ],
+        ),
+    )
+    case.property_links = [
+        SimpleNamespace(property=linked_second, is_primary=False, id=30),
+        SimpleNamespace(property=primary, is_primary=True, id=20),
+        SimpleNamespace(property=linked_first, is_primary=False, id=10),
+    ]
+
+    context = build_word_context(case)
+    mapping = build_template_mapping(case)
+
+    assert context.assets == [primary, linked_first, linked_second]
+    assert mapping["[Tài sản 1 - Serial]"] == "PRIMARY"
+    assert mapping["[Tài sản 2 - Serial]"] == "LINK-1"
+    assert mapping["[Tài sản 3 - Serial]"] == "LINK-2"
+
+
+def test_real_pcds_template_resolves_two_properties_into_one_document():
+    owner = _person(1, "Nguyễn Văn A", gender="Nam", dead=date(2024, 2, 3))
+    receiver = _person(2, "Nguyễn Văn B", gender="Nam")
+    case = _make_case(
+        owner,
+        properties=[
+            _prop(dia_chi="Thửa đất thứ nhất", so_serial="S1"),
+            _prop(dia_chi="Thửa đất thứ hai", so_serial="S2"),
+        ],
+        case_state=_case_state(
+            owner,
+            receiver,
+            nodes=[
+                _node(1, role="Owner", is_land_owner=True),
+                _node(2, role="Con", will_receive=True),
+            ],
+        ),
+    )
+    doc = Document("word_templates/1. PCDS .docx")
+
+    replace_in_doc(doc, build_template_mapping(case))
+
+    assert find_unresolved_placeholders(doc) == []
+    full_text = "\n".join(
+        [paragraph.text for paragraph in doc.paragraphs]
+        + [cell.text for table in doc.tables for row in table.rows for cell in row.cells]
+    )
+    assert "Các quyền sử dụng đất như sau:" in full_text
+    assert "1. Quyền sử dụng đất tại: Thửa đất thứ nhất" in full_text
+    assert "2. Quyền sử dụng đất tại: Thửa đất thứ hai" in full_text
 
 
 def test_more_than_five_properties_raises():
@@ -385,7 +594,7 @@ def test_more_than_five_properties_raises():
             owner, receiver,
             nodes=[
                 _node(1, role="Owner", is_land_owner=True),
-                _node(2, role="Con", decision="accept"),
+                _node(2, role="Con", will_receive=True),
             ],
         ),
     )
@@ -400,13 +609,13 @@ def test_more_than_twenty_heirs_raises():
     for i in range(2, 24):
         p = _person(i, f"Ngườ {i}", gender="Nam")
         people.append(p)
-        nodes.append(_node(i, role="Con", decision="accept"))
+        nodes.append(_node(i, role="Con", will_receive=True))
     case = _make_case(
         owner,
         properties=[_prop()],
         case_state=_case_state(*people, nodes=nodes),
     )
-    with pytest.raises(WordExportValidationError, match="20 ngườ"):
+    with pytest.raises(WordExportValidationError, match="20 người"):
         build_template_mapping(case)
 
 
@@ -424,7 +633,13 @@ def test_pcds_template_no_old_critical_placeholders():
     placeholders = set(re.findall(r"\[[^\[\]]+\]", full))
     old_critical = {
         "[Tên 1]", "[Tên 2]", "[Tên 3]", "[ONT]", "[CLN]", "[NTS]",
+        "[Cụm ngườ để lại di sản]",
+        "[Danh sách ngườ nhận và chưa chọn]",
+        "[Danh sách ngườ ký]",
     }
     assert not (old_critical & placeholders), f"Old placeholders remain: {old_critical & placeholders}"
-    assert "[Cụm ngườ để lại di sản]" in placeholders
+    assert "[Chủ đất chết 1 - Xưng hô]" in placeholders
+    assert "[Chủ đất chết 2 - Họ tên]" in placeholders
+    assert "[Dòng người 20]" in placeholders
+    assert "[Dòng người từ chối 20]" in placeholders
     assert "[Đoạn phân chia di sản]" in placeholders

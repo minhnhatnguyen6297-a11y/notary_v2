@@ -28,6 +28,8 @@ ROLE_LABELS = {
     "vo_chong_nhanh": "vợ/chồng nhánh",
 }
 
+MAX_WORD_ASSETS = 5
+
 
 class WordExportValidationError(Exception):
     """Lỗi nghiệp vụ khi dữ liệu không đủ để xuất Word đúng."""
@@ -47,8 +49,11 @@ class WordPerson:
     dia_chi: str = ""
     loai_dia_chi: str = ""
     role: str = ""
-    inheritance_decision: str = "unset"
+    relation: str = ""
+    share: str = ""
+    will_receive: bool = False
     is_land_owner: bool = False
+    is_in_diagram: bool = True
     is_hidden: bool = False
     is_deleted: bool = False
 
@@ -74,6 +79,20 @@ class WordPerson:
         return _safe_text(self.loai_dia_chi) or "Địa chỉ"
 
 
+@dataclass
+class WordExportContext:
+    case: Any
+    today: date
+    persons: list[WordPerson]
+    assets: list[Any]
+    all_people: list[WordPerson]
+    landowners: list[WordPerson]
+    living_landowners: list[WordPerson]
+    deceased_landowners: list[WordPerson]
+    receivers: list[WordPerson]
+    legal_refusal_people: list[WordPerson]
+
+
 def _fmt_date(d: Any) -> str:
     if not d:
         return ""
@@ -96,6 +115,21 @@ def _safe_text(v: Any) -> str:
     if v is None:
         return ""
     return str(v).strip()
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = _normalize_token(str(value))
+    if normalized in {"1", "true", "yes", "co"}:
+        return True
+    if normalized in {"0", "false", "no", "khong", ""}:
+        return False
+    return default
 
 
 def _so_thanh_chu(so: float) -> str:
@@ -222,50 +256,6 @@ def _format_share(value: Any) -> str:
     return f"{number:g}"
 
 
-def _receive_status(participant: Any) -> str:
-    if participant is None:
-        return ""
-    return "Nhận di sản" if bool(getattr(participant, "co_nhan_tai_san", False)) else "Từ chối nhận di sản"
-
-
-def _add_person_placeholders(
-    mapping: dict[str, str],
-    label: str,
-    customer: Any,
-    participant: Any = None,
-) -> None:
-    prefix = label.strip()
-    mapping[f"[Họ tên {prefix}]"] = _safe_text(getattr(customer, "ho_ten", ""))
-    mapping[f"[Giới tính {prefix}]"] = _safe_text(getattr(customer, "gioi_tinh", ""))
-    mapping[f"[Ngày sinh {prefix}]"] = _fmt_date(getattr(customer, "ngay_sinh", None))
-    mapping[f"[Năm sinh {prefix}]"] = _fmt_birth_or_year(getattr(customer, "ngay_sinh", None))
-    mapping[f"[Ngày chết {prefix}]"] = _fmt_date(getattr(customer, "ngay_chet", None))
-    mapping[f"[Năm chết {prefix}]"] = _fmt_date(getattr(customer, "ngay_chet", None))
-    mapping[f"[Số giấy tờ {prefix}]"] = _safe_text(getattr(customer, "so_giay_to", ""))
-    mapping[f"[Loại giấy tờ {prefix}]"] = _safe_text(getattr(customer, "loai_giay_to", ""))
-    mapping[f"[Ngày cấp {prefix}]"] = _fmt_date(getattr(customer, "ngay_cap", None))
-    mapping[f"[Nơi cấp {prefix}]"] = _safe_text(getattr(customer, "noi_cap", ""))
-    mapping[f"[Địa chỉ {prefix}]"] = _safe_text(getattr(customer, "dia_chi", ""))
-    mapping[f"[Nhãn địa chỉ {prefix}]"] = _safe_text(getattr(customer, "loai_dia_chi", ""))
-    mapping[f"[Vai trò {prefix}]"] = _safe_text(getattr(participant, "vai_tro", "")) if participant else ""
-    mapping[f"[Hàng thừa kế {prefix}]"] = _safe_text(getattr(participant, "hang_thua_ke", "")) if participant else ""
-    mapping[f"[Trạng thái nhận/từ chối {prefix}]"] = _receive_status(participant)
-    mapping[f"[Tỷ lệ nhận {prefix}]"] = _format_share(getattr(participant, "ty_le", "")) if participant else ""
-
-
-def _empty_person_placeholders(mapping: dict[str, str], label: str) -> None:
-    _add_person_placeholders(mapping, label, None, None)
-
-
-def _add_indexed_people(mapping: dict[str, str], label: str, people: list[tuple[Any, Any]], limit: int = 20) -> None:
-    for index in range(1, limit + 1):
-        if index <= len(people):
-            customer, participant = people[index - 1]
-            _add_person_placeholders(mapping, f"{label} {index}", customer, participant)
-        else:
-            _empty_person_placeholders(mapping, f"{label} {index}")
-
-
 def _pick_core_people(case: Any) -> tuple[Any, Any, Any, list[Any]]:
     owner = getattr(case, "nguoi_chet", None)
     spouse = None
@@ -320,65 +310,6 @@ def _parse_land_rows(raw: str) -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)]
 
 
-def _person_pairs(participants: list[Any]) -> list[tuple[Any, Any]]:
-    return [(getattr(p, "customer", None), p) for p in participants if getattr(p, "customer", None) is not None]
-
-
-def _data_line(customer: Any, participant: Any = None) -> str:
-    name = _safe_text(getattr(customer, "ho_ten", ""))
-    parts = [name]
-    born = _fmt_birth_or_year(getattr(customer, "ngay_sinh", None))
-    doc_no = _safe_text(getattr(customer, "so_giay_to", ""))
-    role = _safe_text(getattr(participant, "vai_tro", "")) if participant else ""
-    share = _format_share(getattr(participant, "ty_le", "")) if participant else ""
-    status = _receive_status(participant)
-    if born:
-        parts.append(f"sinh {born}")
-    if doc_no:
-        parts.append(f"số giấy tờ {doc_no}")
-    if role:
-        parts.append(f"vai trò {role}")
-    if status:
-        parts.append(status.lower())
-    if share:
-        parts.append(f"tỷ lệ {share}%")
-    return " - ".join(part for part in parts if part)
-
-
-def _data_list(items: list[tuple[Any, Any]]) -> str:
-    return "\n".join(f"{index}. {_data_line(customer, participant)}" for index, (customer, participant) in enumerate(items, start=1))
-
-
-def _build_grouped_people(case: Any) -> dict[str, list[tuple[Any, Any]]]:
-    owner = getattr(case, "nguoi_chet", None)
-    owner_id = getattr(owner, "id", None)
-    role_groups: dict[str, list[tuple[Any, Any]]] = {key: [] for key in ROLE_LABELS}
-    if owner is not None:
-        role_groups["chu_dat"].append((owner, None))
-
-    for participant in getattr(case, "participants", []) or []:
-        customer = getattr(participant, "customer", None)
-        if customer is None:
-            continue
-        key = _role_key(getattr(participant, "vai_tro", ""))
-        if key in role_groups:
-            role_groups[key].append((customer, participant))
-
-    spouse_ids = {getattr(customer, "id", None) for customer, _ in role_groups["vo_chong"]}
-    excluded = {owner_id, *spouse_ids}
-    participants = list(getattr(case, "participants", []) or [])
-    role_groups["nguoi_nhan"] = _person_pairs([
-        p for p in participants
-        if getattr(p, "co_nhan_tai_san", False) and getattr(p, "customer_id", None) not in excluded
-    ])
-    role_groups["nguoi_tu_choi"] = _person_pairs([
-        p for p in participants
-        if not getattr(p, "co_nhan_tai_san", False) and getattr(p, "customer_id", None) not in excluded
-    ])
-    role_groups["nguoi_thua_ke"] = ([(owner, None)] if owner is not None else []) + _person_pairs(participants)
-    return role_groups
-
-
 # ---------------------------------------------------------------------------
 # Word export V2: case_state_json-aware helpers
 # ---------------------------------------------------------------------------
@@ -429,10 +360,17 @@ def _word_person_from_customer(customer: Any) -> WordPerson:
     )
 
 
-def _apply_diagram_nodes(persons: list[WordPerson], nodes: list[dict[str, Any]]) -> list[WordPerson]:
+def _apply_diagram_nodes(
+    persons: list[WordPerson],
+    nodes: list[dict[str, Any]],
+    allocations: dict[str, Any] | None = None,
+) -> list[WordPerson]:
     if not nodes:
         return persons
+    for person in persons:
+        person.is_in_diagram = False
     by_id = {str(p.id): p for p in persons if p.id is not None}
+    ordered: list[WordPerson] = []
     for node in nodes:
         if not isinstance(node, dict):
             continue
@@ -440,12 +378,27 @@ def _apply_diagram_nodes(persons: list[WordPerson], nodes: list[dict[str, Any]])
         if not person_id or person_id not in by_id:
             continue
         p = by_id[person_id]
+        allocation = (allocations or {}).get(person_id, {})
+        if not isinstance(allocation, dict):
+            allocation = {}
+        p.is_in_diagram = True
         p.role = _safe_text(node.get("role")) or p.role
-        p.inheritance_decision = _safe_text(node.get("inheritanceDecision")) or p.inheritance_decision
-        p.is_land_owner = bool(node.get("isLandOwner", False))
-        p.is_hidden = bool(node.get("hidden", False))
-        p.is_deleted = bool(node.get("deleted", False))
-    return persons
+        p.relation = _safe_text(node.get("relationLabel")) or p.relation
+        p.share = _safe_text(
+            allocation.get("finalShare")
+            or node.get("finalShare")
+            or node.get("share")
+            or node.get("sharePercent")
+        )
+        legacy_decision = _safe_text(node.get("inheritanceDecision"))
+        p.will_receive = _coerce_bool(node.get("willReceive"), legacy_decision == "accept")
+        p.is_land_owner = _coerce_bool(node.get("isLandOwner"), False)
+        p.is_hidden = _coerce_bool(node.get("hidden"), False)
+        p.is_deleted = _coerce_bool(node.get("deleted"), False)
+        if p not in ordered:
+            ordered.append(p)
+    ordered.extend(person for person in persons if person not in ordered)
+    return ordered
 
 
 def _build_word_persons(case: Any) -> list[WordPerson]:
@@ -453,8 +406,14 @@ def _build_word_persons(case: Any) -> list[WordPerson]:
     has_state = bool(state)
     stage = state.get("stage", []) if has_state else []
     diagram = state.get("diagram", {}) if has_state and isinstance(state.get("diagram"), dict) else {}
-    engine_state = diagram.get("engineState", {}) if isinstance(diagram.get("engineState"), dict) else {}
-    nodes = engine_state.get("nodes", []) if isinstance(engine_state.get("nodes"), list) else []
+    engine_input = diagram.get("engineInput", {}) if isinstance(diagram.get("engineInput"), dict) else {}
+    legacy_engine_state = diagram.get("engineState", {}) if isinstance(diagram.get("engineState"), dict) else {}
+    engine_result = diagram.get("engineResult", {}) if isinstance(diagram.get("engineResult"), dict) else {}
+    node_source = engine_input if isinstance(engine_input.get("nodes"), list) else legacy_engine_state
+    nodes = node_source.get("nodes", []) if isinstance(node_source.get("nodes"), list) else []
+    allocations = engine_result.get("allocations", {})
+    if not isinstance(allocations, dict):
+        allocations = {}
 
     persons: list[WordPerson] = []
     owner = getattr(case, "nguoi_chet", None)
@@ -476,7 +435,7 @@ def _build_word_persons(case: Any) -> list[WordPerson]:
             existing.is_land_owner = True
 
     if has_state:
-        persons = _apply_diagram_nodes(persons, nodes)
+        persons = _apply_diagram_nodes(persons, nodes, allocations)
 
     # Fallback về participants cũ khi không có case_state_json hợp lệ.
     if not has_state:
@@ -486,38 +445,48 @@ def _build_word_persons(case: Any) -> list[WordPerson]:
                 continue
             wp = _word_person_from_customer(customer)
             wp.role = _safe_text(getattr(participant, "vai_tro", ""))
-            wp.inheritance_decision = "accept" if bool(getattr(participant, "co_nhan_tai_san", False)) else "refuse"
+            wp.will_receive = bool(getattr(participant, "co_nhan_tai_san", False))
+            wp.share = _format_share(getattr(participant, "ty_le", ""))
             persons.append(wp)
 
-    return persons
+    deduped: list[WordPerson] = []
+    seen_ids: set[str] = set()
+    for person in persons:
+        person_id = str(person.id)
+        if person_id in seen_ids:
+            continue
+        seen_ids.add(person_id)
+        deduped.append(person)
+    return deduped
 
 
 def _active_persons(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in persons if not p.is_hidden and not p.is_deleted]
-
-
-def _landowners(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _active_persons(persons) if p.is_land_owner]
-
-
-def _deceased_landowners(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _landowners(persons) if p.is_deceased]
-
-
-def _receivers(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _active_persons(persons) if p.inheritance_decision == "accept" and p.is_alive]
-
-
-def _unset_people(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _active_persons(persons) if p.inheritance_decision == "unset" and p.is_alive]
-
-
-def _refused_people(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _active_persons(persons) if p.inheritance_decision == "refuse" and p.is_alive]
+    return [p for p in persons if p.is_in_diagram and not p.is_hidden and not p.is_deleted]
 
 
 def _children(persons: list[WordPerson]) -> list[WordPerson]:
-    return [p for p in _active_persons(persons) if _role_key(p.role) == "con" and p.is_alive]
+    return [p for p in _active_persons(persons) if _role_key(p.role) == "con"]
+
+
+def build_word_context(case: Any, today: date | None = None) -> WordExportContext:
+    persons = _build_word_persons(case)
+    all_people = _active_persons(persons)
+    landowners = [person for person in all_people if person.is_land_owner]
+    receivers = [person for person in all_people if person.will_receive]
+    return WordExportContext(
+        case=case,
+        today=today or date.today(),
+        persons=persons,
+        assets=_get_property_list(case),
+        all_people=all_people,
+        landowners=landowners,
+        living_landowners=[person for person in landowners if person.is_alive],
+        deceased_landowners=[person for person in landowners if person.is_deceased],
+        receivers=receivers,
+        # Diagram has no legally confirmed refusal input. Compatibility
+        # placeholders therefore stay empty instead of inferring a refusal.
+        legal_refusal_people=[],
+    )
 
 
 def _spouses_of(persons: list[WordPerson], target: WordPerson) -> list[WordPerson]:
@@ -554,6 +523,136 @@ def _format_simple_name_list(people: list[WordPerson]) -> str:
     return ", ".join(names[:-1]) + f" và {names[-1]}"
 
 
+def _relation_for_person(person: WordPerson) -> str:
+    if person.relation:
+        return person.relation
+    role_key = _role_key(person.role)
+    return ROLE_LABELS.get(role_key, _safe_text(person.role))
+
+
+def _status_for_person(context: WordExportContext, person: WordPerson) -> str:
+    person_id = str(person.id)
+    if any(str(item.id) == person_id for item in context.receivers):
+        return "Người nhận"
+    if any(str(item.id) == person_id for item in context.deceased_landowners):
+        return "Chủ đất chết"
+    if any(str(item.id) == person_id for item in context.living_landowners):
+        return "Chủ đất sống"
+    return "Người không nhận"
+
+
+def _person_placeholder_values(context: WordExportContext, person: WordPerson | None) -> dict[str, str]:
+    if person is None:
+        return {
+            "Xưng hô": "",
+            "Họ tên": "",
+            "Giới tính": "",
+            "Ngày sinh": "",
+            "Năm sinh": "",
+            "Ngày chết": "",
+            "Năm chết": "",
+            "Loại giấy tờ": "",
+            "Số giấy tờ": "",
+            "Ngày cấp": "",
+            "Nơi cấp": "",
+            "Nhãn địa chỉ": "",
+            "Địa chỉ": "",
+            "Quan hệ": "",
+            "Vai trò": "",
+            "Trạng thái": "",
+            "Tỷ lệ": "",
+        }
+    return {
+        "Xưng hô": _title_for_person(person),
+        "Họ tên": person.ho_ten,
+        "Giới tính": person.gioi_tinh,
+        "Ngày sinh": _fmt_date(person.ngay_sinh),
+        "Năm sinh": _fmt_birth_or_year(person.ngay_sinh),
+        "Ngày chết": _fmt_date(person.ngay_chet),
+        "Năm chết": _fmt_birth_or_year(person.ngay_chet),
+        "Loại giấy tờ": person.loai_giay_to,
+        "Số giấy tờ": person.so_giay_to,
+        "Ngày cấp": _fmt_date(person.ngay_cap),
+        "Nơi cấp": person.noi_cap,
+        "Nhãn địa chỉ": person.address_label,
+        "Địa chỉ": person.dia_chi,
+        "Quan hệ": _relation_for_person(person),
+        "Vai trò": person.role,
+        "Trạng thái": _status_for_person(context, person),
+        "Tỷ lệ": person.share,
+    }
+
+
+def _person_detail_block(index: int, person: WordPerson, *, refused: bool = False) -> str:
+    lines = [f"{index}. {_title_for_person(person)} {person.ho_ten}".strip()]
+    if person.ngay_sinh:
+        lines[0] += f"; Sinh ngày: {_fmt_birth_or_year(person.ngay_sinh)}"
+    lines[0] += "."
+
+    document_parts = []
+    if person.loai_giay_to:
+        document_parts.append(person.loai_giay_to)
+    if person.so_giay_to:
+        document_parts.append(f"số: {person.so_giay_to}")
+    document_line = " ".join(document_parts)
+    if person.noi_cap:
+        document_line += f" do {person.noi_cap} cấp"
+    if person.ngay_cap:
+        document_line += f" ngày {_fmt_date(person.ngay_cap)}"
+    if document_line:
+        lines.append(document_line + ".")
+
+    if person.dia_chi:
+        lines.append(f"{person.address_label}: {person.dia_chi}.")
+    relation = _relation_for_person(person)
+    if relation:
+        lines.append(f"Là {relation}.")
+    if refused:
+        lines.append(
+            f"{_title_for_person(person).capitalize()} {person.ho_ten} đã từ chối di sản theo Văn bản "
+            "từ chối nhận di sản số ......................... ."
+        )
+    return "\n".join(lines)
+
+
+def _add_word_person_group(
+    mapping: dict[str, str],
+    context: WordExportContext,
+    group_name: str,
+    people: list[WordPerson],
+    *,
+    limit: int = 20,
+) -> None:
+    group_alias = group_name.lower()
+    for index in range(1, limit + 1):
+        person = people[index - 1] if index <= len(people) else None
+        values = _person_placeholder_values(context, person)
+        for field, value in values.items():
+            mapping[f"[{group_name} {index} - {field}]"] = value
+            mapping[f"[{field} {group_alias} {index}]"] = value
+        if group_name == "Hàng thừa kế":
+            note = _combined_heir_note(context, person) if person else ""
+            mapping[f"[Hàng thừa kế {index} - Ghi chú]"] = note
+            mapping[f"[Ghi chú hàng thừa kế {index}]"] = note
+
+        block = ""
+        inline = ""
+        if person is not None:
+            block = _person_detail_block(index, person, refused=group_name == "Người từ chối")
+            inline_name = f"{_title_for_person(person)} {person.ho_ten}".strip()
+            if index == 1:
+                inline = inline_name
+            elif index == len(people):
+                inline = f" và {inline_name}"
+            else:
+                inline = f", {inline_name}"
+        mapping[f"[Dòng {group_alias} {index}]"] = block
+        mapping[f"[{group_name} inline {index}]"] = inline
+
+    mapping[f"[Danh sách {group_alias} inline]"] = _format_name_list(people)
+    mapping[f"[Danh sách {group_alias}]"] = _format_simple_name_list(people)
+
+
 def _deceased_landowner_clauses(people: list[WordPerson]) -> str:
     lines = []
     for p in people:
@@ -571,8 +670,13 @@ def _deceased_landowner_clauses(people: list[WordPerson]) -> str:
     return "\n".join(lines)
 
 
-def _family_relation_clauses(deceased_landowners: list[WordPerson], persons: list[WordPerson]) -> str:
+def _family_relation_clauses(
+    deceased_landowners: list[WordPerson],
+    persons: list[WordPerson],
+    legal_refusal_people: list[WordPerson],
+) -> str:
     paragraphs = []
+    refused_ids = {str(person.id) for person in legal_refusal_people}
     for owner in deceased_landowners:
         title = _title_for_person(owner)
         spouses = _spouses_of(persons, owner)
@@ -584,7 +688,7 @@ def _family_relation_clauses(deceased_landowners: list[WordPerson], persons: lis
         if children:
             child_lines = []
             for child in children:
-                if child.inheritance_decision == "refuse":
+                if str(child.id) in refused_ids:
                     child_lines.append(
                         f"{child.ho_ten} đã từ chối di sản theo Văn bản từ chối nhận di sản số ......................... ."
                     )
@@ -612,7 +716,7 @@ def _get_property_list(case: Any) -> list[Any]:
 def _property_description(properties: list[Any]) -> str:
     if not properties:
         return ""
-    paragraphs = []
+    paragraphs = ["Các quyền sử dụng đất như sau:"] if len(properties) > 1 else []
     for idx, prop in enumerate(properties, start=1):
         loai_so = _safe_text(getattr(prop, "loai_so", "")) or "Giấy chứng nhận quyền sử dụng đất"
         serial = _safe_text(getattr(prop, "so_serial", ""))
@@ -663,60 +767,26 @@ def _property_description(properties: list[Any]) -> str:
     return "\n".join(paragraphs)
 
 
-def _division_clause(
-    deceased_landowners: list[WordPerson],
-    receivers: list[WordPerson],
-    unset_people: list[WordPerson],
-    refused_people: list[WordPerson],
-    persons: list[WordPerson],
-) -> str:
-    if not receivers:
-        raise WordExportValidationError("Không có ngườ nhận di sản (accept) để xuất văn bản phân chia.")
+def _division_clause(context: WordExportContext) -> str:
+    if not context.receivers:
+        raise WordExportValidationError("Không có người nhận để xuất văn bản phân chia.")
 
-    deceased_names = _format_name_list(deceased_landowners)
-    receiver_names = _format_name_list(receivers)
-    unset_names = _format_name_list(unset_people)
-    simple_receiver_names = _format_simple_name_list(receivers)
-
-    # Ngườ nhận + ngườ chưa chọn (không bao gồm chủ đất còn sống chưa chọn ở đây nếu họ là chủ đất)
-    opening_group = _format_name_list(receivers + [p for p in unset_people if not p.is_land_owner])
-
-    paragraphs = []
+    deceased_names = _format_name_list(context.deceased_landowners)
+    receiver_names = _format_name_list(context.receivers)
+    simple_receiver_names = _format_simple_name_list(context.receivers)
+    paragraphs = [
+        f"Chúng tôi gồm: {receiver_names} thống nhất phân chia di sản của "
+        f"{deceased_names} như sau:"
+    ]
     paragraphs.append(
-        f"Chúng tôi gồm: {opening_group} là những ngườ thừa kế theo pháp luật của {deceased_names}. "
-        "Bằng văn bản này chúng tôi thống nhất phân chia như sau:"
+        f"{simple_receiver_names} đồng ý nhận phần di sản theo nội dung thỏa thuận "
+        "phân chia di sản thừa kế ở trên."
     )
-
-    if unset_names:
-        paragraphs.append(
-            f"Chúng tôi - {unset_names} tự nguyện tặng cho toàn bộ quyền hưởng di sản thừa kế của mình "
-            f"được thụ hưởng từ {deceased_names} cho {receiver_names}."
-        )
-
-    living_landowner_unset = [p for p in unset_people if p.is_land_owner]
-    if living_landowner_unset:
-        donor_names = _format_name_list(living_landowner_unset)
-        paragraphs.append(
-            f"Đồng thở, tôi/chúng tôi - {donor_names} tự nguyện tặng cho phần quyền sử dụng đất "
-            f"thuộc quyền sử dụng của mình cho {receiver_names}."
-        )
-
-    paragraphs.append(
-        f"{simple_receiver_names} đồng ý nhận phần di sản và phần quyền sử dụng đất được tặng cho "
-        "theo nội dung thỏa thuận phân chia di sản thừa kế ở trên."
-    )
-
     return "\n".join(paragraphs)
 
 
-def _heir_note(person: WordPerson) -> str:
-    if person.inheritance_decision == "refuse":
-        return "Đã từ chối nhận di sản"
-    if person.inheritance_decision == "unset":
-        return "Chưa chọn/Thỏa thuận tặng cho"
-    if person.inheritance_decision == "accept":
-        return "Nhận tài sản"
-    return ""
+def _heir_note(context: WordExportContext, person: WordPerson) -> str:
+    return _status_for_person(context, person)
 
 
 def _role_note(person: WordPerson) -> str:
@@ -730,91 +800,144 @@ def _role_note(person: WordPerson) -> str:
     return ""
 
 
-def _combined_heir_note(person: WordPerson) -> str:
-    parts = [p for p in [_role_note(person), _heir_note(person)] if p]
+def _combined_heir_note(context: WordExportContext, person: WordPerson) -> str:
+    parts = [p for p in [_role_note(person), _heir_note(context, person)] if p]
     return "; ".join(parts)
 
 
-def _add_block_placeholders(mapping: dict[str, str], case: Any, persons: list[WordPerson]) -> None:
-    active = _active_persons(persons)
-    deceased_landowners = _deceased_landowners(active)
-    receivers = _receivers(active)
-    unset_people = _unset_people(active)
-    refused_people = _refused_people(active)
-
-    if not deceased_landowners:
+def _add_block_placeholders(mapping: dict[str, str], context: WordExportContext) -> None:
+    if not context.assets:
+        raise WordExportValidationError("Không có tài sản để xuất Word.")
+    if len(context.assets) > MAX_WORD_ASSETS:
+        raise WordExportValidationError(
+            f"Vượt quá {MAX_WORD_ASSETS} tài sản (hiện có {len(context.assets)}). "
+            "Vui lòng giảm số lượng tài sản trước khi xuất Word."
+        )
+    if not context.landowners:
+        raise WordExportValidationError("Không xác định được chủ đất trên Diagram.")
+    if not context.deceased_landowners:
         raise WordExportValidationError("Không xác định được chủ đất đã chết để xuất văn bản.")
+    if not context.receivers:
+        raise WordExportValidationError("Không có người nhận để xuất văn bản phân chia.")
+    if len(context.all_people) > 20:
+        raise WordExportValidationError(
+            f"Danh sách trên Diagram vượt quá 20 người (hiện có {len(context.all_people)})."
+        )
 
-    # Cụm ngườ để lại di sản
-    mapping["[Cụm ngườ để lại di sản]"] = _format_name_list(deceased_landowners)
+    heir_rows = [person for person in context.all_people if not person.is_land_owner]
+    groups = {
+        "Người": context.all_people,
+        "Chủ đất sống": context.living_landowners,
+        "Chủ đất chết": context.deceased_landowners,
+        "Người nhận": context.receivers,
+        "Người từ chối": context.legal_refusal_people,
+        "Hàng thừa kế": heir_rows,
+    }
+    for group_name, people in groups.items():
+        _add_word_person_group(mapping, context, group_name, people)
 
-    # Danh sách ngườ nhận và chưa chọn (mở đầu)
-    opening_group = receivers + [p for p in unset_people if not p.is_land_owner]
-    mapping["[Danh sách ngườ nhận và chưa chọn]"] = _format_name_list(opening_group)
+    deceased_cluster = _format_name_list(context.deceased_landowners)
+    mapping["[Cụm chủ đất chết]"] = deceased_cluster
+    mapping["[Cụm người để lại di sản]"] = deceased_cluster
+    mapping["[Cụm ngườ để lại di sản]"] = deceased_cluster
+    for index in range(1, 3):
+        person = context.deceased_landowners[index - 1] if index <= len(context.deceased_landowners) else None
+        opening = f"{_title_for_person(person)} {person.ho_ten}".strip() if person else ""
+        mapping[f"[Chủ đất chết mở đầu {index}]"] = opening
+        mapping[f"[Dòng khai tử chủ đất chết {index}]"] = (
+            _deceased_landowner_clauses([person]) if person else ""
+        )
+        mapping[f"[Cụm ngày chết chủ đất chết {index}]"] = (
+            f"; Chết ngày: {_fmt_date(person.ngay_chet)}" if person and person.ngay_chet else ""
+        )
+    mapping["[Nối chủ đất chết 2]"] = " và " if len(context.deceased_landowners) >= 2 else ""
+    mapping["[Cụm UBND niêm yết]"] = f"UBND xã {mapping.get('[Niêm Yết]', '')}".strip()
 
-    # Đoạn ngườ chết là chủ đất
-    mapping["[Đoạn ngườ chết là chủ đất]"] = _deceased_landowner_clauses(deceased_landowners)
+    for index in range(1, 21):
+        mapping[f"[Dòng chủ đất sống tặng cho {index}]"] = ""
 
-    # Đoạn quan hệ gia đình
-    mapping["[Đoạn quan hệ gia đình]"] = _family_relation_clauses(deceased_landowners, active)
+    # Alias cũ: không còn nhóm "chưa chọn", giá trị chỉ còn người nhận.
+    mapping["[Danh sách người nhận và chưa chọn]"] = _format_name_list(context.receivers)
+    mapping["[Danh sách ngườ nhận và chưa chọn]"] = mapping["[Danh sách người nhận và chưa chọn]"]
 
-    # Đoạn mô tả di sản
-    properties = _get_property_list(case)
-    mapping["[Đoạn mô tả di sản]"] = _property_description(properties)
+    mapping["[Đoạn người chết là chủ đất]"] = _deceased_landowner_clauses(context.deceased_landowners)
+    mapping["[Đoạn ngườ chết là chủ đất]"] = mapping["[Đoạn người chết là chủ đất]"]
 
-    # Đoạn phân chia di sản
-    mapping["[Đoạn phân chia di sản]"] = _division_clause(
-        deceased_landowners, receivers, unset_people, refused_people, active
+    mapping["[Đoạn quan hệ gia đình]"] = _family_relation_clauses(
+        context.deceased_landowners,
+        context.all_people,
+        context.legal_refusal_people,
     )
 
-    # Danh sách ngườ ký
-    signers = receivers + [p for p in unset_people if not p.is_land_owner]
-    mapping["[Danh sách ngườ ký]"] = _format_simple_name_list(signers)
+    mapping["[Đoạn mô tả di sản]"] = _property_description(context.assets)
+    mapping["[Đoạn phân chia di sản]"] = _division_clause(context)
 
-    # Danh sách hàng thừa kế
-    heir_rows = [p for p in active if _role_key(p.role) != "chu_dat"]
+    signers: list[WordPerson] = []
+    signer_ids: set[str] = set()
+    for person in [*context.living_landowners, *context.receivers]:
+        if str(person.id) not in signer_ids:
+            signers.append(person)
+            signer_ids.add(str(person.id))
+    mapping["[Danh sách người ký]"] = _format_simple_name_list(signers)
+    mapping["[Danh sách ngườ ký]"] = mapping["[Danh sách người ký]"]
     mapping["[Danh sách hàng thừa kế]"] = _format_simple_name_list(heir_rows)
 
-    # Bảng hàng thừa kế 20 dòng
-    if len(heir_rows) > 20:
-        raise WordExportValidationError(
-            f"Danh sách hàng thừa kế vượt quá 20 ngườ (hiện có {len(heir_rows)})."
-        )
     for idx in range(1, 21):
         if idx <= len(heir_rows):
             p = heir_rows[idx - 1]
+            mapping[f"[STT hàng thừa kế {idx}]"] = str(idx)
             mapping[f"[Họ tên hàng thừa kế {idx}]"] = p.ho_ten
+            mapping[f"[Ngày sinh hàng thừa kế {idx}]"] = _fmt_birth_or_year(p.ngay_sinh)
             mapping[f"[Năm sinh hàng thừa kế {idx}]"] = _fmt_birth_or_year(p.ngay_sinh)
             mapping[f"[Địa chỉ hàng thừa kế {idx}]"] = p.dia_chi
-            mapping[f"[Ghi chú hàng thừa kế {idx}]"] = _combined_heir_note(p)
+            mapping[f"[Ghi chú hàng thừa kế {idx}]"] = _combined_heir_note(context, p)
+            mapping[f"[Dòng hàng thừa kế {idx}]"] = (
+                f"{idx}. {p.ho_ten} - {_fmt_birth_or_year(p.ngay_sinh)} - {p.dia_chi} - "
+                f"{_combined_heir_note(context, p)}"
+            ).strip(" -")
         else:
+            mapping[f"[STT hàng thừa kế {idx}]"] = ""
             mapping[f"[Họ tên hàng thừa kế {idx}]"] = ""
+            mapping[f"[Ngày sinh hàng thừa kế {idx}]"] = ""
             mapping[f"[Năm sinh hàng thừa kế {idx}]"] = ""
             mapping[f"[Địa chỉ hàng thừa kế {idx}]"] = ""
             mapping[f"[Ghi chú hàng thừa kế {idx}]"] = ""
+            mapping[f"[Dòng hàng thừa kế {idx}]"] = ""
 
-    # Bảng ngườ ký 20 dòng
     if len(signers) > 20:
         raise WordExportValidationError(
-            f"Danh sách ngườ ký vượt quá 20 ngườ (hiện có {len(signers)})."
+            f"Danh sách người ký vượt quá 20 người (hiện có {len(signers)})."
         )
     for idx in range(1, 21):
         if idx <= len(signers):
-            mapping[f"[Họ tên ngườ ký {idx}]"] = signers[idx - 1].ho_ten
+            mapping[f"[Họ tên người ký {idx}]"] = signers[idx - 1].ho_ten
         else:
-            mapping[f"[Họ tên ngườ ký {idx}]"] = ""
+            mapping[f"[Họ tên người ký {idx}]"] = ""
+        mapping[f"[Họ tên ngườ ký {idx}]"] = mapping[f"[Họ tên người ký {idx}]"]
 
 
-def _add_property_placeholders(mapping: dict[str, str], case: Any) -> None:
-    properties = _get_property_list(case)
-    if len(properties) > 5:
-        raise WordExportValidationError(
-            f"Vượt quá 5 tài sản (hiện có {len(properties)}). Vui lòng giảm số lượng tài sản trước khi xuất Word."
-        )
+def _add_property_placeholders(mapping: dict[str, str], properties: list[Any]) -> None:
+    asset_fields = {
+        "Địa chỉ": "Địa chỉ đất",
+        "Loại sổ": "Loại sổ",
+        "Serial": "Serial",
+        "Số vào sổ": "Số vào sổ",
+        "Số thửa": "Số thửa",
+        "Số tờ": "Số tờ",
+        "Diện tích": "Diện tích",
+        "Hình thức sử dụng": "Hình thức sử dụng",
+        "Mục đích sử dụng": "Mục đích sử dụng",
+        "Thời hạn": "Thời hạn",
+        "Nguồn gốc": "Nguồn gốc",
+        "Ngày cấp sổ": "Ngày cấp sổ",
+        "Cơ quan cấp sổ": "Cơ quan cấp sổ",
+    }
 
-    for idx in range(1, 6):
-        if idx <= len(properties):
-            prop = properties[idx - 1]
+    for idx in range(1, MAX_WORD_ASSETS + 1):
+        prop = properties[idx - 1] if idx <= len(properties) else None
+        land_rows: list[dict[str, Any]] = []
+        values = {field: "" for field in asset_fields}
+        if prop is not None:
             land_rows = _parse_land_rows(_safe_text(getattr(prop, "land_rows_json", "")))
             if not land_rows:
                 land_rows = [{
@@ -829,37 +952,84 @@ def _add_property_placeholders(mapping: dict[str, str], case: Any) -> None:
                 except (TypeError, ValueError):
                     pass
             area_str = f"{total_area:g}" if total_area else _safe_text(getattr(prop, "dien_tich", ""))
+            purpose = "; ".join(
+                f"{_safe_text(row.get('loai_dat'))}: {_safe_text(row.get('dien_tich'))} m2"
+                for row in land_rows
+                if _safe_text(row.get("loai_dat")) or _safe_text(row.get("dien_tich"))
+            )
+            values = {
+                "Địa chỉ": _safe_text(getattr(prop, "dia_chi", "")),
+                "Loại sổ": _safe_text(getattr(prop, "loai_so", "")) or "Giấy chứng nhận quyền sử dụng đất",
+                "Serial": _safe_text(getattr(prop, "so_serial", "")),
+                "Số vào sổ": _safe_text(getattr(prop, "so_vao_so", "")),
+                "Số thửa": _safe_text(getattr(prop, "so_thua_dat", "")),
+                "Số tờ": _safe_text(getattr(prop, "so_to_ban_do", "")),
+                "Diện tích": area_str,
+                "Hình thức sử dụng": _safe_text(getattr(prop, "hinh_thuc_su_dung", "")),
+                "Mục đích sử dụng": purpose,
+                "Thời hạn": _safe_text(getattr(prop, "thoi_han", "")),
+                "Nguồn gốc": _safe_text(getattr(prop, "nguon_goc", "")),
+                "Ngày cấp sổ": _fmt_date(getattr(prop, "ngay_cap", None)),
+                "Cơ quan cấp sổ": _safe_text(getattr(prop, "co_quan_cap", "")),
+            }
 
-            mapping[f"[Địa chỉ tài sản {idx}]"] = _safe_text(getattr(prop, "dia_chi", ""))
-            mapping[f"[Loại sổ tài sản {idx}]"] = _safe_text(getattr(prop, "loai_so", "")) or "Giấy chứng nhận quyền sử dụng đất"
-            mapping[f"[Serial tài sản {idx}]"] = _safe_text(getattr(prop, "so_serial", ""))
-            mapping[f"[Số vào sổ tài sản {idx}]"] = _safe_text(getattr(prop, "so_vao_so", ""))
-            mapping[f"[Số thửa tài sản {idx}]"] = _safe_text(getattr(prop, "so_thua_dat", ""))
-            mapping[f"[Số tờ tài sản {idx}]"] = _safe_text(getattr(prop, "so_to_ban_do", ""))
-            mapping[f"[Diện tích tài sản {idx}]"] = area_str
+        for field, legacy_name in asset_fields.items():
+            value = values[field]
+            mapping[f"[Tài sản {idx} - {field}]"] = value
+            mapping[f"[{legacy_name} {idx}]"] = value
+            mapping[f"[{legacy_name} tài sản {idx}]"] = value
+            if idx == 1:
+                mapping[f"[Tài sản - {field}]"] = value
 
-            for m_idx in range(1, 11):
-                if m_idx <= len(land_rows):
-                    row = land_rows[m_idx - 1]
-                    mapping[f"[Loại đất tài sản {idx}.{m_idx}]"] = _safe_text(row.get("loai_dat", ""))
-                    mapping[f"[Diện tích loại đất tài sản {idx}.{m_idx}]"] = _safe_text(row.get("dien_tích", row.get("dien_tich", "")))
-                    mapping[f"[Thờ hạn loại đất tài sản {idx}.{m_idx}]"] = _safe_text(row.get("thoi_han", ""))
-                else:
-                    mapping[f"[Loại đất tài sản {idx}.{m_idx}]"] = ""
-                    mapping[f"[Diện tích loại đất tài sản {idx}.{m_idx}]"] = ""
-                    mapping[f"[Thờ hạn loại đất tài sản {idx}.{m_idx}]"] = ""
+        if prop is None:
+            mapping[f"[Dòng tài sản {idx}]"] = ""
+            mapping[f"[Dòng thửa đất {idx}]"] = ""
+            mapping[f"[Dòng diện tích {idx}]"] = ""
+            mapping[f"[Dòng hình thức sử dụng {idx}]"] = ""
+            mapping[f"[Dòng mục đích sử dụng {idx}]"] = ""
+            mapping[f"[Dòng thời hạn {idx}]"] = ""
+            mapping[f"[Dòng nguồn gốc {idx}]"] = ""
         else:
-            mapping[f"[Địa chỉ tài sản {idx}]"] = ""
-            mapping[f"[Loại sổ tài sản {idx}]"] = ""
-            mapping[f"[Serial tài sản {idx}]"] = ""
-            mapping[f"[Số vào sổ tài sản {idx}]"] = ""
-            mapping[f"[Số thửa tài sản {idx}]"] = ""
-            mapping[f"[Số tờ tài sản {idx}]"] = ""
-            mapping[f"[Diện tích tài sản {idx}]"] = ""
-            for m_idx in range(1, 11):
-                mapping[f"[Loại đất tài sản {idx}.{m_idx}]"] = ""
-                mapping[f"[Diện tích loại đất tài sản {idx}.{m_idx}]"] = ""
-                mapping[f"[Thờ hạn loại đất tài sản {idx}.{m_idx}]"] = ""
+            mapping[f"[Dòng tài sản {idx}]"] = (
+                f"{idx}. Quyền sử dụng đất tại: {values['Địa chỉ']} theo {values['Loại sổ']} số: "
+                f"{values['Serial']}; Số vào sổ cấp GCN: {values['Số vào sổ']} do "
+                f"{values['Cơ quan cấp sổ']} cấp ngày {values['Ngày cấp sổ']}."
+            )
+            mapping[f"[Dòng thửa đất {idx}]"] = (
+                f"Thửa đất số: {values['Số thửa']}, tờ bản đồ số: {values['Số tờ']}."
+            )
+            mapping[f"[Dòng diện tích {idx}]"] = f"Diện tích: {values['Diện tích']} m2."
+            mapping[f"[Dòng hình thức sử dụng {idx}]"] = (
+                f"Hình thức sử dụng: {values['Hình thức sử dụng']}."
+            )
+            mapping[f"[Dòng mục đích sử dụng {idx}]"] = (
+                f"Mục đích sử dụng: {values['Mục đích sử dụng']}."
+            )
+            mapping[f"[Dòng thời hạn {idx}]"] = f"Thời hạn sử dụng: {values['Thời hạn']}."
+            mapping[f"[Dòng nguồn gốc {idx}]"] = (
+                f"Nguồn gốc sử dụng đất: {values['Nguồn gốc']}."
+            )
+
+        for line_name in ("thửa đất", "diện tích", "hình thức sử dụng", "mục đích sử dụng", "thời hạn", "nguồn gốc"):
+            canonical = f"[Dòng {line_name} {idx}]"
+            mapping[f"[Dòng {line_name} tài sản {idx}]"] = mapping[canonical]
+
+        for m_idx in range(1, 11):
+            row = land_rows[m_idx - 1] if m_idx <= len(land_rows) else None
+            land_type = _safe_text(row.get("loai_dat", "")) if row else ""
+            area = _safe_text(row.get("dien_tích", row.get("dien_tich", ""))) if row else ""
+            term = _safe_text(row.get("thoi_han", "")) if row else ""
+            mapping[f"[Loại đất {idx}.{m_idx} - Loại đất]"] = land_type
+            mapping[f"[Loại đất {idx}.{m_idx} - Diện tích]"] = area
+            mapping[f"[Loại đất {idx}.{m_idx} - Thời hạn]"] = term
+            mapping[f"[Loại đất tài sản {idx}.{m_idx}]"] = land_type
+            mapping[f"[Diện tích loại đất tài sản {idx}.{m_idx}]"] = area
+            mapping[f"[Thời hạn loại đất tài sản {idx}.{m_idx}]"] = term
+            mapping[f"[Thờ hạn loại đất tài sản {idx}.{m_idx}]"] = term
+            mapping[f"[Dòng loại đất {idx}.{m_idx}]"] = (
+                f"{idx}.{m_idx}. {land_type}: {area} m2; Thời hạn: {term}." if row else ""
+            )
+            mapping[f"[Dòng loại đất tài sản {idx}.{m_idx}]"] = mapping[f"[Dòng loại đất {idx}.{m_idx}]"]
 
 
 # ---------------------------------------------------------------------------
@@ -869,7 +1039,8 @@ def _add_property_placeholders(mapping: dict[str, str], case: Any) -> None:
 
 def build_template_mapping(case: Any, today: date | None = None) -> dict[str, str]:
     ts = getattr(case, "tai_san", None)
-    today = today or date.today()
+    context = build_word_context(case, today=today)
+    today = context.today
     person1, person2, person3, people_4_plus = _pick_core_people(case)
 
     people_slots = [None] * 21
@@ -959,37 +1130,25 @@ def build_template_mapping(case: Any, today: date | None = None) -> dict[str, st
     if not mapping.get("[Thờ hạn 1]") and getattr(ts, "thoi_han", None):
         mapping["[Thờ hạn 1]"] = _safe_text(getattr(ts, "thoi_han", ""))
 
-    groups = _build_grouped_people(case)
+    role_groups: dict[str, list[WordPerson]] = {key: [] for key in ROLE_LABELS}
+    for person in context.all_people:
+        role_key = "chu_dat" if person.is_land_owner else _role_key(person.role)
+        if role_key in role_groups:
+            role_groups[role_key].append(person)
     for role_key, label in ROLE_LABELS.items():
-        first = groups.get(role_key, [])[:1]
-        if first:
-            _add_person_placeholders(mapping, label, first[0][0], first[0][1])
-        else:
-            _empty_person_placeholders(mapping, label)
-        _add_indexed_people(mapping, label, groups.get(role_key, []))
-    _add_indexed_people(mapping, "ngườ nhận", groups["nguoi_nhan"])
-    _add_indexed_people(mapping, "ngườ từ chối", groups["nguoi_tu_choi"])
-    _add_indexed_people(mapping, "ngườ thừa kế", groups["nguoi_thua_ke"])
-
-    mapping["[Danh sách ngườ nhận]"] = _data_list(groups["nguoi_nhan"])
-    mapping["[Danh sách ngườ từ chối]"] = _data_list(groups["nguoi_tu_choi"])
-    mapping["[Danh sách ngườ thừa kế]"] = _data_list(groups["nguoi_thua_ke"])
-    mapping["[Đoạn mô tả quan hệ]"] = _data_list(groups["nguoi_thua_ke"])
+        role_people = role_groups[role_key]
+        _add_word_person_group(mapping, context, label.capitalize(), role_people)
+        first = role_people[0] if role_people else None
+        for field, value in _person_placeholder_values(context, first).items():
+            mapping[f"[{field} {label}]"] = value
 
     # -----------------------------------------------------------------------
     # Word export V2 placeholders based on case_state_json
     # -----------------------------------------------------------------------
-    persons = _build_word_persons(case)
-    _add_block_placeholders(mapping, case, persons)
-    _add_property_placeholders(mapping, case)
-
-    # Đoạn phân chia di sản V1 (legacy) chỉ dùng khi V2 chưa populate.
-    if not mapping.get("[Đoạn phân chia di sản]"):
-        mapping["[Đoạn phân chia di sản]"] = (
-            f"{loai_van_ban}: {mapping['[Danh sách ngườ nhận]']}"
-            if mapping["[Danh sách ngườ nhận]"]
-            else loai_van_ban
-        )
+    _add_block_placeholders(mapping, context)
+    _add_property_placeholders(mapping, context.assets)
+    mapping["[Danh sách người thừa kế]"] = mapping["[Danh sách hàng thừa kế]"]
+    mapping["[Đoạn mô tả quan hệ]"] = mapping["[Đoạn quan hệ gia đình]"]
 
     return mapping
 
@@ -1019,7 +1178,10 @@ def _replace_text_placeholders(text: str, mapping: dict[str, str], normalized_ma
             return normalized_mapping[norm]
         return match.group(0)
 
-    return re.sub(r"\[([^\[\]]+)\]", _token_repl, new_text)
+    new_text = re.sub(r"\[([^\[\]]+)\]", _token_repl, new_text)
+    new_text = re.sub(r"[ \t]{2,}", " ", new_text)
+    new_text = re.sub(r"[ \t]+([,.;:])", r"\1", new_text)
+    return new_text
 
 
 def _replace_in_paragraph(paragraph: Any, mapping: dict[str, str], normalized_mapping: dict[str, str]) -> None:
@@ -1060,6 +1222,24 @@ def replace_in_doc(doc: Any, mapping: dict[str, str]) -> None:
             _replace_in_paragraph(paragraph, mapping, normalized_mapping)
         for paragraph in section.footer.paragraphs:
             _replace_in_paragraph(paragraph, mapping, normalized_mapping)
+
+
+def find_unresolved_placeholders(doc: Any) -> list[str]:
+    texts: list[str] = []
+    texts.extend(paragraph.text for paragraph in doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                texts.extend(paragraph.text for paragraph in cell.paragraphs)
+    for section in doc.sections:
+        texts.extend(paragraph.text for paragraph in section.header.paragraphs)
+        texts.extend(paragraph.text for paragraph in section.footer.paragraphs)
+    found = {
+        match.group(0)
+        for text in texts
+        for match in re.finditer(r"\[[^\[\]]+\]", text)
+    }
+    return sorted(found)
 
 
 def list_public_builtin_templates(root: str | Path = "word_templates") -> list[dict[str, Any]]:
