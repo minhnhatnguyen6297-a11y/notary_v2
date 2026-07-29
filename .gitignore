@@ -8,8 +8,6 @@ __pycache__/
 .vscode/
 logs/
 tmp/
-deploy/vps/ssh_credentials.env
-deploy/vps/bin/
 
 # UPLOAD tool - generated outputs (now at tools/upload_lab/)
 tools/upload_lab/output/
