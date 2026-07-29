@@ -2,11 +2,14 @@
 
 > **Trạng thái:** DRAFT chờ user duyệt.
 > **Cập nhật:** 22/07/2026.
-> **Vai trò:** nguồn chuẩn duy nhất cho nghiệp vụ tính thừa kế của Diagram.
+> **Vai trò:** đề xuất draft, không chuẩn tắc và chưa phải nguồn sự thật cho đến khi user phê duyệt rõ ràng.
 >
 > Bài toán kiểm thử nằm tại `research/case-catalog.md`; UI/UX nằm tại
 > `ux.md`; luồng Stage/Pool/Diagram nằm tại
 > `workflow.md`.
+>
+> Hành vi quan sát được hiện tại thuộc về `workflow.md` và code. Khi có điểm mơ hồ,
+> hỏi user; không tự đoán quy tắc.
 
 ## 1. Nguyên tắc và phạm vi
 

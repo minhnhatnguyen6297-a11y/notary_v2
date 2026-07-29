@@ -1,9 +1,10 @@
 # Inheritance Engine V2 — Technical contract
 
-Status: current
+Status: target contract pending implementation commit; non-normative
+Current only after the implementation and its tests are committed and verification passes. Referenced services, endpoints, and tests may exist only in an uncommitted workspace and cannot be assumed in a clean checkout. Draft business rules do not win until the user explicitly approves them; ask the user when ambiguous.
 Verification evidence: `../research/`
 
-If this contract conflicts with business rules, `../spec.md` wins.
+If this target contract conflicts with business rules, do not resolve the conflict by guessing; ask the user. `../spec.md` is a non-normative draft until approved.
 UI/UX is governed by `../ux.md`; verification scenarios and evidence live in
 `../research/case-catalog.md`, `../research/validation-matrix.md`, and
 `../research/validation-issues.md`.

@@ -5,9 +5,9 @@ mismatch.
 
 ## Remaining items
 
-### VERIFY - complete
+### Previously recorded verification (uncommitted snapshot)
 
-Full `verify.bat`, the target engine/parser/Word/research suite, and the Node UI suite pass.
+Full `verify.bat`, the target engine/parser/Word/research suite, and the Node UI suite were recorded as passing for an uncommitted workspace snapshot. This is not evidence for clean HEAD.
 
 ### OUT_OF_SCOPE - uploaded custom Word content
 

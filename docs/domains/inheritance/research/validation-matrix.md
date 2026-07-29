@@ -1,7 +1,7 @@
 # Inheritance Engine V2 validation matrix
 
-Verified 2026-07-23. The business-rule source remains
-`../spec.md`; this document records implementation evidence only.
+Recorded 2026-07-23 from an uncommitted V2 workspace snapshot. Non-normative until the code and tests are committed; claims apply only to that snapshot.
+The business-rule draft is `../spec.md`; this document records implementation evidence only.
 
 ## Research evidence
 
