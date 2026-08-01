@@ -71,10 +71,13 @@ Read `docs/README.md` only when the task area is not obvious. Then read the matc
 | Word renderer / placeholder engine | `docs/platform/document-generation/README.md` |
 | Fast text audit CLI | `docs/platform/fast-text-audit/README.md` |
 | Architecture or module boundaries | `docs/architecture/README.md` |
+| Cross-session technical context / handoff | `memory-bank/README.md`; then `PROJECT-CONTEXT.md`, `PROGRESS.md`, `CURRENT.md` |
 
 Source precedence: `AGENTS.md` hard rules -> accepted architecture ADR -> domain spec -> platform contract -> technical/UX docs -> active plan -> research.
 
 If code conflicts with a normative spec or contract, stop and report the conflict. Do not silently change either side.
+
+`memory-bank/` is operational context only. It must not override `AGENTS.md`, accepted ADRs, domain specs, or platform contracts.
 
 ## 6. Graphify code graph
 
