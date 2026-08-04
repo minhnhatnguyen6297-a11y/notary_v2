@@ -12,6 +12,7 @@ Keep this file short. It should prevent bad edits and route agents to the right 
 - Do not edit, format, revert, move, or delete unrelated user changes.
 - Do not change API contracts, router signatures, Celery contracts, DB schema, OCR flow, or business rules without explicit scope.
 - If a business rule is ambiguous, state the case and ask the user. Do not guess.
+- New business content must pass the Business-spec gate in section 2 before any non-spec work.
 - Prefer the smallest behavior-preserving change. Reuse existing code/patterns before adding new code.
 - Use Ponytail/Superpowers discipline if available; do not duplicate those workflows here.
 
@@ -32,6 +33,19 @@ Rules:
 - Do not edit outside `FILES TO TOUCH`.
 - If another file or broader change becomes necessary, stop and ask with `SCOPE BREAK REQUEST`.
 - No new helper/class/module/abstraction unless needed and scoped.
+
+### Business-spec gate
+
+When the user introduces a new business rule, term, workflow, or expected behavior:
+
+1. Read only the routed module entrypoint and linked spec index needed to locate existing coverage.
+2. Before research, planning, coding, or other non-spec work, tell the user exactly one of:
+   - `SPEC STATUS: DA CO - <APPROVED/DRAFT> - <path and section>`
+   - `SPEC STATUS: CHUA CO/CHUA BAO PHU - can tao hoac cap nhat draft spec`
+   - `SPEC STATUS: MAU THUAN - <conflicting paths or interpretations>`
+3. If no approved spec covers the new content, stop non-spec work and create or update a draft using `docs/templates/spec-template.md` in the routed domain/platform location. Do not create a parallel source of truth.
+4. Ask one business question at a time. Mark unresolved items `[NEEDS CLARIFICATION]`; do not create an implementation plan or edit code while any marker remains.
+5. Only the user's explicit approval may authorize changing a business spec from `DRAFT` to `APPROVED`. If implementation later exposes a spec gap or conflict, return the spec to `DRAFT` and ask the user before continuing.
 
 ## 3. Verify / report
 
@@ -56,6 +70,7 @@ BAO CAO HOAN THANH:
 - Frontend: Jinja2 + Bootstrap + Vanilla JS.
 - Diagram UI: ReactFlow embedded from `frontend/static/ReactFlowApp.jsx`.
 - Active default OCR: Cloud AI OCR. Local OCR is parked/research code unless a task explicitly targets it.
+- QR is no longer part of the active OCR AI path. QR may be developed as a separate capability later, but the direction is not finalized yet.
 
 ## 5. Read routing
 
@@ -95,6 +110,7 @@ If code conflicts with a normative spec or contract, stop and report the conflic
 - Stage is the UI source of truth for people in a case; Pool/Diagram must not mutate Stage person data.
 - OCR modal `x` must not save, clear, reset, flush, or auto-stage.
 - Cloud AI OCR is active default; Local OCR is parked/research unless explicitly scoped.
+- QR is out of scope for the active OCR AI path. If a task wants QR behavior, stop and confirm the intended separate direction first.
 - Detailed invariants belong in the routed spec/plan files.
 
 ## 8. Run / smoke
