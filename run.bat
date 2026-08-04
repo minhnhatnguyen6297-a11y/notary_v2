@@ -8,172 +8,160 @@ set "VENV_PYTHON=%VENV%\Scripts\python.exe"
 set "VENV_PIP=%VENV%\Scripts\pip.exe"
 set "PORT=8000"
 set "HOST=127.0.0.1"
-set "PROJECT_DIR_F=%PROJECT_DIR:\=/%"
-set "CELERY_BROKER_URL=sqlalchemy+sqlite:///%PROJECT_DIR_F%ocr_jobs.db"
-set "CELERY_RESULT_BACKEND=db+sqlite:///%PROJECT_DIR_F%ocr_jobs.db"
-set "PYTHON_CMD="
 
 cd /d "%PROJECT_DIR%"
 
 echo.
-echo  Cong chung -- Quan ly Ho so Thua ke
 echo  =====================================
-
-:: 1. Xac dinh Python
-if exist "%VENV_PYTHON%" (
-  set "PYTHON_CMD=%VENV_PYTHON%"
-) else (
-  python --version >nul 2>&1
-  if not errorlevel 1 set "PYTHON_CMD=python"
-)
-if not defined PYTHON_CMD (
-  py -3.10 --version >nul 2>&1
-  if not errorlevel 1 set "PYTHON_CMD=py -3.10"
-)
-if not defined PYTHON_CMD (
-  py -3 --version >nul 2>&1
-  if not errorlevel 1 set "PYTHON_CMD=py -3"
-)
-if not defined PYTHON_CMD (
-  echo.
-  echo [LOI] Khong tim thay Python 3.10+ de khoi tao moi truong.
-  echo       Neu da cai Python, hay tick Add python.exe to PATH roi chay lai.
-  echo.
-  pause
-  exit /b 1
-)
-
-:: 2. Tao venv neu chua co + cai dependency nen
-if not exist "%VENV_PYTHON%" (
-  echo [SETUP] Tao moi truong ao (venv^)...
-  %PYTHON_CMD% -m venv "%VENV%"
-  if errorlevel 1 (
-    echo [LOI] Khong tao duoc venv.
-    pause & exit /b 1
-  )
-  echo [SETUP] Cai dat thu vien tu requirements.txt...
-  "%VENV_PYTHON%" -m pip install --upgrade pip --quiet
-  if errorlevel 1 (
-    echo [LOI] Nang cap pip that bai.
-    pause & exit /b 1
-  )
-  "%VENV_PIP%" install -r requirements.txt --quiet
-  if errorlevel 1 (
-    echo [LOI] Cai dat thu vien that bai.
-    pause & exit /b 1
-  )
-  echo [SETUP] Hoan tat.
-)
-
-:: 2.1 Tao .env neu chua co
-if not exist ".env" (
-  if exist ".env.example" (
-    echo [SETUP] Tao .env tu .env.example...
-    copy ".env.example" ".env" >nul
-    if errorlevel 1 (
-      echo [LOI] Khong tao duoc file .env.
-      pause & exit /b 1
-    )
-  ) else (
-    echo [WARN] Khong tim thay .env.example de tao .env.
-  )
-)
-
-:: 3. Kiem tra Local OCR dependency (RapidOCR det + VietOCR rec)
-echo [RUN] Kiem tra Local OCR...
-"%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, vietocr, rapidocr_onnxruntime; assert int(numpy.__version__.split('.')[0]) < 2"
-if errorlevel 1 (
-  echo [RUN] Thieu hoac lech dependency Local OCR. Dang tu cai dat CPU-only stack...
-  "%VENV_PIP%" uninstall -y easyocr torch torchvision torchaudio vietocr opencv-python opencv-python-headless >nul 2>&1
-  "%VENV_PIP%" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-  if errorlevel 1 (
-    echo [LOI] Khong the cai dat PyTorch CPU-only.
-    pause & exit /b 1
-  )
-  "%VENV_PIP%" install -r requirements-local-ocr.txt
-  if errorlevel 1 (
-    echo [LOI] Khong the cai dat stack OCR Local moi.
-    pause & exit /b 1
-  )
-  "%VENV_PYTHON%" -c "import cv2, numpy, onnxruntime, torch, vietocr, rapidocr_onnxruntime; assert int(numpy.__version__.split('.')[0]) < 2"
-  if errorlevel 1 (
-    echo [LOI] Local OCR van chua san sang sau khi cai dat.
-    pause & exit /b 1
-  )
-)
-echo [RUN] Local OCR san sang.
-echo [RUN] OCR engine: RapidOCR detection + VietOCR recognition (CPU-only).
-
-:: 4. Dong tat ca process cu (server + worker)
-echo [RUN] Dong cac process cu...
-taskkill /F /FI "WINDOWTITLE eq Celery Worker" >nul 2>&1
-taskkill /F /FI "WINDOWTITLE eq Server: Notary" >nul 2>&1
-taskkill /F /FI "IMAGENAME eq uvicorn.exe" >nul 2>&1
-
-:: 5. Kill ALL processes on port (lap 3 lan de kill ca reloader + worker cua uvicorn)
-echo [RUN] Kiem tra port %PORT%...
-for /L %%i in (1,1,3) do (
-  for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr ":%PORT% "') do (
-    if "%%p" neq "0" (
-      echo [RUN]   - Dong PID %%p /T ...
-      taskkill /F /T /PID %%p >nul 2>&1
-    )
-  )
-  timeout /t 1 /nobreak >nul
-)
-echo [RUN] Port %PORT% san sang.
-
-:: 6. Khoi dong Celery worker (Local OCR)
-echo [RUN] Khoi dong Celery worker...
-if not exist "logs" mkdir logs
-if not exist "tmp" mkdir tmp
-if not exist "tmp\ocr" mkdir tmp\ocr
-del /q "ocr_jobs.db" >nul 2>&1
-del /q "tmp\ocr\*" >nul 2>&1
-set PYTHONFAULTHANDLER=1
-echo [RUN] Da don broker local cu (ocr_jobs.db) truoc khi boot worker.
-start "Celery Worker" /D "%PROJECT_DIR%" cmd /k ""%VENV_PYTHON%" -m celery -A celery_app.celery_app worker --pool=solo --concurrency=1 --loglevel=INFO"
-timeout /t 2 /nobreak >nul
-
-:: 7. Chay server
+echo    NOTARY V2 - Quan ly Ho so Thua ke
+echo  =====================================
 echo.
-echo  +------------------------------------------+
-echo  ^|  Server: http://%HOST%:%PORT%               ^|
-echo  ^|  Nhan Ctrl+C de dung server              ^|
-echo  +------------------------------------------+
+
+:: ============================
+::  1. KIEM TRA PYTHON
+:: ============================
+set "PYTHON_CMD="
+
+where python >nul 2>&1 && python --version 2>nul | find "3." >nul && (
+    set "PYTHON_CMD=python"
+) || (
+    where py >nul 2>&1 && (
+        for /L %%v in (11,-1,10) do (
+            py -3.%%v --version >nul 2>&1 && set "PYTHON_CMD=py -3.%%v" && goto :FOUND_PYTHON
+        )
+        py -3 --version >nul 2>&1 && set "PYTHON_CMD=py -3"
+    )
+)
+:FOUND_PYTHON
+
+if not defined PYTHON_CMD (
+    echo [LOI] Khong tim thay Python 3.10+.
+    echo.
+    echo       Tai Python tai: https://www.python.org/downloads/
+    echo       Khi cai nho tick "Add Python to PATH" roi chay lai file nay.
+    echo.
+    pause
+    exit /b 1
+)
+
+%PYTHON_CMD% --version
+echo [OK] Tim thay Python.
+echo.
+
+:: ============================
+::  2. TAO VENV + CAI DAT
+:: ============================
+if not exist "%VENV_PYTHON%" (
+    echo [1/3] Tao moi truong ao venv...
+    %PYTHON_CMD% -m venv "%VENV%"
+    if errorlevel 1 (
+        echo [LOI] Khong tao duoc venv.
+        pause & exit /b 1
+    )
+
+    echo [2/3] Nang cap pip...
+    "%VENV_PYTHON%" -m pip install --upgrade pip --quiet
+    if errorlevel 1 (
+        echo [LOI] Nang cap pip that bai.
+        pause & exit /b 1
+    )
+
+    echo [3/3] Cai dat thu vien tu requirements.txt...
+    "%VENV_PIP%" install -r requirements.txt --quiet
+    if errorlevel 1 (
+        echo [LOI] Cai dat thu vien that bai. Doc log ben tren de biet chi tiet.
+        pause & exit /b 1
+    )
+
+    echo.
+    echo [OK] Cai dat hoan tat.
+)
+
+:: ============================
+::  3. TAO .env (neu chua co)
+:: ============================
+if not exist ".env" (
+    if exist ".env.example" (
+        echo [SETUP] Tao .env tu .env.example...
+        copy ".env.example" ".env" >nul
+        if errorlevel 1 (
+            echo [LOI] Khong tao duoc .env.
+            pause & exit /b 1
+        )
+        echo [OK] Da tao .env. Vui long mo file .env va nhap API key truoc khi dung OCR.
+    ) else (
+        echo [WARN] Khong tim thay .env.example. Tao file .env trang...
+        echo # Notary V2 - .env > .env
+        echo # Can nhap QWEN_API_KEY de dung Cloud OCR >> .env
+    )
+)
+
+:: ============================
+::  4. DON DEP PROCESS CU
+:: ============================
+echo [RUN] Don process cu...
+taskkill /F /IM uvicorn.exe >nul 2>&1
+for /L %%i in (1,1,3) do (
+    for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr ":%PORT% "') do (
+        if "%%p" neq "0" (
+            taskkill /F /T /PID %%p >nul 2>&1
+        )
+    )
+    timeout /t 1 /nobreak >nul
+)
+echo [OK] Port %PORT% da duoc giai phong.
+
+:: ============================
+::  5. CHUAN BI THU MUC
+:: ============================
+if not exist "logs" mkdir logs
+if not exist "tmp"   mkdir tmp
+
+set PYTHONFAULTHANDLER=1
+
+:: ============================
+::  6. KHOI DONG UVICORN SERVER
+:: ============================
+echo.
+echo  +-----------------------------------------------+
+echo  ^|  Server:   http://%HOST%:%PORT%                  ^|
+echo  ^|  De dung:  dong cua so Server                   ^|
+echo  +-----------------------------------------------+
 echo.
 
 start "Server: Notary" "%VENV_PYTHON%" -m uvicorn main:app --host %HOST% --port %PORT%
 
-:: Cho server khoi dong hoan toan roi moi mo trinh duyet
+:: ============================
+::  7. CHO SERVER ROI MO BROWSER
+:: ============================
 echo [RUN] Dang cho server san sang...
 set /A WAIT_COUNT=0
+
 :WAIT_SERVER
 set /A WAIT_COUNT+=1
 set "FOUND_PORT="
 for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr ":%PORT% " ^| findstr /V "TIME_WAIT"') do set FOUND_PORT=1
+
 if defined FOUND_PORT (
-  start "" "http://%HOST%:%PORT%"
-  goto :SERVER_READY
+    start "" "http://%HOST%:%PORT%"
+    goto :SERVER_READY
 )
 if %WAIT_COUNT% GEQ 20 (
-  echo [WARN] Server khoi dong cham, hay mo thu cong: http://%HOST%:%PORT%
-  goto :SERVER_READY
+    echo [WARN] Server khoi dong cham. Mo thu cong: http://%HOST%:%PORT%
+    goto :SERVER_READY
 )
 timeout /t 1 /nobreak >nul
 goto :WAIT_SERVER
 
 :SERVER_READY
+echo.
+echo [INFO] He thong da san sang.
+echo        Server:   http://%HOST%:%PORT%
+echo        Local OCR worker khong tu khoi dong; day la research path rieng.
+echo        De dung:  dong cua so Server hoac tat cmd.
+echo.
 
-echo.
-echo [INFO] He thong da khoi dong (server + worker).
-echo        Mo trinh duyet: http://%HOST%:%PORT%
-echo        Xem log worker truc tiep tren cua so "Celery Worker".
-echo        De dung: dong 2 cua so Server va Celery Worker.
-echo.
 pause
-
-echo.
 echo [INFO] Server da dung.
 pause
 endlocal

@@ -1,17 +1,31 @@
+# =============================================================================
+# NOTARY V2 — Danh sach thu vien (1 file cho may moi)
+# Cai dat: pip install -r requirements.txt
+# =============================================================================
+
+# ---------- Web Framework ----------
 fastapi==0.111.0
-uvicorn==0.30.1
+uvicorn[standard]==0.30.1
 jinja2==3.1.4
 python-multipart==0.0.9
-sqlalchemy==2.0.47
-python-docx==1.1.2
-playwright
-openpyxl==3.1.2
-zxing-cpp
-Pillow
 httpx
-python-dotenv
-celery[sqlalchemy]==5.3.6
 
-# fast_text_audit pipeline
+# ---------- Database / ORM ----------
+sqlalchemy==2.0.47
+python-dotenv
+
+# ---------- Document Processing ----------
+python-docx==1.1.2
+openpyxl==3.1.2
 PyMuPDF==1.24.5
+
+# ---------- OCR — Cloud AI path ----------
+Pillow>=10
+zxing-cpp
+
+# ---------- Audit / Soat chinh ta ----------
 rapidfuzz==3.9.0
+
+# ---------- Testing ----------
+playwright
+pytest
