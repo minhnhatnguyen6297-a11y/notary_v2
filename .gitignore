@@ -36,6 +36,7 @@ benchmark_qr.py
 
 # Runtime dirs
 runtime/
+zalo_connector/node_modules/
 
 # Never track VPS credentials
 deploy/vps/ssh_credentials.env

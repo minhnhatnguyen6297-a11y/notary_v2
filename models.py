@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -181,3 +181,79 @@ class ExtractedDocument(Base):
     raw_text = Column(Text, nullable=True)
     parsed_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+
+class ZaloConnectorAccount(Base):
+    __tablename__ = "zalo_connector_accounts"
+
+    id = Column(String(36), primary_key=True)
+    bound_zalo_id = Column(String(100), nullable=True)
+    session_state = Column(String(30), nullable=False, default="login_required")
+    listener_generation = Column(Integer, nullable=False, default=0)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    qr_image = Column(Text, nullable=True)
+    qr_generated_at = Column(DateTime(timezone=True), nullable=True)
+    qr_expires_at = Column(DateTime(timezone=True), nullable=True)
+    storage_full = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ZaloSource(Base):
+    __tablename__ = "zalo_sources"
+    __table_args__ = (
+        UniqueConstraint("connector_account_id", "conversation_id", name="uq_zalo_source_conversation"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    connector_account_id = Column(String(36), ForeignKey("zalo_connector_accounts.id"), nullable=False, index=True)
+    conversation_id = Column(String(200), nullable=False)
+    conversation_type = Column(String(20), nullable=False)
+    display_name = Column(String(300), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ZaloMedia(Base):
+    __tablename__ = "zalo_media"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_account_id",
+            "conversation_id",
+            "msg_id",
+            "attachment_index",
+            name="uq_zalo_media_attachment",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    connector_account_id = Column(String(36), ForeignKey("zalo_connector_accounts.id"), nullable=False, index=True)
+    source_id = Column(String(36), ForeignKey("zalo_sources.id"), nullable=False, index=True)
+    conversation_id = Column(String(200), nullable=False)
+    msg_id = Column(String(200), nullable=False)
+    attachment_index = Column(Integer, nullable=False)
+    media_object_key = Column(String(500), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=False)
+    payload_digest = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ZaloBatch(Base):
+    __tablename__ = "zalo_batches"
+
+    id = Column(String(36), primary_key=True)
+    connector_account_id = Column(String(36), ForeignKey("zalo_connector_accounts.id"), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="preparing")
+    items_json = Column(JSON, nullable=False, default=list)
+    selection_json = Column(JSON(none_as_null=True), nullable=True)
+    outputs_json = Column(JSON, nullable=False, default=dict)
+    ocr_status = Column(String(30), nullable=False, default="not_selected")
+    raw_ocr_json = Column(JSON, nullable=True)
+    confirmed_json = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

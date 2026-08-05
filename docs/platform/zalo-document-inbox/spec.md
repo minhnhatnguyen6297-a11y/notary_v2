@@ -1,6 +1,6 @@
 # Feature specification: Zalo Document Inbox
 
-> **Status:** DRAFT
+> **Status:** APPROVED
 > **Owner/approver:** User
 > **Input:** Tự động nhận ảnh giấy tờ từ Zalo cá nhân, cho người dùng chọn và xử lý thành dữ liệu hoặc tài liệu sử dụng ngay
 > **Parent source:** `docs/platform/document-intake/spec.md`
@@ -70,7 +70,7 @@ Tài liệu này định nghĩa **hệ thống phải làm gì** và **vì sao**
 | R-016 | Batch retention | Sau khi validation `Xử lý` thành công, backend đặt một `created_at` và `expires_at = created_at + 72 giờ` cho toàn batch. Preview state, working copy, raw/normalized OCR và output dùng chung mốc này; quá hạn thì dữ liệu nội dung bị xóa, không xác nhận/retry/download và job hoàn tất muộn không được publish. Chỉ tombstone không nội dung (`batch_id`, status, expiry) được giữ để URL báo `Hết hạn`. Media nguồn và dữ liệu đã chuyển vào luồng chính dùng lifecycle riêng | PRODUCT | User clarified 2026-07-30; lifecycle unified 2026-08-03 |
 | R-017 | Source ownership | Media Zalo gốc do connector quản lý; Zalo Document Inbox không tự xóa file nguồn của connector | PRODUCT | Module boundary confirmed 2026-07-30 |
 | R-018 | Local và deployed | Folder trên máy chỉ là cách lưu của môi trường phát triển khi backend chạy local. Khi deploy, connector và `notary_v2` dùng storage phía server; browser chỉ nhận nội dung qua UI/API và không được yêu cầu truy cập đường dẫn local | PRODUCT | User clarified 2026-07-30 |
-| R-019 | Webhook, heartbeat và polling | Connector gửi state-change và heartbeat mặc định mỗi 15 giây kèm listener generation; backend dùng thời điểm nhận phía server. Ba trạng thái loại trừ nhau, xét theo thứ tự ưu tiên: `Cần đăng nhập lại` khi connector báo session Zalo không dùng được (hết hạn, bị đá, chưa onboard) — trạng thái này thắng mọi trạng thái khác kể cả khi heartbeat cũng ngừng; `Mất kết nối` khi không có heartbeat hợp lệ quá 45 giây mà không có báo cáo session; `Đã kết nối` khi heartbeat trong ngưỡng và session dùng được. Chỉ QR login thành công mới thoát `Cần đăng nhập lại`; heartbeat của generation cũ không đảo được trạng thái của generation mới. Tab Inbox visible polling mặc định mỗi 2 giây và refresh ngay khi visible/focus trở lại. Các khoảng thời gian đều cấu hình được; chưa dùng SSE/WebSocket | PRODUCT | User approved approach A 2026-07-31; state machine finalized 2026-08-03 |
+| R-019 | Webhook, heartbeat, polling và QR login | Connector gửi state-change và heartbeat mặc định mỗi 15 giây kèm listener generation; backend dùng thời điểm nhận phía server. Ba trạng thái loại trừ nhau, xét theo thứ tự ưu tiên: `Cần đăng nhập lại` khi connector báo session Zalo không dùng được (hết hạn, bị đá, chưa onboard) — trạng thái này thắng mọi trạng thái khác kể cả khi heartbeat cũng ngừng; `Mất kết nối` khi không có heartbeat hợp lệ quá 45 giây mà không có báo cáo session; `Đã kết nối` khi heartbeat trong ngưỡng và session dùng được. Chỉ QR login thành công mới thoát `Cần đăng nhập lại`; heartbeat của generation cũ không đảo được trạng thái của generation mới. Khi mở module, UI chỉ hiển thị nút `Đăng nhập Zalo`, không tự mở QR. Sau khi user bấm nút, hệ thống xóa QR cũ, tạo và hiển thị QR mới cùng thời điểm hết hạn; QR có hiệu lực 100 giây theo connector. Khi QR hết hạn, connector tự xóa QR cũ và yêu cầu mã mới; UI hiển thị mã mới nếu connector còn hoạt động, nếu không thì hiển thị lỗi và nút thử lại. QR quá hạn hoặc QR của phiên cũ không được trả lại cho browser. Tab Inbox visible polling mặc định mỗi 2 giây và refresh ngay khi visible/focus trở lại. Các khoảng thời gian được cấu hình nếu không thuộc giới hạn của connector; chưa dùng SSE/WebSocket | PRODUCT | User approved QR lifecycle 2026-08-05; state machine finalized 2026-08-03 |
 | R-020 | Vòng đời lô | Trước `Xử lý`, lựa chọn chỉ nằm trong bộ nhớ trang và có thể mất khi reload/đóng trang. `Xử lý` chỉ tạo batch sau validation toàn lô; backend cấp opaque `batch_id`, tạo working copy/preview state và dùng URL batch đến hết hạn. Inbox chỉ có một link `Lô gần nhất`; tạo lô mới khi lô cũ chưa hoàn tất phải cảnh báo kèm link lô cũ để user mở/lưu trước khi tiếp tục. Không có danh sách, lịch sử, màn hình quản lý lô hoặc hard-cancel job | PRODUCT | User confirmed 2026-07-31; lifecycle finalized 2026-08-03 |
 | R-021 | Chuẩn bị preview | Backend sở hữu bước tách PDF và tiền xử lý sau khi batch được tạo. Bước này dùng `Đang chuẩn bị`, `Chờ duyệt`, `Lỗi`, `Hết hạn`; item lỗi có `Thử lại` hoặc `Bỏ`. Batch chỉ vào `Chờ duyệt` khi mọi item còn lại đã chuẩn bị xong; còn item `Đang chuẩn bị` hoặc `Lỗi` thì không cho chọn output, user phải retry hoặc bỏ item đó trước. Khi `Chờ duyệt`, user có thể crop/no-crop, bỏ hoặc đổi thứ tự; reload phải khôi phục state | PRODUCT | User approved preprocessing 2026-07-31; gate finalized 2026-08-03 |
 | R-022 | Chốt preview, output và OCR gate | Khi user chọn một hoặc nhiều output và backend ACK, danh sách/thứ tự/crop hiện tại được đóng băng thành một preview snapshot; từ đó browser đóng không hủy job và preview không còn sửa được. PDF dùng snapshot, không gọi model. JSON/Excel dùng chung một OCR result và một OCR gate; result area có một hành động `Xem và xác nhận`, còn từng file được tạo sau xác nhận | PRODUCT | User approved output flow 2026-07-31; ownership finalized 2026-08-03 |
@@ -88,17 +88,20 @@ Tài liệu này định nghĩa **hệ thống phải làm gì** và **vì sao**
 
 ### US-001: Tự động nhận ảnh Zalo (Priority: P1)
 
-1. **Given** connector chưa kết nối Zalo, **When** user mở khu vực thiết lập nguồn, **Then** khu vực này hiển thị trạng thái chưa kết nối và mã QR để đăng nhập.
-2. **Given** connector vừa đăng nhập QR, **When** user mở thiết lập nguồn, **Then** danh sách bạn bè/nhóm hỗ trợ tìm theo tên và mọi nguồn mới mặc định `TẮT`.
-3. **Given** chưa có nguồn nào được bật, **When** user mở Inbox, **Then** empty state hiển thị `Chưa bật nguồn Zalo` và một đường dẫn tới khu vực chọn nguồn.
-4. **Given** thread chưa có trong danh sách phát sinh event, **When** connector nhận event đầu tiên, **Then** hệ thống chỉ thêm định danh/tên nguồn ở trạng thái `TẮT`, không lưu text hoặc tải media của event khám phá.
-5. **Given** connector đang kết nối và nguồn đã bật, **When** có JPG/JPEG/PNG/PDF mới, **Then** media xuất hiện trong đúng hội thoại/thời điểm mà không có nhãn phân loại hay nhãn ảnh trùng.
-6. **Given** connector gửi state-change/heartbeat, **When** tab Inbox đang visible và polling thành công, **Then** trạng thái kết nối được cập nhật theo ưu tiên `Cần đăng nhập lại` > `Mất kết nối` > `Đã kết nối`; thiếu heartbeat quá ngưỡng mà không có báo cáo session hiển thị `Mất kết nối`.
-7. **Given** connector ở `Cần đăng nhập lại` hoặc `Mất kết nối`, **When** user chọn `Kết nối lại/Quét QR`, **Then** hệ thống hướng dẫn khôi phục phiên hoặc quét QR mà không xóa Inbox; chỉ QR login thành công mới thoát `Cần đăng nhập lại`.
-8. **Given** connector tải một attachment thất bại, **When** connector retry theo chính sách của nó, **Then** Inbox chỉ hiển thị media sau khi tải và publish thành công; Inbox không hiển thị attachment lỗi và không có nút retry download.
-9. **Given** outbox còn event/media chưa ACK và Zalo session hết hạn, **When** connector chờ hoặc thực hiện re-login QR, **Then** delivery worker vẫn gửi dữ liệu đã tải; chỉ intake event mới bị tạm dừng.
-10. **Given** cùng một `(connector_account_id, conversation_id, msg_id, attachment_index)` được gửi lại, **When** backend nhận lần sau, **Then** không tạo media thứ hai; khóa khác vẫn hiển thị riêng dù nội dung giống nhau.
-11. **Given** nguồn đang `TẮT` hoặc event là text/video/voice/sticker/file không hỗ trợ, **When** connector nhận event, **Then** Inbox không lưu nội dung, không tải media và không tạo placeholder.
+1. **Given** connector chưa kết nối Zalo, **When** user mở khu vực thiết lập nguồn, **Then** khu vực này hiển thị trạng thái chưa kết nối và nút `Đăng nhập Zalo`, chưa hiển thị hoặc tự mở mã QR.
+2. **Given** user bấm `Đăng nhập Zalo`, **When** connector bắt đầu phiên QR, **Then** hệ thống xóa QR cũ, hiển thị QR mới cùng thời điểm hết hạn và QR có hiệu lực 100 giây.
+3. **Given** QR đang hiển thị hết hạn, **When** connector còn hoạt động, **Then** hệ thống xóa QR cũ, tự tạo QR mới và UI hiển thị QR mới mà user không cần reload hoặc bấm refresh.
+4. **Given** QR hết hạn hoặc connector dừng, **When** UI polling trạng thái, **Then** QR cũ không còn hiển thị; UI báo lỗi an toàn và có nút `Thử lại`.
+5. **Given** connector vừa đăng nhập QR, **When** user mở thiết lập nguồn, **Then** danh sách bạn bè/nhóm hỗ trợ tìm theo tên và mọi nguồn mới mặc định `TẮT`.
+6. **Given** chưa có nguồn nào được bật, **When** user mở Inbox, **Then** empty state hiển thị `Chưa bật nguồn Zalo` và một đường dẫn tới khu vực chọn nguồn.
+7. **Given** thread chưa có trong danh sách phát sinh event, **When** connector nhận event đầu tiên, **Then** hệ thống chỉ thêm định danh/tên nguồn ở trạng thái `TẮT`, không lưu text hoặc tải media của event khám phá.
+8. **Given** connector đang kết nối và nguồn đã bật, **When** có JPG/JPEG/PNG/PDF mới, **Then** media xuất hiện trong đúng hội thoại/thời điểm mà không có nhãn phân loại hay nhãn ảnh trùng.
+9. **Given** connector gửi state-change/heartbeat, **When** tab Inbox đang visible và polling thành công, **Then** trạng thái kết nối được cập nhật theo ưu tiên `Cần đăng nhập lại` > `Mất kết nối` > `Đã kết nối`; thiếu heartbeat quá ngưỡng mà không có báo cáo session hiển thị `Mất kết nối`.
+10. **Given** connector ở `Cần đăng nhập lại` hoặc `Mất kết nối`, **When** user chọn `Kết nối lại/Quét QR`, **Then** hệ thống hướng dẫn khôi phục phiên hoặc quét QR mà không xóa Inbox; chỉ QR login thành công mới thoát `Cần đăng nhập lại`.
+11. **Given** connector tải một attachment thất bại, **When** connector retry theo chính sách của nó, **Then** Inbox chỉ hiển thị media sau khi tải và publish thành công; Inbox không hiển thị attachment lỗi và không có nút retry download.
+12. **Given** outbox còn event/media chưa ACK và Zalo session hết hạn, **When** connector chờ hoặc thực hiện re-login QR, **Then** delivery worker vẫn gửi dữ liệu đã tải; chỉ intake event mới bị tạm dừng.
+13. **Given** cùng một `(connector_account_id, conversation_id, msg_id, attachment_index)` được gửi lại, **When** backend nhận lần sau, **Then** không tạo media thứ hai; khóa khác vẫn hiển thị riêng.
+14. **Given** nguồn đang `TẮT` hoặc event là text/video/voice/sticker/file không hỗ trợ, **When** connector nhận event, **Then** Inbox không lưu nội dung, không tải media và không tạo placeholder.
 
 ### US-002: Chọn và chuẩn bị ảnh (Priority: P1)
 
@@ -179,7 +182,7 @@ Tài liệu này định nghĩa **hệ thống phải làm gì** và **vì sao**
 - **FR-008:** 100% item cần OCR MUST dùng Cloud AI OCR hiện có. Active OCR runtime MUST NOT decode QR giấy tờ, dùng QR fallback/priority hoặc gọi Local OCR; quy định này không ảnh hưởng QR dùng để đăng nhập Zalo connector.
 - **FR-009:** Hệ thống MUST NOT tự ghi kết quả vào Stage/Pool/Diagram. Đóng modal OCR bằng `x` MUST không lưu chỉnh sửa chưa xác nhận, không clear/reset/flush raw OCR hoặc batch, và không auto-stage.
 - **FR-010:** Sau khi duyệt preview, user MUST chọn đúng một lần một hoặc nhiều output JSON, Excel và PDF. PDF không cần OCR; JSON/Excel dùng chung một OCR gate và chỉ tạo file sau một lần `Xác nhận`. Khi JSON hoặc Excel được chọn, result area MUST có đúng một dòng OCR dùng các trạng thái R-030 và hành động `Xem và xác nhận` khi chờ; lô chỉ chọn PDF MUST NOT có dòng OCR. Mỗi output đã chọn MUST có một dòng riêng với trạng thái/file tương ứng.
-- **FR-011:** Connector MUST gửi heartbeat mặc định mỗi 15 giây kèm listener generation; backend dùng thời điểm nhận phía server. Inbox MUST hiển thị đúng một trong ba trạng thái loại trừ nhau theo thứ tự ưu tiên `Cần đăng nhập lại` > `Mất kết nối` > `Đã kết nối`: `Cần đăng nhập lại` khi connector báo session Zalo không dùng được và chỉ thoát khi QR login thành công; `Mất kết nối` khi thiếu heartbeat hợp lệ quá 45 giây mà không có báo cáo session; `Đã kết nối` khi heartbeat trong ngưỡng và session dùng được. Heartbeat generation cũ MUST NOT đảo trạng thái generation mới. Hai trạng thái lỗi MUST có hành động `Kết nối lại/Quét QR`; các ngưỡng cấu hình được.
+- **FR-011:** Connector MUST gửi heartbeat mặc định mỗi 15 giây kèm listener generation; backend dùng thời điểm nhận phía server. Inbox MUST hiển thị đúng một trong ba trạng thái loại trừ nhau theo thứ tự ưu tiên `Cần đăng nhập lại` > `Mất kết nối` > `Đã kết nối`: `Cần đăng nhập lại` khi connector báo session Zalo không dùng được và chỉ thoát khi QR login thành công; `Mất kết nối` khi thiếu heartbeat hợp lệ quá 45 giây mà không có báo cáo session; `Đã kết nối` khi heartbeat trong ngưỡng và session dùng được. Heartbeat generation cũ MUST NOT đảo trạng thái generation mới. Khi vào module, UI MUST chỉ hiển thị nút `Đăng nhập Zalo`, không tự hiển thị hoặc mở QR. Sau khi user bấm nút, backend MUST bỏ QR cũ trước khi khởi động/restart phiên QR; QR mới MUST có `generated_at` và `expires_at`, có hiệu lực 100 giây theo connector. Khi QR hết hạn, connector MUST xóa QR cũ và tự yêu cầu QR mới; nếu connector còn hoạt động UI MUST hiển thị QR mới, nếu không MUST hiển thị lỗi an toàn và nút `Thử lại`. Backend/UI MUST NOT public QR quá hạn hoặc QR còn sót từ phiên cũ. Hai trạng thái lỗi MUST có hành động `Kết nối lại/Quét QR`; các ngưỡng cấu hình được.
 - **FR-012:** Vì `notary_v2` chưa có user authentication/authorization, module MUST chỉ được triển khai trên máy local hoặc mạng nội bộ tin cậy và MUST NOT expose công khai. Khi platform có access control, mọi trang/API thiết lập nguồn, Inbox, batch, preview và download MUST dùng cơ chế đó; opaque ID không phải authorization và MUST NOT được coi là biện pháp bảo vệ. Session Zalo không rời connector; production log chỉ dùng opaque/redacted ID và không ghi nội dung giấy tờ, tên nguồn hoặc field value.
 - **FR-013:** Hệ thống MUST cho phép một lô chứa mọi ảnh do user chọn, bao gồm ảnh từ nhiều hội thoại, nhiều người và nhiều loại giấy tờ; hệ thống không tự tách lô.
 - **FR-014:** Khi crop tự động sai hoặc user không muốn dùng bản crop, hệ thống MUST cho phép chọn `Không crop` bằng một thao tác; ảnh toàn khung vẫn MUST qua resize và các bước tiền xử lý khác trước OCR.
@@ -331,10 +334,10 @@ Không còn câu hỏi nghiệp vụ/UX hoặc lựa chọn kiến trúc OCR nà
 
 ## Approval
 
-- Status: `DRAFT`
+- Status: `APPROVED`
 - Approved by: User only
-- Approved on: Pending
-- Approval note: `zca-js` connector choice approved 2026-07-31; awaiting explicit approval of the complete written specification
+- Approved on: 2026-08-04
+- Approval note: Complete written specification explicitly approved by the user on 2026-08-04.
 
 ## Agent self-check before requesting approval
 
@@ -349,4 +352,4 @@ Không còn câu hỏi nghiệp vụ/UX hoặc lựa chọn kiến trúc OCR nà
 - [x] Claims about current runtime were verified against the code (`main.py` has no auth; `routers/ocr_ai.py` still prefers QR over AI).
 - [x] Section 10 contains no open business/UX or OCR-architecture question; remaining items are deployment values, the pure-OCR runtime gate, form-standardization risk, and the PDF capacity assumption.
 - [x] The agent has summarized the revised spec in plain business language for user review.
-- [ ] The user explicitly approved the spec before its status changed to `APPROVED`.
+- [x] The user explicitly approved the spec before its status changed to `APPROVED`.

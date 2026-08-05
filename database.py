@@ -87,6 +87,18 @@ def migrate_properties_schema():
     con.close()
 
 
+def migrate_zalo_schema():
+    """Them thoi diem hieu luc cho QR tren DB Zalo cu."""
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    _ensure_table_columns(cur, "zalo_connector_accounts", {
+        "qr_generated_at": "DATETIME",
+        "qr_expires_at": "DATETIME",
+    })
+    con.commit()
+    con.close()
+
+
 def migrate_inheritance_case_properties_schema():
     """Tao bang lien ket nhieu tai san cho ho so neu chua co."""
     con = sqlite3.connect(DB_PATH)

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Hộp tài liệu Zalo{% endblock %}
+{% block topbar_title %}Hộp tài liệu Zalo{% endblock %}
+
+{% block content %}
+<div id="zalo-inbox" data-batch-id="{{ initial_batch_id or '' }}">
+  <div class="page-header align-items-start">
+    <div>
+      <h2>Hộp tài liệu Zalo</h2>
+      <p class="text-muted small mb-0">Chọn tài liệu đã nhận, kiểm tra từng trang rồi tạo file.</p>
+    </div>
+    <div class="d-flex gap-2 align-items-center">
+      <span id="connector-status" class="badge text-bg-secondary">Đang kiểm tra…</span>
+      <button id="open-settings" class="btn btn-outline-secondary btn-sm" type="button">
+        <i class="bi bi-gear"></i> Nguồn nhận
+      </button>
+    </div>
+  </div>
+
+  <div id="notice" class="alert d-none" role="alert"></div>
+
+  <section id="inbox-view">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Tài liệu mới</span>
+        <label class="small fw-normal mb-0"><input id="select-all" class="form-check-input me-1" type="checkbox"> Chọn tất cả</label>
+      </div>
+      <div class="card-body">
+        <div id="media-groups" class="row g-3"><p class="text-muted mb-0">Đang tải…</p></div>
+        <div class="d-flex justify-content-between align-items-center mt-4">
+          <span id="selection-summary" class="small text-muted">Chưa chọn tài liệu</span>
+          <button id="create-batch" class="btn btn-gold" type="button" disabled>
+            <i class="bi bi-arrow-right-circle"></i> Xử lý
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="batch-view" class="d-none">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <a href="/zalo-inbox/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Inbox</a>
+      <span id="batch-expiry" class="small text-muted"></span>
+    </div>
+
+    <div id="preparing-panel" class="card d-none">
+      <div class="card-body text-center py-5">
+        <div class="spinner-border text-primary mb-3" role="status"></div>
+        <h5>Đang chuẩn bị tài liệu</h5>
+        <p class="text-muted mb-0">Có thể đóng tab; backend vẫn tiếp tục.</p>
+      </div>
+    </div>
+
+    <div id="preview-panel" class="d-none">
+      <div class="card mb-3">
+        <div class="card-header">Kiểm tra và sắp xếp trang</div>
+        <div class="card-body">
+          <p class="small text-muted">Kéo thả để đổi thứ tự. Bỏ chọn crop khi cần giữ ảnh đầy đủ.</p>
+          <div id="preview-items" class="row g-3"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">Kết quả cần tạo</div>
+        <div class="card-body d-flex flex-wrap gap-4 align-items-center">
+          <label><input class="form-check-input output-choice" value="pdf" type="checkbox"> PDF</label>
+          <label><input class="form-check-input output-choice" value="json" type="checkbox"> JSON</label>
+          <label><input class="form-check-input output-choice" value="excel" type="checkbox"> Excel</label>
+          <button id="start-output" class="btn btn-gold ms-auto" type="button" disabled>Tạo file</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="result-panel" class="d-none">
+      <div class="card">
+        <div class="card-header">Kết quả</div>
+        <div class="card-body">
+          <div id="output-results" class="row g-3"></div>
+          <button id="open-review" class="btn btn-primary mt-3 d-none" type="button">Kiểm tra dữ liệu OCR</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="previous-batch-warning" class="modal fade" tabindex="-1" aria-labelledby="previous-batch-warning-title" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><h5 id="previous-batch-warning-title" class="modal-title">Lô gần nhất chưa hoàn tất</h5><button class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button></div>
+    <div class="modal-body">Mở hoặc lưu kết quả của <a id="previous-batch-link" href="#">lô gần nhất</a> trước khi tạo lô mới.</div>
+    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Quay lại</button><button id="continue-create-batch" class="btn btn-gold" type="button">Vẫn tạo lô mới</button></div>
+  </div></div>
+</div>
+
+<div class="modal fade" id="settings-modal" tabindex="-1" aria-labelledby="settings-title" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="settings-title">Nguồn được phép nhận</h5><button class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button></div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between align-items-center border rounded p-3 mb-3">
+          <span><strong>Kết nối tài khoản Zalo</strong><br><small class="text-muted">Quét QR ngay trong module; không nhập mật khẩu.</small></span>
+          <button id="start-zalo-login" class="btn btn-primary btn-sm" type="button">Đăng nhập Zalo</button>
+        </div>
+        <div id="connector-login-notice" class="alert d-none" role="alert"></div>
+        <div id="source-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="qr-modal" tabindex="-1" aria-labelledby="qr-title" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content text-center">
+      <div class="modal-header"><h5 class="modal-title" id="qr-title">Đăng nhập Zalo connector</h5></div>
+      <div class="modal-body">
+        <p class="text-muted">Quét QR bằng tài khoản Zalo dùng để nhận tài liệu.</p>
+        <img id="qr-image" class="img-fluid border rounded" alt="Mã QR đăng nhập Zalo">
+        <p id="qr-expires" class="small text-muted mt-2 mb-0"></p>
+        <p class="small text-muted mt-3 mb-0">Credential/session chỉ nằm trong connector; trang này không nhận credential.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="review-modal" tabindex="-1" aria-labelledby="review-title" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="review-title">Kiểm tra dữ liệu OCR</h5><button class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button></div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-lg-6"><label class="form-label" for="persons-json">Người</label><textarea id="persons-json" class="form-control font-monospace" rows="16"></textarea></div>
+          <div class="col-lg-6"><label class="form-label" for="properties-json">Tài sản / sổ đỏ</label><textarea id="properties-json" class="form-control font-monospace" rows="16"></textarea></div>
+        </div>
+        <details class="mt-3"><summary>Raw OCR và nguồn</summary><pre id="raw-ocr" class="small bg-light p-3 mt-2 overflow-auto"></pre></details>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button><button id="confirm-ocr" class="btn btn-gold">Xác nhận và tạo file</button></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .media-card, .preview-card { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; height: 100%; background: #fff; }
+  .media-card img, .preview-card img { width: 100%; height: 150px; object-fit: contain; background: #f3f4f6; }
+  .media-card .body, .preview-card .body { padding: 12px; }
+  .preview-card[draggable="true"] { cursor: grab; }
+  .preview-card.dragging { opacity: .45; }
+  .source-heading { font-size: 14px; color: var(--navy); margin: 8px 0; }
+  .output-state { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; height: 100%; }
+  #persons-json, #properties-json { font-size: 12px; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script src="/static/js/zalo_inbox.js"></script>
+{% endblock %}

@@ -18,7 +18,7 @@ function Get-ChangedPythonFiles {
 }
 
 function Get-ChangedFiles {
-    $Tracked = @(& git diff --name-only --diff-filter=ACMRT HEAD -- "*.py")
+    $Tracked = @(& git diff --name-only --diff-filter=ACMRT HEAD)
     if ($LASTEXITCODE -ne 0) {
         return @()
     }
@@ -76,6 +76,28 @@ function Test-FastAuditRelevantChange {
     foreach ($File in $ChangedFiles) {
         $Normalized = $File -replace "\\", "/"
         if ($FastAuditRelevant -contains $Normalized) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-ZaloInboxRelevantChange {
+    param([string[]]$ChangedFiles)
+
+    foreach ($File in $ChangedFiles) {
+        $Normalized = $File -replace "\\", "/"
+        if (
+            $Normalized -in @("models.py", "main.py", ".env.example") -or
+            $Normalized -eq "routers/zalo_inbox.py" -or
+            $Normalized -eq "services/zalo_inbox.py" -or
+            $Normalized -eq "frontend/templates/zalo_inbox.html" -or
+            $Normalized -eq "frontend/static/js/zalo_inbox.js" -or
+            $Normalized -like "tests/test_zalo_inbox*.py" -or
+            $Normalized -eq "tests/zalo_inbox_ui_static.test.mjs" -or
+            $Normalized -like "zalo_connector/*"
+        ) {
             return $true
         }
     }
@@ -158,6 +180,26 @@ if (Test-Path "tests/test_fast_audit_scan_loader.py") {
 }
 else {
     $Skipped += "pytest tests/test_fast_audit_*.py (files not found)"
+}
+
+$ChangedFiles = @(Get-ChangedFiles)
+$RunFullVerify = $env:FULL_VERIFY -eq "1"
+if ($RunFullVerify -or (Test-ZaloInboxRelevantChange -ChangedFiles $ChangedFiles)) {
+    Invoke-VerifyStep "pytest Zalo Inbox and OCR contract" {
+        & $Python -m pytest tests/test_zalo_inbox.py tests/test_zalo_inbox_api.py tests/test_ocr_ai.py -q
+    }
+    Invoke-VerifyStep "node Zalo Inbox UI contract" {
+        & node --test tests/zalo_inbox_ui_static.test.mjs
+    }
+    Invoke-VerifyStep "npm Zalo connector tests" {
+        & npm --prefix zalo_connector test
+    }
+    Invoke-VerifyStep "npm Zalo connector syntax" {
+        & npm --prefix zalo_connector run check
+    }
+}
+else {
+    $Skipped += "Zalo Inbox Python/UI/connector tests (no Zalo-relevant changed files; set FULL_VERIFY=1 to force)"
 }
 
 if ($Skipped.Count -gt 0) {
