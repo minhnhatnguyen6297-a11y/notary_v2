@@ -1,6 +1,6 @@
 # Memorybank kỹ thuật đồng bộ đa máy
 
-**Status:** DRAFT — design đã được người dùng chốt, chờ review văn bản trước khi lập implementation plan  
+**Status:** IMPLEMENTED — người dùng chốt hướng `CURRENT.md`-first ngày 2026-08-06
 **Date:** 2026-08-01  
 **Scope:** Ngữ cảnh kỹ thuật và trạng thái làm việc của dự án `notary_v2`
 
@@ -16,8 +16,9 @@ Git là nguồn sự thật duy nhất. Memorybank chứa ngữ cảnh vận hà
 - Dùng Markdown thuần; không thêm database, ứng dụng web, dependency hoặc daemon đồng bộ.
 - Đồng bộ qua Git private repository, có lịch sử, diff, rollback và dùng được offline.
 - Chỉ lưu ngữ cảnh kỹ thuật; không lưu secret, credential hoặc dữ liệu khách hàng.
-- `CURRENT.md` là handoff bắt buộc khi chuyển máy; `PROGRESS.md` là bản tổng hợp tiến độ, không chứa chi tiết phiên.
+- `CURRENT.md` là entrypoint khi chuyển máy hoặc tiếp tục việc dở; `PROGRESS.md` chỉ tổng hợp milestone và được đọc khi `CURRENT.md` dẫn tới.
 - Không sao chép nội dung normative từ `docs/`; Memorybank chỉ dẫn link hoặc ghi tóm tắt vận hành không có tính thay thế.
+- Không bắt agent đọc Memorybank ở task mới không liên quan việc dở.
 
 ## 3. Cấu trúc
 
@@ -25,15 +26,7 @@ Git là nguồn sự thật duy nhất. Memorybank chứa ngữ cảnh vận hà
 memory-bank/
 ├── README.md
 ├── CURRENT.md
-├── PROJECT-CONTEXT.md
-├── PROGRESS.md
-├── DECISIONS/
-│   └── 0001-*.md
-├── RESEARCH/
-│   └── *.md
-├── SESSIONS/
-│   └── YYYY-MM-DD.md
-└── ARCHIVE/
+└── PROGRESS.md
 ```
 
 ### `README.md`
@@ -54,50 +47,30 @@ Trạng thái bàn giao hiện tại, được cập nhật sau mỗi milestone 
 
 File này được cập nhật tại chỗ; không biến thành nhật ký dài hạn.
 
-### `PROJECT-CONTEXT.md`
-
-Thông tin ổn định: mục tiêu dự án, kiến trúc, lệnh chạy/verify, quy tắc ranh giới và các quy ước làm việc. Mỗi mục quan trọng dẫn tới tài liệu chuẩn tương ứng.
-
 ### `PROGRESS.md`
 
-Tóm tắt trạng thái theo milestone: đã hoàn tất, đang làm, còn lại, known issues và các hướng đã bỏ. File này không phải changelog chi tiết; chi tiết nằm trong Git history hoặc `SESSIONS/` khi thực sự cần.
-
-### `DECISIONS/`
-
-Các quyết định kỹ thuật có ảnh hưởng lâu dài, theo mẫu ngắn: bối cảnh, quyết định, lý do, hệ quả, trạng thái và link tới ADR/spec nếu có. Quyết định business hoặc architecture chính thức phải được cập nhật ở nguồn chuẩn, không chỉ ở đây.
-
-### `RESEARCH/`
-
-Kết quả nghiên cứu có nguồn, ngày kiểm tra, kết luận và tác động tới công việc. Không dùng làm nguồn sự thật nếu đã có spec/contract chính thức.
-
-### `SESSIONS/`
-
-Nhật ký ngắn theo ngày cho các phiên có quyết định, nghiên cứu hoặc thay đổi đáng giữ. Không ghi lại toàn bộ hội thoại.
-
-### `ARCHIVE/`
-
-Lưu các handoff, session hoặc quyết định đã hết hiệu lực khi chúng không còn hữu ích trong luồng hiện tại.
+Tóm tắt trạng thái theo milestone: đã hoàn tất, đang làm, còn lại, known issues và các hướng đã bỏ. File này không phải changelog chi tiết; chi tiết nằm trong Git history hoặc tài liệu chuẩn được dẫn link.
 
 ## 4. Quy trình vận hành
 
 ### Bắt đầu trên một máy
 
 1. `git pull --rebase`.
-2. Đọc `memory-bank/README.md`, `PROJECT-CONTEXT.md`, `PROGRESS.md` và `CURRENT.md` theo thứ tự đó.
-3. Đọc các tài liệu/spec mà `CURRENT.md` dẫn tới.
-4. Tiếp tục từ `Next exact action`.
+2. Đọc `memory-bank/CURRENT.md` trước.
+3. Kiểm tra branch, commit, worktree và test claims trong file với Git hiện tại.
+4. Chỉ đọc tài liệu chuẩn hoặc file Memorybank mà `CURRENT.md` dẫn tới.
+5. Tiếp tục từ `Next exact action` nếu bằng chứng vẫn khớp.
 
 ### Trong phiên
 
 - Không để thông tin quan trọng chỉ tồn tại trong chat hoặc trí nhớ cục bộ.
 - Cập nhật `CURRENT.md` sau milestone, blocker hoặc thay đổi hướng; cập nhật `PROGRESS.md` khi milestone làm thay đổi tổng quan.
-- Ghi `DECISIONS/`, `RESEARCH/` hoặc `SESSIONS/` khi thông tin có giá trị lâu dài.
 
 ### Kết thúc phiên
 
 1. Cập nhật `CURRENT.md` với trạng thái thật và bước tiếp theo.
 2. Cập nhật `PROGRESS.md` nếu có thay đổi milestone.
-3. Ghi session/decision/research nếu cần.
+3. Cập nhật tài liệu chuẩn tương ứng nếu có quyết định lâu dài.
 4. Chạy verify phù hợp với thay đổi code.
 5. Commit và push toàn bộ checkpoint cần chuyển máy.
 
@@ -105,21 +78,21 @@ Trạng thái chưa commit không được xem là đã đồng bộ. Với côn
 
 ## 5. Tích hợp với coding agent
 
-Trong bước triển khai, `AGENTS.md` sẽ có một route ngắn tới `memory-bank/README.md` và yêu cầu đọc bốn file core trước khi bắt đầu task. Memorybank chỉ cung cấp ngữ cảnh vận hành; các hard rule trong `AGENTS.md` vẫn được ưu tiên.
+`AGENTS.md` có một route ngắn tới `memory-bank/CURRENT.md` chỉ cho trường hợp chuyển máy hoặc tiếp tục việc dở. Memorybank chỉ cung cấp ngữ cảnh vận hành; các hard rule trong `AGENTS.md` vẫn được ưu tiên.
 
-Không bắt buộc agent phải đọc toàn bộ `DECISIONS/`, `RESEARCH/`, `SESSIONS/` hoặc `ARCHIVE/` ở mọi phiên. Chỉ mở các file được `CURRENT.md`, `PROGRESS.md` hoặc task hiện tại dẫn tới.
+Không bắt buộc agent đọc `README.md` hoặc `PROGRESS.md` ở mọi phiên. Chỉ mở khi `CURRENT.md` hoặc task hiện tại dẫn tới.
 
 ## 6. Quy tắc tránh lệch ngữ cảnh
 
 - Chỉ một file `CURRENT.md` làm handoff hiện tại.
 - Không dùng Memorybank để override `AGENTS.md`, ADR, domain spec hoặc platform contract.
-- Mọi mục có thời hạn phải có ngày cập nhật; thông tin lỗi thời chuyển vào `ARCHIVE/` hoặc xóa.
+- Mọi mục có thời hạn phải có ngày cập nhật; thông tin lỗi thời được thay thế hoặc xóa, còn lịch sử nằm trong Git.
 - Không đưa secret vào Markdown; `.env` và credential vẫn theo cơ chế riêng.
 - Nếu hai máy cùng sửa Memorybank, pull/rebase và giải quyết conflict trước khi tiếp tục; không tự động ghi đè.
 
 ## 7. Tiêu chí hoàn thành thiết kế
 
-- Một phiên mới có thể xác định mục tiêu và hành động tiếp theo bằng bốn file core ngắn: `README.md`, `PROJECT-CONTEXT.md`, `PROGRESS.md`, `CURRENT.md`.
+- Một checkout mới có thể xác định mục tiêu và hành động tiếp theo từ `CURRENT.md`, sau đó kiểm chứng với Git và đọc link cần thiết.
 - File handoff và progress đủ ngắn để đọc nhanh; lịch sử chi tiết chỉ được mở theo link khi cần.
 - Ngữ cảnh kỹ thuật quan trọng có diff và lịch sử Git.
 - Máy thứ hai có thể khôi phục trạng thái sau `git pull --rebase`.

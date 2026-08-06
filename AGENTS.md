@@ -1,124 +1,107 @@
 # AGENTS.md - notary_v2
 
-Source of truth for agents working in `notary_v2`.
-Updated: 2026-07-09.
+Project authority, routing, stop conditions, and review gates only. Graphify
+describes code structure; routed specs define behavior.
 
-Keep this file short. It should prevent bad edits and route agents to the right docs, not duplicate plans/history.
+## Authority
 
-## 1. Hard rules
+- Preserve user changes and external state. Do not modify, revert, commit, or
+  publish unrelated work.
+- Change behavior only inside the task explicitly authorized by the user.
+- Business rules, API/data contracts, DB schema, OCR flow, and shared behavior
+  require explicit scope covering every affected module.
+- A task/spec/contract/runtime conflict is evidence to report, not permission
+  to change any side. Stop and ask which source wins.
+- Completion claims require fresh verification evidence.
 
-- Read this file before planning or editing.
-- Do not scan the whole repo by default. Route to the right docs, then inspect only touched code.
-- Do not edit, format, revert, move, or delete unrelated user changes.
-- Do not change API contracts, router signatures, Celery contracts, DB schema, OCR flow, or business rules without explicit scope.
-- If a business rule is ambiguous, state the case and ask the user. Do not guess.
-- New business content must pass the Business-spec gate in section 2 before any non-spec work.
-- Prefer the smallest behavior-preserving change. Reuse existing code/patterns before adding new code.
-- Use Ponytail/Superpowers discipline if available; do not duplicate those workflows here.
+## Task boundary
 
-## 2. Scope discipline
-
-Before editing code, state:
+Before editing, establish:
 
 ```text
-TASK:
-FILES TO TOUCH:
-FILES NOT TO TOUCH:
-RISK:
-TEST:
+GOAL:
+AUTHORIZED BEHAVIOR:
+EXPECTED MODULES/FILES:
+KNOWN SHARED BOUNDARIES:
+ACCEPTANCE EVIDENCE:
 SCOPE: LOCKED
 ```
 
-Rules:
-- Do not edit outside `FILES TO TOUCH`.
-- If another file or broader change becomes necessary, stop and ask with `SCOPE BREAK REQUEST`.
-- No new helper/class/module/abstraction unless needed and scoped.
+If another module, shared core, contract, or business rule becomes necessary,
+stop with `SCOPE BREAK REQUEST` naming the dependency, affected behavior, and
+why work cannot safely continue. Only the user may expand scope. Never rewrite
+a plan or brief to legitimize work already performed.
 
-### Business-spec gate
+## Sources of truth
 
-When the user introduces a new business rule, term, workflow, or expected behavior:
+`AGENTS.md` -> accepted architecture ADR -> approved domain spec -> platform
+contract -> technical/UX docs -> active plan -> research/history.
 
-1. Read only the routed module entrypoint and linked spec index needed to locate existing coverage.
-2. Before research, planning, coding, or other non-spec work, tell the user exactly one of:
-   - `SPEC STATUS: DA CO - <APPROVED/DRAFT> - <path and section>`
-   - `SPEC STATUS: CHUA CO/CHUA BAO PHU - can tao hoac cap nhat draft spec`
-   - `SPEC STATUS: MAU THUAN - <conflicting paths or interpretations>`
-3. If no approved spec covers the new content, stop non-spec work and create or update a draft using `docs/templates/spec-template.md` in the routed domain/platform location. Do not create a parallel source of truth.
-4. Ask one business question at a time. Mark unresolved items `[NEEDS CLARIFICATION]`; do not create an implementation plan or edit code while any marker remains.
-5. Only the user's explicit approval may authorize changing a business spec from `DRAFT` to `APPROVED`. If implementation later exposes a spec gap or conflict, return the spec to `DRAFT` and ask the user before continuing.
-
-## 3. Verify / report
-
-- Run `.\verify.bat` for non-trivial code changes unless docs-only or explicitly out of scope.
-- For concrete OCR/image bugs, use the OCR loop in the relevant OCR plan.
-- Do not report success if verification failed.
-
-Every file-changing task ends with:
-
-```text
-BAO CAO HOAN THANH:
-- File changed/added/deleted:
-- Verify:
-- Scope match:
-- Remaining risk/test:
-```
-
-## 4. Project overview
-
-- App: notary/case-management system for inheritance land cases.
-- Backend: FastAPI + SQLAlchemy + SQLite.
-- Frontend: Jinja2 + Bootstrap + Vanilla JS.
-- Diagram UI: ReactFlow embedded from `frontend/static/ReactFlowApp.jsx`.
-- Active default OCR: Cloud AI OCR. Local OCR is parked/research code unless a task explicitly targets it.
-- QR is no longer part of the active OCR AI path. QR may be developed as a separate capability later, but the direction is not finalized yet.
-
-## 5. Read routing
-
-Read `docs/README.md` only when the task area is not obvious. Then read the matching module entrypoint:
+Use `docs/README.md` only when the task area is unclear. Otherwise route here:
 
 | Task area | Read first |
 | --- | --- |
-| Hồ sơ thừa kế / inheritance rules | `docs/domains/inheritance/README.md` |
-| Stage / Pool / inheritance case UX | `docs/domains/inheritance/README.md` |
-| Cloud AI OCR / property OCR | `docs/platform/document-intake/README.md` |
-| Local OCR | `docs/platform/document-intake/README.md`; parked, separate redesign required |
-| Shared Stage / Pool capability | `docs/platform/case-workspace/README.md` |
-| Word renderer / placeholder engine | `docs/platform/document-generation/README.md` |
-| Fast text audit CLI | `docs/platform/fast-text-audit/README.md` |
-| Architecture or module boundaries | `docs/architecture/README.md` |
-| Cross-session technical context / handoff | `memory-bank/README.md`; then `PROJECT-CONTEXT.md`, `PROGRESS.md`, `CURRENT.md` |
+| Inheritance rules and case UX | `docs/domains/inheritance/README.md` |
+| Cloud AI OCR and document intake | `docs/platform/document-intake/README.md` |
+| Local OCR | `docs/platform/document-intake/README.md`; separate scope required |
+| Shared Stage/Pool capability | `docs/platform/case-workspace/README.md` |
+| Word generation | `docs/platform/document-generation/README.md` |
+| Fast text audit | `docs/platform/fast-text-audit/README.md` |
+| Architecture decisions | `docs/architecture/README.md` |
 
-Source precedence: `AGENTS.md` hard rules -> accepted architecture ADR -> domain spec -> platform contract -> technical/UX docs -> active plan -> research.
+New or changed business behavior requires an approved spec. Missing, draft,
+ambiguous, or runtime-conflicting coverage blocks implementation until the user
+decides. Only the user approves business specs.
 
-If code conflicts with a normative spec or contract, stop and report the conflict. Do not silently change either side.
+For cross-machine continuation or interrupted work, read
+`memory-bank/CURRENT.md` first, verify it against Git, then follow only its
+relevant links. Memory Bank is operational context and cannot override the
+sources above or fresh evidence.
 
-`memory-bank/` is operational context only. It must not override `AGENTS.md`, accepted ADRs, domain specs, or platform contracts.
+## Impact discovery
 
-## 6. Graphify code graph
-
-- A Graphify scan exists in `graphify-out/` for code navigation.
-- For non-trivial code changes, bug hunts, cross-file impact checks, or "where is X?" tasks, consult the graph before broad file search.
-- Useful commands from repo root:
-  - `D:\graphify\.venv\Scripts\graphify.exe query "question" --graph graphify-out/graph.json`
-  - `D:\graphify\.venv\Scripts\graphify.exe explain "NodeName" --graph graphify-out/graph.json`
-  - `D:\graphify\.venv\Scripts\graphify.exe path "A" "B" --graph graphify-out/graph.json`
-- Do not use Graphify as the source of truth for business rules; routed docs and touched code still win.
-- After meaningful code changes, refresh with `D:\graphify\.venv\Scripts\graphify.exe update .`.
-
-## 7. Project red lines
-
-- Stage is the UI source of truth for people in a case; Pool/Diagram must not mutate Stage person data.
-- OCR modal `x` must not save, clear, reset, flush, or auto-stage.
-- Cloud AI OCR is active default; Local OCR is parked/research unless explicitly scoped.
-- QR is out of scope for the active OCR AI path. If a task wants QR behavior, stop and confirm the intended separate direction first.
-- Detailed invariants belong in the routed spec/plan files.
-
-## 8. Run / smoke
+For non-trivial changes and every shared symbol, contract, state, or core file,
+use Graphify plus focused source search to identify production callers and
+affected modules before editing. Graphify is navigation evidence, not business
+authority. Refresh it after meaningful code changes.
 
 ```bash
-run.bat
-python -m uvicorn main:app --port 8000
-.\verify.bat
+D:\graphify\.venv\Scripts\graphify.exe query "question" --graph graphify-out/graph.json
 ```
 
-Default URL: `http://127.0.0.1:8000`.
+## Review gate
+
+Review every completed task/slice before dependent work or commit. Use an
+independent reviewer with fresh context; the implementer must not approve its
+own work. Review the original request, normative spec, base-to-head diff,
+affected production callers, and actual test output—not the implementer's
+summary.
+
+```text
+SCOPE: PASS/FAIL — missing, extra, or misunderstood behavior
+SPEC: PASS/FAIL — implementation matches normative behavior
+SHARED IMPACT: PASS/FAIL — affected consumers and contracts checked
+TEST EVIDENCE: SUFFICIENT/INSUFFICIENT — focused checks per affected module;
+  full-suite status reported separately
+VERDICT: APPROVE/BLOCK
+```
+
+Unapproved behavior, unresolved shared impact, or spec/runtime conflict blocks
+the next task and commit even when tests pass.
+
+## Completion
+
+Prefer the smallest behavior-preserving change and existing code. Run focused
+regressions, then `.\verify.bat` for non-trivial code unless out of scope.
+Never describe focused checks as a full-suite pass. Report:
+
+```text
+CHANGED FILES:
+SCOPE VERDICT:
+SHARED BEHAVIOR: YES/NO; AFFECTED MODULES:
+FOCUSED VERIFICATION:
+FULL-SUITE STATUS:
+REMAINING RISK:
+```
+
+Detailed business invariants belong in routed normative specs, not here.
