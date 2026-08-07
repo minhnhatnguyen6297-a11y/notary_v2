@@ -1,6 +1,6 @@
 # Feature specification: Zalo Document Inbox
 
-> **Status:** DRAFT — chờ user duyệt bản viết về source discovery, realtime intake và Data Sync thủ công
+> **Status:** APPROVED
 > **Owner/approver:** User
 > **Input:** Nhận text và tài liệu hỗ trợ từ Zalo cá nhân, cho người dùng chọn media và xử lý thành dữ liệu hoặc tài liệu sử dụng ngay
 > **Parent source:** `docs/platform/document-intake/spec.md`
@@ -406,10 +406,10 @@ Spec giữ `DRAFT` để user duyệt bản viết này. Các quyết định pr
 
 ## Approval
 
-- Status: `DRAFT`
+- Status: `APPROVED`
 - Previous approval: 2026-08-04, trước revision source discovery/realtime/Data Sync.
 - Product design source: User-approved decisions supplied for revision 2026-08-07.
-- Written-spec approval: Chờ user duyệt chính văn này; agent không tự đổi sang `APPROVED`.
+- Written-spec approval: User approved 2026-08-07.
 
 ## Agent self-check before requesting approval
 
@@ -426,4 +426,4 @@ Spec giữ `DRAFT` để user duyệt bản viết này. Các quyết định pr
 - [x] Source-type defaults, first-event handling, consent, realtime/history, persistence và quota/retention đã được cross-check thành ma trận nhất quán.
 - [x] Parent OCR contract được giữ nguyên; revision này không thay OCR behavior/runtime hoặc các file shared-core.
 - [x] The agent has summarized the revised spec in plain business language for user review.
-- [ ] The user approves this written revision before status changes to `APPROVED`.
+- [x] The user approved this written revision before status changed to `APPROVED`.
