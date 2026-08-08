@@ -460,7 +460,9 @@ def connector_config(
     return {
         "listener_generation": account.listener_generation,
         "policy_version": account.policy_version,
+        "policy_acked_version": account.policy_acked_version,
         "source_sync_request_version": account.source_sync_request_version,
+        "source_sync_acked_version": account.source_sync_acked_version,
         "sources": [
             {
                 "conversation_id": source.conversation_id,

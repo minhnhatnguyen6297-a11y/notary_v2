@@ -137,7 +137,9 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
         assert config.json() == {
             "listener_generation": 0,
             "policy_version": 2,
+            "policy_acked_version": 0,
             "source_sync_request_version": 0,
+            "source_sync_acked_version": 0,
             "sources": [{
                 "conversation_id": "friend-thread",
                 "source_type": "friend",
@@ -191,6 +193,98 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
         assert (account.policy_acked_version, account.source_sync_acked_version) == (2, 1)
         assert (source.acked_enabled, source.policy_acked_version) == (False, 2)
         db.close()
+
+
+def test_connector_config_returns_requested_account_ack_baselines_as_ints(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
+        account.listener_generation = 7
+        account.policy_version = 11
+        account.policy_acked_version = 9
+        account.source_sync_request_version = 13
+        account.source_sync_acked_version = 12
+        db.add_all(
+            [
+                ZaloConnectorAccount(
+                    id="other-account",
+                    session_state="usable",
+                    listener_generation=99,
+                    policy_version=99,
+                    policy_acked_version=98,
+                    source_sync_request_version=97,
+                    source_sync_acked_version=96,
+                ),
+                ZaloSource(
+                    id="selected-source",
+                    connector_account_id=account_id,
+                    conversation_id="selected",
+                    conversation_type="user",
+                    display_name="Selected",
+                    source_type="friend",
+                    enabled=True,
+                    acked_enabled=True,
+                    policy_version=11,
+                ),
+                ZaloSource(
+                    id="other-source",
+                    connector_account_id="other-account",
+                    conversation_id="other",
+                    conversation_type="user",
+                    display_name="Other",
+                    source_type="friend",
+                    enabled=False,
+                    acked_enabled=False,
+                    policy_version=99,
+                ),
+            ]
+        )
+        db.commit()
+        db.close()
+
+        response = client.get(
+            f"/zalo-inbox/api/connectors/{account_id}/config", headers=_signed_config_headers()
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {
+        "policy_version",
+        "policy_acked_version",
+        "source_sync_request_version",
+        "source_sync_acked_version",
+        "listener_generation",
+        "sources",
+        "protected_media_object_keys",
+    }
+    assert payload == {
+        "listener_generation": 7,
+        "policy_version": 11,
+        "policy_acked_version": 9,
+        "source_sync_request_version": 13,
+        "source_sync_acked_version": 12,
+        "sources": [{
+            "conversation_id": "selected",
+            "source_type": "friend",
+            "enabled": True,
+            "desired_enabled": True,
+            "acked_enabled": True,
+            "policy_version": 11,
+        }],
+        "protected_media_object_keys": [],
+    }
+    for field in (
+        "policy_version",
+        "policy_acked_version",
+        "source_sync_request_version",
+        "source_sync_acked_version",
+        "listener_generation",
+    ):
+        assert type(payload[field]) is int
 
 
 def test_state_partitions_sources_and_marks_pending_when_any_source_is_unready(tmp_path, monkeypatch):
@@ -468,7 +562,9 @@ def test_api_batch_pdf_and_safe_serialization(tmp_path, monkeypatch):
         assert connector_config.json() == {
             "listener_generation": 0,
             "policy_version": 1,
+            "policy_acked_version": 1,
             "source_sync_request_version": 0,
+            "source_sync_acked_version": 0,
             "sources": [{
                 "conversation_id": "thread-1",
                 "source_type": "friend",
