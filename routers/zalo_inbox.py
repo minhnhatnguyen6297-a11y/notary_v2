@@ -25,6 +25,7 @@ from services.zalo_inbox import (
     InboxConfigurationError,
     InboxError,
     InboxLimits,
+    apply_intake_consent,
     cleanup_expired_batch,
     confirm_batch,
     connector_state,
@@ -35,9 +36,14 @@ from services.zalo_inbox import (
     public_qr,
     retry_cached_ocr,
     retry_export,
+    request_source_sync,
     resolve_media_object,
     run_outputs,
+    set_source_policy,
+    source_ready,
+    _aware,
     update_preview,
+    utcnow,
     verify_webhook_signature,
 )
 
@@ -45,7 +51,7 @@ router = APIRouter(prefix="/zalo-inbox", tags=["zalo-inbox"])
 templates = Jinja2Templates(directory="frontend/templates")
 UTC = timezone.utc
 _connector_process: subprocess.Popen | None = None
-_connector_lock = threading.Lock()
+_connector_lock = threading.RLock()
 _connector_error: str | None = None
 CONNECTOR_STOPPED_MESSAGE = "Zalo connector đã dừng. Kiểm tra cấu hình và thử lại."
 
@@ -115,33 +121,70 @@ def _connector_environment(*, force_qr: bool = False) -> dict[str, str]:
 
 def _terminate_connector_process() -> None:
     global _connector_error, _connector_process
-    process = _connector_process
-    if process is None or process.poll() is not None:
+    with _connector_lock:
+        process = _connector_process
         _connector_process = None
         _connector_error = None
+    if process is None or process.poll() is not None:
         return
+    process.terminate()
     try:
-        process.terminate()
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
         try:
             process.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            process.kill()
-            try:
-                process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+            pass
+
+
+def _receiving_connector_identity() -> tuple[str, int] | None:
+    db = SessionLocal()
+    try:
+        account = db.query(ZaloConnectorAccount).order_by(ZaloConnectorAccount.created_at.asc()).first()
+        if account is not None and account.session_state == "usable":
+            return account.id, account.listener_generation
+        return None
     finally:
+        db.close()
+
+
+def _record_connector_gap(identity: tuple[str, int] | None) -> None:
+    if identity is None:
+        return
+    account_id, listener_generation = identity
+    db = SessionLocal()
+    try:
+        account = db.query(ZaloConnectorAccount).filter(ZaloConnectorAccount.id == account_id).first()
+        if (
+            account is not None
+            and account.session_state == "usable"
+            and account.listener_generation == listener_generation
+            and account.gap_started_at is None
+        ):
+            account.gap_started_at = utcnow()
+            db.commit()
+    finally:
+        db.close()
+
+
+def _watch_connector_process(process: subprocess.Popen, identity: tuple[str, int] | None) -> None:
+    process.wait(timeout=None)
+    global _connector_error, _connector_process
+    with _connector_lock:
+        if _connector_process is not process:
+            return
         _connector_process = None
-        _connector_error = None
+        _connector_error = CONNECTOR_STOPPED_MESSAGE
+        _record_connector_gap(identity)
 
 
 def _connector_runtime_error() -> str | None:
     global _connector_error, _connector_process
     with _connector_lock:
         if _connector_process is not None and _connector_process.poll() is not None:
-            _connector_process = None
             _connector_error = CONNECTOR_STOPPED_MESSAGE
-        return _connector_error
+    return _connector_error
 
 
 def _start_connector_process(*, force_restart: bool = False, force_qr: bool = False) -> bool:
@@ -155,6 +198,7 @@ def _start_connector_process(*, force_restart: bool = False, force_qr: bool = Fa
         if not entrypoint.is_file():
             raise InboxConfigurationError("Không tìm thấy Zalo connector")
         child_env = _connector_environment(force_qr=force_qr)
+        identity = _receiving_connector_identity()
         try:
             _connector_process = subprocess.Popen(
                 ["node", str(entrypoint)],
@@ -172,6 +216,8 @@ def _start_connector_process(*, force_restart: bool = False, force_qr: bool = Fa
             _connector_process = None
             _connector_error = CONNECTOR_STOPPED_MESSAGE
             raise InboxConfigurationError(CONNECTOR_STOPPED_MESSAGE)
+        process = _connector_process
+        threading.Thread(target=_watch_connector_process, args=(process, identity), daemon=True).start()
         return True
 
 
@@ -363,6 +409,7 @@ async def webhook(
         result = ingest_webhook_event(db, payload, storage_root=_storage_root())
     except (json.JSONDecodeError, InboxError) as exc:
         if isinstance(exc, InboxError):
+            db.rollback()
             _raise_http(exc)
         raise HTTPException(status_code=400, detail="Webhook JSON không hợp lệ") from exc
     return {"ack": True, "id": getattr(result, "id", None)}
@@ -412,28 +459,75 @@ def connector_config(
         ]
     return {
         "listener_generation": account.listener_generation,
+        "policy_version": account.policy_version,
+        "source_sync_request_version": account.source_sync_request_version,
         "sources": [
-            {"conversation_id": source.conversation_id, "enabled": bool(source.enabled)}
+            {
+                "conversation_id": source.conversation_id,
+                "source_type": source.source_type,
+                "enabled": bool(source.enabled),
+                "desired_enabled": bool(source.enabled),
+                "acked_enabled": source.acked_enabled,
+                "policy_version": source.policy_version,
+            }
             for source in sources
         ],
         "protected_media_object_keys": protected_keys,
     }
 
 
+@router.post("/api/connectors/{account_id}/consent")
+def consent_intake(account_id: str, db: Session = Depends(get_db)):
+    try:
+        return {"policy_version": apply_intake_consent(db, account_id)}
+    except InboxError as exc:
+        _raise_http(exc)
+
+
+@router.post("/api/connectors/{account_id}/sources/refresh")
+def refresh_sources(account_id: str, db: Session = Depends(get_db)):
+    try:
+        return {"source_sync_request_version": request_source_sync(db, account_id)}
+    except InboxError as exc:
+        _raise_http(exc)
+
+
 @router.get("/api/state")
 def state_snapshot(db: Session = Depends(get_db)):
     connector_error = _connector_runtime_error()
     account = db.query(ZaloConnectorAccount).order_by(ZaloConnectorAccount.created_at.asc()).first()
-    sources = db.query(ZaloSource).order_by(ZaloSource.display_name.asc()).all()
+    all_sources = (
+        db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).all() if account else []
+    )
+    sort_sources = lambda rows: sorted(
+        rows,
+        key=lambda source: (
+            source.last_activity_at is None,
+            -(_aware(source.last_activity_at).timestamp() if source.last_activity_at else 0),
+            source.display_name.casefold(),
+        ),
+    )
+    sources = sort_sources(source for source in all_sources if source.source_type != "stranger")
+    stranger_sources = sort_sources(source for source in all_sources if source.source_type == "stranger")
     media_rows = (
         db.query(ZaloMedia)
         .join(ZaloSource, ZaloMedia.source_id == ZaloSource.id)
-        .filter(ZaloSource.enabled.is_(True))
+        .filter(
+            ZaloSource.connector_account_id == account.id if account else False,
+            ZaloSource.enabled.is_(True),
+        )
         .order_by(ZaloMedia.sent_at.asc(), ZaloMedia.created_at.asc())
         .limit(500)
         .all()
     )
-    latest = db.query(ZaloBatch).order_by(ZaloBatch.created_at.desc()).first()
+    latest = (
+        db.query(ZaloBatch)
+        .filter(ZaloBatch.connector_account_id == account.id)
+        .order_by(ZaloBatch.created_at.desc())
+        .first()
+        if account
+        else None
+    )
     return {
         "connector": (
             {
@@ -456,14 +550,41 @@ def state_snapshot(db: Session = Depends(get_db)):
                 "error": connector_error,
             }
         ),
+        "consent_required": not bool(account and account.intake_consented_at),
+        "policy_pending": bool(
+            account
+            and (
+                account.policy_version != account.policy_acked_version
+                or any(not source_ready(source) for source in all_sources)
+            )
+        ),
         "sources": [
             {
                 "id": source.id,
                 "display_name": source.display_name,
                 "conversation_type": source.conversation_type,
+                "source_type": source.source_type,
+                "last_activity_at": _as_iso(source.last_activity_at),
                 "enabled": bool(source.enabled),
+                "desired_enabled": bool(source.enabled),
+                "acked_enabled": source.acked_enabled,
+                "pending": not source_ready(source),
             }
             for source in sources
+        ],
+        "stranger_sources": [
+            {
+                "id": source.id,
+                "display_name": source.display_name,
+                "conversation_type": source.conversation_type,
+                "source_type": source.source_type,
+                "last_activity_at": _as_iso(source.last_activity_at),
+                "enabled": bool(source.enabled),
+                "desired_enabled": bool(source.enabled),
+                "acked_enabled": source.acked_enabled,
+                "pending": not source_ready(source),
+            }
+            for source in stranger_sources
         ],
         "media": [
             {
@@ -491,12 +612,18 @@ def state_snapshot(db: Session = Depends(get_db)):
 
 @router.patch("/api/sources/{source_id}")
 def toggle_source(source_id: str, body: SourceToggle, db: Session = Depends(get_db)):
-    source = db.query(ZaloSource).filter(ZaloSource.id == source_id).first()
-    if source is None:
-        raise HTTPException(status_code=404, detail="Không tìm thấy nguồn")
-    source.enabled = body.enabled
-    db.commit()
-    return {"id": source.id, "enabled": bool(source.enabled)}
+    try:
+        set_source_policy(db, source_id, body.enabled)
+    except InboxError as exc:
+        _raise_http(exc)
+    source = db.query(ZaloSource).filter(ZaloSource.id == source_id).one()
+    return {
+        "id": source.id,
+        "enabled": bool(source.enabled),
+        "desired_enabled": bool(source.enabled),
+        "acked_enabled": source.acked_enabled,
+        "pending": not source_ready(source),
+    }
 
 
 @router.get("/api/media/{media_id}/content")

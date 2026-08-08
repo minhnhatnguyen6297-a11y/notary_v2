@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import sqlite3
+import threading
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -51,6 +52,12 @@ from services.zalo_inbox import (
     update_preview,
     verify_webhook_signature,
     write_excel_export,
+    apply_intake_consent,
+    ack_policy,
+    ack_source_sync,
+    request_source_sync,
+    set_source_policy,
+    source_ready,
 )
 
 UTC = timezone.utc
@@ -475,6 +482,400 @@ def test_zalo_policy_migration_models_have_additive_defaults(db):
     assert source.last_activity_at is None
 
 
+def test_consent_applies_type_defaults_only_to_legacy_sources_and_waits_for_ack(db):
+    account = _account(db)
+    legacy_friend = _source(db, account, "friend-1")
+    legacy_friend.source_type = "friend"
+    legacy_friend.enabled_explicit = None
+    explicit_stranger = ZaloSource(
+        id="source-explicit",
+        connector_account_id=account.id,
+        conversation_id="stranger-1",
+        conversation_type="user",
+        display_name="Explicit stranger",
+        source_type="stranger",
+        enabled=True,
+        enabled_explicit=True,
+    )
+    my_documents = ZaloSource(
+        id="source-documents",
+        connector_account_id=account.id,
+        conversation_id="documents-1",
+        conversation_type="user",
+        display_name="My Documents",
+        source_type="my_documents",
+        enabled=False,
+        enabled_explicit=None,
+    )
+    db.add_all([explicit_stranger, my_documents])
+    db.commit()
+    db.query(ZaloSource).filter(ZaloSource.id.in_([legacy_friend.id, my_documents.id])).update(
+        {ZaloSource.enabled_explicit: None}, synchronize_session=False
+    )
+    db.commit()
+    db.expire_all()
+
+    version = apply_intake_consent(db, account.id)
+    db.refresh(account)
+    db.refresh(legacy_friend)
+    db.refresh(explicit_stranger)
+    db.refresh(my_documents)
+
+    assert version == account.policy_version == 1
+    assert account.intake_consented_at is not None
+    assert (legacy_friend.enabled, legacy_friend.enabled_explicit) == (True, False)
+    assert (my_documents.enabled, my_documents.enabled_explicit) == (True, False)
+    assert (explicit_stranger.enabled, explicit_stranger.enabled_explicit) == (True, True)
+    assert source_ready(legacy_friend) is False
+
+    assert ack_policy(db, account.id, version) == version
+    db.refresh(account)
+    db.refresh(legacy_friend)
+    assert account.policy_acked_version == version
+    assert (legacy_friend.acked_enabled, legacy_friend.policy_acked_version) == (True, version)
+    assert source_ready(legacy_friend) is True
+
+
+def test_source_policy_is_explicit_pending_until_the_matching_ack(db):
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = False
+    source.acked_enabled = True
+    source.policy_version = source.policy_acked_version = account.policy_version = account.policy_acked_version = 1
+    db.commit()
+
+    version = set_source_policy(db, source.id, False)
+    db.refresh(account)
+    db.refresh(source)
+
+    assert version == account.policy_version == source.policy_version == 2
+    assert source.enabled_explicit is True
+    assert source.enabled is False
+    assert source.acked_enabled is True
+    assert source_ready(source) is False
+    with pytest.raises(InboxValidationError):
+        ack_policy(db, account.id, 1)
+    with pytest.raises(InboxValidationError):
+        ack_policy(db, account.id, 3)
+    assert ack_policy(db, account.id, 2) == 2
+    db.refresh(source)
+    assert (source.acked_enabled, source.policy_acked_version, source_ready(source)) == (False, 2, True)
+
+
+def test_source_policy_two_toggles_restage_the_complete_snapshot_before_ack(db):
+    account = _account(db)
+    source_a = _source(db, account, "source-a")
+    source_a.source_type = "friend"
+    source_b = ZaloSource(
+        id="source-b",
+        connector_account_id=account.id,
+        conversation_id="source-b",
+        conversation_type="group",
+        display_name="Nguồn B",
+        source_type="group",
+        enabled=True,
+        enabled_explicit=False,
+    )
+    db.add(source_b)
+    db.commit()
+
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    assert set_source_policy(db, source_a.id, False) == 2
+    assert set_source_policy(db, source_b.id, False) == 3
+    db.refresh(account)
+    db.refresh(source_a)
+    db.refresh(source_b)
+
+    assert (source_a.policy_version, source_b.policy_version) == (account.policy_version, account.policy_version)
+    with pytest.raises(InboxValidationError):
+        ack_policy(db, account.id, 2)
+    assert ack_policy(db, account.id, 3) == 3
+    db.refresh(source_a)
+    db.refresh(source_b)
+    assert (source_a.acked_enabled, source_a.policy_acked_version, source_ready(source_a)) == (False, 3, True)
+    assert (source_b.acked_enabled, source_b.policy_acked_version, source_ready(source_b)) == (False, 3, True)
+
+
+def test_concurrent_source_toggles_use_distinct_atomic_versions_and_current_snapshot_is_ackable(tmp_path):
+    db_path = tmp_path / "concurrent-policy.sqlite"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
+    database.enable_sqlite_foreign_keys(engine)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    setup = factory()
+    try:
+        account = _account(setup)
+        source_a = _source(setup, account, "concurrent-a")
+        source_b = ZaloSource(
+            id="concurrent-source-b",
+            connector_account_id=account.id,
+            conversation_id="concurrent-b",
+            conversation_type="user",
+            display_name="Nguồn B",
+            enabled=True,
+            source_type="friend",
+        )
+        setup.add(source_b)
+        setup.commit()
+        source_ids = (source_a.id, source_b.id)
+    finally:
+        setup.close()
+
+    barrier = threading.Barrier(2)
+    versions = []
+
+    def toggle(source_id):
+        session = factory()
+        try:
+            barrier.wait()
+            versions.append(set_source_policy(session, source_id, False))
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=toggle, args=(source_id,)) for source_id in source_ids]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    verify = factory()
+    try:
+        account = verify.query(ZaloConnectorAccount).one()
+        assert sorted(versions) == [1, 2]
+        assert account.policy_version == 2
+        assert ack_policy(verify, account.id, account.policy_version) == 2
+        assert all(source_ready(source) for source in verify.query(ZaloSource).all())
+    finally:
+        verify.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_concurrent_source_refreshes_use_distinct_atomic_request_versions(tmp_path):
+    db_path = tmp_path / "concurrent-source-sync.sqlite"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
+    database.enable_sqlite_foreign_keys(engine)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    setup = factory()
+    try:
+        account_id = _account(setup).id
+    finally:
+        setup.close()
+
+    barrier = threading.Barrier(2)
+    versions = []
+
+    def refresh():
+        session = factory()
+        try:
+            barrier.wait()
+            versions.append(request_source_sync(session, account_id))
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=refresh) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    verify = factory()
+    try:
+        assert sorted(versions) == [1, 2]
+        assert verify.query(ZaloConnectorAccount).one().source_sync_request_version == 2
+    finally:
+        verify.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_source_policy_pending_fails_closed_for_media_until_policy_ack(db, tmp_path):
+    account = _account(db)
+    account.intake_consented_at = datetime(2026, 8, 4, 2, tzinfo=UTC)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = True
+    source.enabled = True
+    source.acked_enabled = True
+    source.policy_version = source.policy_acked_version = account.policy_version = account.policy_acked_version = 1
+    db.commit()
+    object_path = tmp_path / account.id / "pending.png"
+    object_path.parent.mkdir()
+    _png(object_path)
+    payload = {
+        "schema_version": 1,
+        "event_type": "media",
+        "connector_account_id": account.id,
+        "conversation_id": source.conversation_id,
+        "conversation_type": "user",
+        "source_display_name": source.display_name,
+        "msg_id": "pending-media",
+        "sent_at": "2026-08-04T03:00:00Z",
+        "attachment_index": 0,
+        "media_object_key": f"{account.id}/pending.png",
+        "mime_type": "image/png",
+        "size_bytes": object_path.stat().st_size,
+    }
+    set_source_policy(db, source.id, True)
+    assert ingest_webhook_event(db, payload, storage_root=tmp_path) == {"ignored": True}
+    assert ack_policy(db, account.id, 2) == 2
+    assert ingest_webhook_event(db, payload, storage_root=tmp_path).source_id == source.id
+
+
+def test_media_before_consent_is_ignored_even_for_legacy_enabled_source(db, tmp_path):
+    account = _account(db)
+    source = _source(db, account)
+    object_path = tmp_path / account.id / "before-consent.png"
+    object_path.parent.mkdir()
+    _png(object_path)
+    assert ingest_webhook_event(
+        db,
+        {
+            "schema_version": 1,
+            "event_type": "media",
+            "connector_account_id": account.id,
+            "conversation_id": source.conversation_id,
+            "conversation_type": "user",
+            "source_display_name": source.display_name,
+            "msg_id": "before-consent",
+            "sent_at": "2026-08-04T03:00:00Z",
+            "attachment_index": 0,
+            "media_object_key": f"{account.id}/before-consent.png",
+            "mime_type": "image/png",
+            "size_bytes": object_path.stat().st_size,
+        },
+        storage_root=tmp_path,
+    ) == {"ignored": True}
+    assert db.query(ZaloMedia).count() == 0
+
+
+def test_discovery_reclassifies_default_source_but_preserves_explicit_choice(db):
+    account = _account(db)
+    apply_intake_consent(db, account.id)
+    payload = {
+        "schema_version": 1,
+        "event_type": "discovery",
+        "connector_account_id": account.id,
+        "conversation_id": "thread-discovery",
+        "conversation_type": "user",
+        "source_display_name": "Nguồn discovery",
+        "source_type": "stranger",
+        "last_activity_at": "2026-08-04T03:00:00Z",
+    }
+    source = ingest_webhook_event(db, payload, storage_root=".")
+    assert (source.source_type, source.enabled, source.enabled_explicit) == ("stranger", False, False)
+
+    source.enabled_explicit = True
+    source.enabled = False
+    db.commit()
+    reclassified = ingest_webhook_event(db, {**payload, "source_type": "friend"}, storage_root=".")
+    assert (reclassified.source_type, reclassified.enabled, reclassified.enabled_explicit) == ("friend", False, True)
+
+    with pytest.raises(InboxValidationError, match="source_type"):
+        ingest_webhook_event(db, {**payload, "conversation_id": "bad", "source_type": "unknown"}, storage_root=".")
+    with pytest.raises(InboxValidationError, match="Timestamp"):
+        ingest_webhook_event(
+            db,
+            {**payload, "conversation_id": "bad-activity", "last_activity_at": "not-a-timestamp"},
+            storage_root=".",
+        )
+
+
+def test_discovery_after_current_ack_bumps_once_and_exact_ack_activates_source(db):
+    account = _account(db)
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    payload = {
+        "schema_version": 1,
+        "event_type": "discovery",
+        "connector_account_id": account.id,
+        "conversation_id": "new-friend",
+        "conversation_type": "user",
+        "source_display_name": "Bạn mới",
+        "source_type": "friend",
+    }
+
+    source = ingest_webhook_event(db, payload, storage_root=".")
+    db.refresh(account)
+    assert (account.policy_version, account.policy_acked_version) == (2, 1)
+    assert (source.enabled, source.enabled_explicit, source.policy_version, source_ready(source)) == (True, False, 2, False)
+
+    ingest_webhook_event(db, {**payload, "source_display_name": "Bạn mới đổi tên"}, storage_root=".")
+    db.refresh(account)
+    assert account.policy_version == 2
+
+    assert ack_policy(db, account.id, 2) == 2
+    db.refresh(source)
+    assert source_ready(source) is True
+
+
+def test_default_reclassification_after_current_ack_bumps_once_and_preserves_explicit_choice(db):
+    account = _account(db)
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    payload = {
+        "schema_version": 1,
+        "event_type": "discovery",
+        "connector_account_id": account.id,
+        "conversation_id": "reclassified-source",
+        "conversation_type": "user",
+        "source_display_name": "Nguồn lạ",
+        "source_type": "stranger",
+    }
+    source = ingest_webhook_event(db, payload, storage_root=".")
+    assert ack_policy(db, account.id, 2) == 2
+
+    source = ingest_webhook_event(db, {**payload, "source_type": "friend"}, storage_root=".")
+    db.refresh(account)
+    assert (account.policy_version, account.policy_acked_version) == (3, 2)
+    assert (source.enabled, source.enabled_explicit, source.policy_version, source_ready(source)) == (True, False, 3, False)
+    assert ack_policy(db, account.id, 3) == 3
+
+    assert set_source_policy(db, source.id, False) == 4
+    assert ack_policy(db, account.id, 4) == 4
+    source = ingest_webhook_event(db, {**payload, "source_type": "stranger"}, storage_root=".")
+    db.refresh(account)
+    assert (account.policy_version, source.enabled, source.enabled_explicit, source_ready(source)) == (4, False, True, True)
+
+
+def test_source_sync_ack_rejects_stale_future_and_wrong_account_but_replays_exactly(db):
+    account = _account(db)
+    assert request_source_sync(db, account.id) == 1
+    with pytest.raises(InboxValidationError):
+        ack_source_sync(db, account.id, 0)
+    with pytest.raises(InboxValidationError):
+        ack_source_sync(db, account.id, 2)
+    with pytest.raises(InboxValidationError):
+        ack_source_sync(db, "wrong-account", 1)
+    assert ack_source_sync(db, account.id, 1) == 1
+    assert ack_source_sync(db, account.id, 1) == 1
+
+
+def test_source_refresh_ack_and_connector_gap_are_idempotent(db):
+    account = _account(db)
+    first_request = request_source_sync(db, account.id)
+    second_request = request_source_sync(db, account.id)
+    assert (first_request, second_request, account.source_sync_request_version) == (1, 2, 2)
+
+    now = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
+    apply_connector_report(account, "connected", 1, now, qr_login_success=True, bound_zalo_id="owner")
+    apply_connector_report(account, "disconnected", 1, now + timedelta(seconds=1))
+    first_gap = account.gap_started_at
+    apply_connector_report(account, "connected", 1, now + timedelta(seconds=2))
+    apply_connector_report(account, "disconnected", 2, now + timedelta(seconds=3))
+    assert account.gap_started_at == first_gap == now + timedelta(seconds=1)
+
+
+def test_listener_generation_replacement_marks_gap_once_when_receiving(db):
+    account = _account(db)
+    now = datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
+    assert apply_connector_report(account, "connected", 1, now, qr_login_success=True, bound_zalo_id="owner") is True
+    assert apply_connector_report(account, "connected", 2, now + timedelta(seconds=1)) is True
+    assert account.gap_started_at == now + timedelta(seconds=1)
+    assert apply_connector_report(account, "connected", 2, now + timedelta(seconds=2)) is True
+    assert account.gap_started_at == now + timedelta(seconds=1)
+
+
 def test_zalo_message_text_rejects_duplicate_message_identity(db):
     from models import ZaloMessageText
 
@@ -686,6 +1087,10 @@ def test_webhook_signature_and_replay_window():
 def test_webhook_duplicate_is_idempotent_and_conflict_is_rejected(db, tmp_path):
     account = _account(db)
     source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
     object_path = tmp_path / account.id / "media.png"
     object_path.parent.mkdir()
     _png(object_path)

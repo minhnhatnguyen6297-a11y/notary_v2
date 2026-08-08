@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
+import threading
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -62,7 +63,320 @@ def _signed_post(client, payload):
     )
 
 
-def test_onboard_webhook_batch_pdf_and_safe_serialization(tmp_path, monkeypatch):
+def _signed_config_headers():
+    timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+    signature = hmac.new(b"webhook-test", timestamp.encode() + b".", hashlib.sha256).hexdigest()
+    return {"x-zalo-timestamp": timestamp, "x-zalo-signature": signature}
+
+
+def _manual_watcher_threads(monkeypatch):
+    threads = []
+
+    class Thread:
+        def __init__(self, *, target, args=(), daemon=False):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            threads.append(self)
+
+    monkeypatch.setattr(zalo_inbox.threading, "Thread", Thread)
+    return threads
+
+
+def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        discovery = {
+            "schema_version": 1,
+            "event_type": "discovery",
+            "connector_account_id": account_id,
+            "conversation_id": "friend-thread",
+            "conversation_type": "user",
+            "source_display_name": "Bạn A",
+            "source_type": "friend",
+            "last_activity_at": "2026-08-04T03:00:00Z",
+        }
+        assert _signed_post(client, discovery).status_code == 200
+        consent = client.post(f"/zalo-inbox/api/connectors/{account_id}/consent")
+        assert consent.status_code == 200
+        assert consent.json() == {"policy_version": 1}
+
+        state = client.get("/zalo-inbox/api/state").json()
+        source_id = state["sources"][0]["id"]
+        assert state["consent_required"] is False
+        assert state["policy_pending"] is True
+        assert state["sources"] == [{
+            "id": source_id,
+            "display_name": "Bạn A",
+            "conversation_type": "user",
+            "source_type": "friend",
+            "last_activity_at": "2026-08-04T03:00:00Z",
+            "enabled": True,
+            "desired_enabled": True,
+            "acked_enabled": None,
+            "pending": True,
+        }]
+        assert state["stranger_sources"] == []
+        assert "conversation_id" not in json.dumps(state)
+
+        toggled = client.patch(f"/zalo-inbox/api/sources/{source_id}", json={"enabled": False})
+        assert toggled.status_code == 200
+        assert toggled.json() == {
+            "id": source_id,
+            "enabled": False,
+            "desired_enabled": False,
+            "acked_enabled": None,
+            "pending": True,
+        }
+        config = client.get(f"/zalo-inbox/api/connectors/{account_id}/config", headers=_signed_config_headers())
+        assert config.json() == {
+            "listener_generation": 0,
+            "policy_version": 2,
+            "source_sync_request_version": 0,
+            "sources": [{
+                "conversation_id": "friend-thread",
+                "source_type": "friend",
+                "enabled": False,
+                "desired_enabled": False,
+                "acked_enabled": None,
+                "policy_version": 2,
+            }],
+            "protected_media_object_keys": [],
+        }
+
+        wrong_account = _signed_post(client, {
+            "schema_version": 1,
+            "event_type": "policy_ack",
+            "connector_account_id": "wrong",
+            "policy_version": 2,
+        })
+        assert wrong_account.status_code == 400
+        stale_ack = _signed_post(client, {
+            "schema_version": 1,
+            "event_type": "policy_ack",
+            "connector_account_id": account_id,
+            "policy_version": 1,
+        })
+        assert stale_ack.status_code == 400
+        exact_ack = {
+            "schema_version": 1,
+            "event_type": "policy_ack",
+            "connector_account_id": account_id,
+            "policy_version": 2,
+        }
+        assert _signed_post(client, exact_ack).status_code == 200
+        assert _signed_post(client, exact_ack).status_code == 200
+        assert client.get("/zalo-inbox/api/state").json()["policy_pending"] is False
+
+        refresh = client.post(f"/zalo-inbox/api/connectors/{account_id}/sources/refresh")
+        assert refresh.status_code == 200
+        assert refresh.json() == {"source_sync_request_version": 1}
+        sync_ack = {
+            "schema_version": 1,
+            "event_type": "source_sync_ack",
+            "connector_account_id": account_id,
+            "source_sync_request_version": 1,
+        }
+        assert _signed_post(client, sync_ack).status_code == 200
+        assert _signed_post(client, sync_ack).status_code == 200
+
+        db = factory()
+        account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
+        source = db.query(ZaloSource).filter_by(id=source_id).one()
+        assert (account.policy_acked_version, account.source_sync_acked_version) == (2, 1)
+        assert (source.acked_enabled, source.policy_acked_version) == (False, 2)
+        db.close()
+
+
+def test_state_partitions_sources_and_marks_pending_when_any_source_is_unready(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
+        account.intake_consented_at = datetime.now(timezone.utc)
+        account.policy_version = account.policy_acked_version = 1
+        db.add_all(
+            [
+                ZaloSource(
+                    id="friend-ready", connector_account_id=account_id, conversation_id="friend", conversation_type="user",
+                    display_name="Zulu", source_type="friend", enabled=True, acked_enabled=True,
+                    policy_version=1, policy_acked_version=1, last_activity_at=datetime(2026, 8, 4, 4, tzinfo=timezone.utc),
+                ),
+                ZaloSource(
+                    id="group-unready", connector_account_id=account_id, conversation_id="group", conversation_type="group",
+                    display_name="Alpha", source_type="group", enabled=True, acked_enabled=True,
+                    policy_version=2, policy_acked_version=1,
+                ),
+                ZaloSource(
+                    id="stranger", connector_account_id=account_id, conversation_id="stranger", conversation_type="user",
+                    display_name="A Stranger", source_type="stranger", enabled=False, acked_enabled=False,
+                    policy_version=1, policy_acked_version=1, last_activity_at=datetime(2026, 8, 4, 5, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        db.commit()
+        db.close()
+
+        state = client.get("/zalo-inbox/api/state").json()
+        assert state["policy_pending"] is True
+        assert [row["display_name"] for row in state["sources"]] == ["Zulu", "Alpha"]
+        assert [row["display_name"] for row in state["stranger_sources"]] == ["A Stranger"]
+        assert "conversation_id" not in json.dumps(state)
+
+
+def test_state_is_scoped_to_the_selected_connector_account(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        other_account = ZaloConnectorAccount(id="other-account", session_state="usable", listener_generation=1)
+        db.add(other_account)
+        db.add_all(
+            [
+                ZaloSource(
+                    id="selected-source", connector_account_id=account_id, conversation_id="selected", conversation_type="user",
+                    display_name="Selected", source_type="friend", enabled=True, acked_enabled=True,
+                ),
+                ZaloSource(
+                    id="other-source", connector_account_id=other_account.id, conversation_id="other", conversation_type="user",
+                    display_name="Other", source_type="stranger", enabled=True, acked_enabled=False, policy_version=1,
+                ),
+                ZaloMedia(
+                    id="other-media", connector_account_id=other_account.id, source_id="other-source", conversation_id="other",
+                    msg_id="other-message", attachment_index=0, media_object_key="other-account/file.png", mime_type="image/png",
+                    size_bytes=1, sent_at=datetime(2026, 8, 4, 3, tzinfo=timezone.utc), payload_digest="a" * 64,
+                ),
+                ZaloBatch(
+                    id="selected-batch", connector_account_id=account_id, status="completed",
+                    created_at=datetime(2026, 8, 4, 3, tzinfo=timezone.utc),
+                    expires_at=datetime(2026, 8, 7, 3, tzinfo=timezone.utc),
+                ),
+                ZaloBatch(
+                    id="other-batch", connector_account_id=other_account.id, status="review",
+                    created_at=datetime(2026, 8, 4, 4, tzinfo=timezone.utc),
+                    expires_at=datetime(2026, 8, 7, 4, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        db.commit()
+        db.close()
+
+        state = client.get("/zalo-inbox/api/state").json()
+        assert state["policy_pending"] is False
+        assert [source["id"] for source in state["sources"]] == ["selected-source"]
+        assert state["stranger_sources"] == []
+        assert state["media"] == []
+        assert state["latest_batch"] == {
+            "id": "selected-batch",
+            "status": "completed",
+            "url": "/zalo-inbox/batches/selected-batch",
+            "unfinished": False,
+        }
+
+
+def test_source_order_keeps_strangers_after_active_and_inactive_sources(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        db.add_all(
+            [
+                ZaloSource(
+                    id="activity-new", connector_account_id=account_id, conversation_id="a", conversation_type="user",
+                    display_name="Zeta", source_type="friend", enabled=False,
+                    last_activity_at=datetime(2026, 8, 4, 4, tzinfo=timezone.utc),
+                ),
+                ZaloSource(
+                    id="activity-old", connector_account_id=account_id, conversation_id="b", conversation_type="group",
+                    display_name="Alpha", source_type="group", enabled=False,
+                    last_activity_at=datetime(2026, 8, 4, 3, tzinfo=timezone.utc),
+                ),
+                ZaloSource(
+                    id="no-activity", connector_account_id=account_id, conversation_id="c", conversation_type="user",
+                    display_name="Beta", source_type="friend", enabled=False,
+                ),
+                ZaloSource(
+                    id="stranger", connector_account_id=account_id, conversation_id="d", conversation_type="user",
+                    display_name="A Stranger", source_type="stranger", enabled=False,
+                    last_activity_at=datetime(2026, 8, 4, 5, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        db.commit()
+        db.close()
+        state = client.get("/zalo-inbox/api/state").json()
+        assert [source["display_name"] for source in state["sources"]] == ["Zeta", "Alpha", "Beta"]
+        assert [source["display_name"] for source in state["stranger_sources"]] == ["A Stranger"]
+
+
+def test_state_sorts_naive_activity_as_utc(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        db.add_all(
+            [
+                ZaloSource(
+                    id="naive-newer", connector_account_id=account_id, conversation_id="naive", conversation_type="user",
+                    display_name="Naive newer", source_type="friend", enabled=False,
+                    last_activity_at=datetime(2026, 8, 4, 4),
+                ),
+                ZaloSource(
+                    id="aware-older", connector_account_id=account_id, conversation_id="aware", conversation_type="user",
+                    display_name="Aware older", source_type="friend", enabled=False,
+                    last_activity_at=datetime(2026, 8, 4, 3, 30, tzinfo=timezone.utc),
+                ),
+            ]
+        )
+        db.commit()
+        db.close()
+
+        state = client.get("/zalo-inbox/api/state").json()
+        assert [source["id"] for source in state["sources"]] == ["naive-newer", "aware-older"]
+
+
+def test_signed_ack_rejects_invalid_version_types_without_server_error(tmp_path, monkeypatch):
+    app, _ = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        for field, values in (
+            ("policy_version", [True, None, "not-an-int", 1.0, -1]),
+            ("source_sync_request_version", [True, None, "not-an-int", 1.0, -1]),
+        ):
+            event_type = "policy_ack" if field == "policy_version" else "source_sync_ack"
+            for value in values:
+                response = _signed_post(client, {
+                    "schema_version": 1,
+                    "event_type": event_type,
+                    "connector_account_id": account_id,
+                    field: value,
+                })
+                assert response.status_code in {400, 422}
+            missing = _signed_post(client, {
+                "schema_version": 1,
+                "event_type": event_type,
+                "connector_account_id": account_id,
+            })
+            assert missing.status_code in {400, 422}
+
+
+def test_api_batch_pdf_and_safe_serialization(tmp_path, monkeypatch):
     app, factory = _app(tmp_path, monkeypatch)
     with TestClient(app) as client:
         page = client.get("/zalo-inbox/")
@@ -88,13 +402,21 @@ def test_onboard_webhook_batch_pdf_and_safe_serialization(tmp_path, monkeypatch)
             "conversation_id": "thread-1",
             "conversation_type": "user",
             "source_display_name": "Khách A",
+            "source_type": "friend",
         }
         assert _signed_post(client, discovery).status_code == 200
 
+        consent = client.post(f"/zalo-inbox/api/connectors/{account_id}/consent")
+        assert consent.status_code == 200
+        assert _signed_post(client, {
+            "schema_version": 1,
+            "event_type": "policy_ack",
+            "connector_account_id": account_id,
+            "policy_version": consent.json()["policy_version"],
+        }).status_code == 200
+
         db = factory()
         source = db.query(ZaloSource).one()
-        source.enabled = True
-        db.commit()
         source_id = source.id
         db.close()
 
@@ -143,8 +465,20 @@ def test_onboard_webhook_batch_pdf_and_safe_serialization(tmp_path, monkeypatch)
             headers={"x-zalo-timestamp": config_timestamp, "x-zalo-signature": config_signature},
         )
         assert connector_config.status_code == 200
-        assert connector_config.json()["sources"] == [{"conversation_id": "thread-1", "enabled": True}]
-        assert connector_config.json()["protected_media_object_keys"] == [f"{account_id}/doc.png"]
+        assert connector_config.json() == {
+            "listener_generation": 0,
+            "policy_version": 1,
+            "source_sync_request_version": 0,
+            "sources": [{
+                "conversation_id": "thread-1",
+                "source_type": "friend",
+                "enabled": True,
+                "desired_enabled": True,
+                "acked_enabled": True,
+                "policy_version": 1,
+            }],
+            "protected_media_object_keys": [f"{account_id}/doc.png"],
+        }
 
         db = factory()
         protected_batch = db.query(ZaloBatch).filter(ZaloBatch.id == batch_id).one()
@@ -222,15 +556,20 @@ def test_start_connector_is_idempotent_and_does_not_expose_secrets(tmp_path, mon
 
         def __init__(self):
             self.terminated = False
+            self.exited = threading.Event()
 
         def poll(self):
             return None
 
         def terminate(self):
             self.terminated = True
+            self.exited.set()
 
-        def wait(self, timeout):
-            assert timeout == 3
+        def wait(self, timeout=None):
+            if timeout is not None:
+                assert timeout == 3
+                return
+            self.exited.wait()
 
     def fake_popen(command, **options):
         calls.append((command, options))
@@ -321,6 +660,13 @@ def test_connector_failure_is_sanitized_and_clears_stale_qr(tmp_path, monkeypatc
         def terminate(self):
             raise AssertionError("exited process must not be terminated")
 
+        def wait(self, timeout=None):
+            assert timeout is None
+            return 9
+
+    stopped_at = datetime(2026, 8, 4, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(zalo_inbox, "utcnow", lambda: stopped_at)
+    monkeypatch.setattr(zalo_inbox, "SessionLocal", factory)
     monkeypatch.setattr(zalo_inbox.subprocess, "Popen", lambda *args, **kwargs: FailedProcess())
 
     with TestClient(app) as client:
@@ -336,6 +682,136 @@ def test_connector_failure_is_sanitized_and_clears_stale_qr(tmp_path, monkeypatc
     assert "exit_code" not in connector
     assert "stderr" not in connector
     assert "secret" not in json.dumps(connector).lower()
+    db = factory()
+    assert db.query(ZaloConnectorAccount).filter_by(id="account-failed").one().gap_started_at.replace(tzinfo=timezone.utc) == stopped_at
+    db.close()
+
+
+def test_unexpected_connector_exit_persists_gap_without_state_poll(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    monkeypatch.setenv("ZALO_CONNECTOR_QUOTA_BYTES", "1048576")
+    monkeypatch.setenv("ZALO_CONNECTOR_RETENTION_HOURS", "72")
+    monkeypatch.setattr(zalo_inbox, "_connector_process", None)
+    monkeypatch.setattr(zalo_inbox, "SessionLocal", factory)
+    threads = _manual_watcher_threads(monkeypatch)
+    db = factory()
+    db.add(ZaloConnectorAccount(
+        id="account-watched",
+        session_state="usable",
+        listener_generation=1,
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    db.close()
+
+    stopped_at = datetime(2026, 8, 4, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(zalo_inbox, "utcnow", lambda: stopped_at)
+
+    class ExitedProcess:
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            assert timeout is None
+            return 9
+
+    monkeypatch.setattr(zalo_inbox.subprocess, "Popen", lambda *args, **kwargs: ExitedProcess())
+    with TestClient(app) as client:
+        assert client.post("/zalo-inbox/api/connectors/start").status_code == 202
+        assert len(threads) == 1
+        assert threads[0].daemon is True
+        threads[0].target(*threads[0].args)
+
+    db = factory()
+    assert db.query(ZaloConnectorAccount).filter_by(id="account-watched").one().gap_started_at.replace(tzinfo=timezone.utc) == stopped_at
+    db.close()
+
+
+def test_old_connector_watcher_does_not_mark_replacement_process_account(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    monkeypatch.setenv("ZALO_CONNECTOR_QUOTA_BYTES", "1048576")
+    monkeypatch.setenv("ZALO_CONNECTOR_RETENTION_HOURS", "72")
+    monkeypatch.setattr(zalo_inbox, "_connector_process", None)
+    monkeypatch.setattr(zalo_inbox, "SessionLocal", factory)
+    threads = _manual_watcher_threads(monkeypatch)
+    db = factory()
+    db.add(ZaloConnectorAccount(
+        id="account-replaced",
+        session_state="usable",
+        listener_generation=1,
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    db.close()
+
+    class Process:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    old_process = Process()
+    replacement = Process()
+    processes = iter((old_process, replacement))
+    monkeypatch.setattr(zalo_inbox.subprocess, "Popen", lambda *args, **kwargs: next(processes))
+    with TestClient(app) as client:
+        assert client.post("/zalo-inbox/api/connectors/start").status_code == 202
+        assert client.post("/zalo-inbox/api/connectors/start", json={"force_restart": True}).status_code == 202
+        assert zalo_inbox._connector_process is replacement
+        threads[0].target(*threads[0].args)
+
+    db = factory()
+    assert db.query(ZaloConnectorAccount).filter_by(id="account-replaced").one().gap_started_at is None
+    db.close()
+
+
+def test_repeated_watcher_and_terminate_keep_first_gap_marker(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    monkeypatch.setenv("ZALO_CONNECTOR_QUOTA_BYTES", "1048576")
+    monkeypatch.setenv("ZALO_CONNECTOR_RETENTION_HOURS", "72")
+    monkeypatch.setattr(zalo_inbox, "_connector_process", None)
+    monkeypatch.setattr(zalo_inbox, "SessionLocal", factory)
+    threads = _manual_watcher_threads(monkeypatch)
+    db = factory()
+    db.add(ZaloConnectorAccount(
+        id="account-idempotent-gap",
+        session_state="usable",
+        listener_generation=1,
+        last_seen_at=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    db.close()
+
+    first_gap = datetime(2026, 8, 4, 4, tzinfo=timezone.utc)
+    monkeypatch.setattr(zalo_inbox, "utcnow", lambda: first_gap)
+
+    class ExitedProcess:
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            assert timeout is None
+            return 0
+
+    monkeypatch.setattr(zalo_inbox.subprocess, "Popen", lambda *args, **kwargs: ExitedProcess())
+    with TestClient(app) as client:
+        assert client.post("/zalo-inbox/api/connectors/start").status_code == 202
+        threads[0].target(*threads[0].args)
+        monkeypatch.setattr(
+            zalo_inbox,
+            "utcnow",
+            lambda: (_ for _ in ()).throw(AssertionError("gap marker must not be rewritten")),
+        )
+        threads[0].target(*threads[0].args)
+        zalo_inbox._terminate_connector_process()
+
+    db = factory()
+    assert db.query(ZaloConnectorAccount).filter_by(id="account-idempotent-gap").one().gap_started_at.replace(tzinfo=timezone.utc) == first_gap
+    db.close()
 
 
 def test_connector_immediate_exit_returns_a_sanitized_startup_error(tmp_path, monkeypatch):
@@ -368,15 +844,20 @@ def test_start_connector_force_restart_replaces_a_running_process(tmp_path, monk
     class RunningProcess:
         def __init__(self):
             self.terminated = False
+            self.exited = threading.Event()
 
         def poll(self):
             return None
 
         def terminate(self):
             self.terminated = True
+            self.exited.set()
 
-        def wait(self, timeout):
-            assert timeout == 3
+        def wait(self, timeout=None):
+            if timeout is not None:
+                assert timeout == 3
+                return
+            self.exited.wait()
 
     old_process = RunningProcess()
     new_process = RunningProcess()
@@ -428,7 +909,7 @@ def test_force_qr_clears_the_previous_qr_before_starting(tmp_path, monkeypatch):
             pass
 
         def wait(self, timeout):
-            pass
+            assert timeout is None
 
     monkeypatch.setattr(zalo_inbox.subprocess, "Popen", lambda *args, **kwargs: RunningProcess())
 

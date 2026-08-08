@@ -17,6 +17,7 @@ import fitz
 from fastapi import UploadFile
 from openpyxl import Workbook
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
@@ -148,6 +149,118 @@ def connector_state(
     return "connected"
 
 
+SOURCE_TYPES = {"friend", "group", "stranger", "my_documents"}
+
+
+def _source_default(source_type: str | None) -> bool:
+    return source_type in {"friend", "group", "my_documents"}
+
+
+def _restage_policy_snapshot(db: Session, account: ZaloConnectorAccount) -> int:
+    db.execute(
+        update(ZaloConnectorAccount)
+        .where(ZaloConnectorAccount.id == account.id)
+        .values(policy_version=ZaloConnectorAccount.policy_version + 1)
+    )
+    db.flush()
+    db.refresh(account)
+    db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).update(
+        {ZaloSource.policy_version: account.policy_version}, synchronize_session=False
+    )
+    return account.policy_version
+
+
+def _account_or_error(db: Session, account_id: str) -> ZaloConnectorAccount:
+    account = db.query(ZaloConnectorAccount).filter(ZaloConnectorAccount.id == account_id).first()
+    if account is None:
+        raise InboxValidationError("connector_account_id chưa onboard")
+    return account
+
+
+def source_ready(source: ZaloSource) -> bool:
+    return (
+        source.acked_enabled is not None
+        and source.policy_version == source.policy_acked_version
+        and bool(source.enabled) == bool(source.acked_enabled)
+    )
+
+
+def apply_intake_consent(db: Session, account_id: str) -> int:
+    account = _account_or_error(db, account_id)
+    account.intake_consented_at = utcnow()
+    for source in db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).all():
+        if source.enabled_explicit is None:
+            source.enabled = _source_default(source.source_type)
+            source.enabled_explicit = False
+    _restage_policy_snapshot(db, account)
+    db.commit()
+    return account.policy_version
+
+
+def set_source_policy(db: Session, source_id: str, enabled: bool) -> int:
+    source = db.query(ZaloSource).filter(ZaloSource.id == source_id).first()
+    if source is None:
+        raise InboxValidationError("Không tìm thấy nguồn")
+    account = _account_or_error(db, source.connector_account_id)
+    source.enabled = bool(enabled)
+    source.enabled_explicit = True
+    _restage_policy_snapshot(db, account)
+    db.commit()
+    return account.policy_version
+
+
+def ack_policy(db: Session, account_id: str, policy_version: int) -> int:
+    account = _account_or_error(db, account_id)
+    if policy_version != account.policy_version:
+        raise InboxValidationError("policy_version không phải bản hiện hành")
+    if policy_version == account.policy_acked_version:
+        return policy_version
+    for source in db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id):
+        source.acked_enabled = bool(source.enabled)
+        source.policy_acked_version = policy_version
+    account.policy_acked_version = policy_version
+    db.commit()
+    return policy_version
+
+
+def request_source_sync(db: Session, account_id: str) -> int:
+    account = _account_or_error(db, account_id)
+    db.execute(
+        update(ZaloConnectorAccount)
+        .where(ZaloConnectorAccount.id == account.id)
+        .values(source_sync_request_version=ZaloConnectorAccount.source_sync_request_version + 1)
+    )
+    db.flush()
+    db.refresh(account)
+    db.commit()
+    return account.source_sync_request_version
+
+
+def ack_source_sync(db: Session, account_id: str, source_sync_request_version: int) -> int:
+    account = _account_or_error(db, account_id)
+    if source_sync_request_version != account.source_sync_request_version:
+        raise InboxValidationError("source_sync_request_version không phải bản hiện hành")
+    if source_sync_request_version == account.source_sync_acked_version:
+        return source_sync_request_version
+    account.source_sync_acked_version = source_sync_request_version
+    db.commit()
+    return source_sync_request_version
+
+
+def _ack_version(payload: dict[str, Any], field: str) -> int:
+    value = payload.get(field)
+    if isinstance(value, bool):
+        raise InboxValidationError(f"{field} không hợp lệ")
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError as exc:
+            raise InboxValidationError(f"{field} không hợp lệ") from exc
+    if not isinstance(value, int) or value < 0:
+        raise InboxValidationError(f"{field} không hợp lệ")
+    return value
+
+
 def apply_connector_report(
     account: ZaloConnectorAccount,
     reported_state: str,
@@ -159,7 +272,9 @@ def apply_connector_report(
     storage_full: bool | None = None,
     bound_zalo_id: str | None = None,
 ) -> bool:
-    if generation < (account.listener_generation or 0):
+    previous_generation = account.listener_generation or 0
+    was_receiving = account.session_state == "usable"
+    if generation < previous_generation:
         return False
     if reported_state not in {"connected", "login_required", "disconnected"}:
         raise InboxValidationError("Trạng thái connector không hợp lệ")
@@ -188,14 +303,20 @@ def apply_connector_report(
     if reported_state == "login_required":
         account.session_state = "login_required"
         account.last_seen_at = observed_at
+        if was_receiving and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         return True
     if account.session_state == "login_required" and not qr_login_success:
         return False
     if reported_state == "disconnected":
         account.session_state = "disconnected"
         account.last_seen_at = observed_at
+        if was_receiving and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         return True
     if reported_state == "connected":
+        if was_receiving and generation > previous_generation and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         account.session_state = "usable"
         account.last_seen_at = observed_at
         if qr_login_success:
@@ -281,13 +402,27 @@ def resolve_media_object(
     return path
 
 
-def _source_from_payload(db: Session, payload: dict[str, Any]) -> ZaloSource:
+def _source_from_payload(db: Session, payload: dict[str, Any], *, require_source_type: bool = False) -> ZaloSource:
     account_id = str(payload.get("connector_account_id") or "")
     conversation_id = str(payload.get("conversation_id") or "")
     conversation_type = str(payload.get("conversation_type") or "")
     display_name = str(payload.get("source_display_name") or "").strip()
-    if not account_id or not conversation_id or conversation_type not in {"user", "group"} or not display_name:
+    source_type = str(payload.get("source_type") or "")
+    if (
+        not account_id
+        or not conversation_id
+        or conversation_type not in {"user", "group"}
+        or not display_name
+        or (require_source_type and source_type not in SOURCE_TYPES)
+    ):
+        if require_source_type and source_type not in SOURCE_TYPES:
+            raise InboxValidationError("source_type không hợp lệ")
         raise InboxValidationError("Metadata nguồn không hợp lệ")
+    last_activity_provided = "last_activity_at" in payload
+    last_activity = payload.get("last_activity_at")
+    if last_activity is not None:
+        last_activity = _parse_timestamp(last_activity)
+    account = _account_or_error(db, account_id)
     source = (
         db.query(ZaloSource)
         .filter(
@@ -297,19 +432,39 @@ def _source_from_payload(db: Session, payload: dict[str, Any]) -> ZaloSource:
         .first()
     )
     if source is None:
+        enabled = _source_default(source_type) if account.intake_consented_at and source_type else False
         source = ZaloSource(
             id=_uuid(),
             connector_account_id=account_id,
             conversation_id=conversation_id,
             conversation_type=conversation_type,
             display_name=display_name,
-            enabled=False,
+            source_type=source_type or None,
+            enabled=enabled,
+            enabled_explicit=False if account.intake_consented_at else None,
+            policy_version=account.policy_version,
+            last_activity_at=last_activity,
         )
         db.add(source)
         db.flush()
+        if account.intake_consented_at:
+            _restage_policy_snapshot(db, account)
+        if account.intake_consented_at is None:
+            db.query(ZaloSource).filter(ZaloSource.id == source.id).update(
+                {ZaloSource.enabled_explicit: None}, synchronize_session=False
+            )
+            db.refresh(source)
     else:
         source.display_name = display_name
         source.conversation_type = conversation_type
+        if last_activity_provided:
+            source.last_activity_at = last_activity
+        if source_type:
+            default_enabled = _source_default(source_type)
+            if account.intake_consented_at and source.enabled_explicit is not True and source.enabled != default_enabled:
+                source.enabled = default_enabled
+                _restage_policy_snapshot(db, account)
+            source.source_type = source_type
     return source
 
 
@@ -323,9 +478,21 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         raise InboxValidationError("connector_account_id chưa onboard")
 
     if event_type == "discovery":
-        source = _source_from_payload(db, payload)
+        source = _source_from_payload(db, payload, require_source_type=True)
         db.commit()
         return source
+    if event_type == "policy_ack":
+        if set(payload) != {"schema_version", "event_type", "connector_account_id", "policy_version"}:
+            raise InboxValidationError("policy_ack không hợp lệ")
+        return {"policy_version": ack_policy(db, account_id, _ack_version(payload, "policy_version"))}
+    if event_type == "source_sync_ack":
+        if set(payload) != {"schema_version", "event_type", "connector_account_id", "source_sync_request_version"}:
+            raise InboxValidationError("source_sync_ack không hợp lệ")
+        return {
+            "source_sync_request_version": ack_source_sync(
+                db, account_id, _ack_version(payload, "source_sync_request_version")
+            )
+        }
     if event_type in {"heartbeat", "state"}:
         _parse_timestamp(payload.get("observed_at"))
         received_at = utcnow()
@@ -364,7 +531,7 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         return existing
 
     source = _source_from_payload(db, payload)
-    if not source.enabled:
+    if account.intake_consented_at is None or not source_ready(source) or not source.enabled:
         db.commit()
         return {"ignored": True}
     resolve_media_object(
