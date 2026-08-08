@@ -21,6 +21,7 @@
 - Deployment must provide `ZALO_INBOX_TEXT_QUOTA_BYTES`, `ZALO_INBOX_TEXT_RETENTION_HOURS`, and `ZALO_DATA_SYNC_TIMEOUT_SECONDS`; all must be positive and fail closed when missing/invalid.
 - Use `venv/Scripts/python.exe`, not system Python 3.14.
 - Focused verification and full-project verification must be reported separately.
+- User approved shared SQLite FK enforcement on 2026-08-07: every app connection uses `PRAGMA foreign_keys=ON`; startup runs `PRAGMA foreign_key_check` and stops on violations. Do not add cascade or repair callers without separate evidence/approval.
 - Baseline note: `tests/test_zalo_inbox.py` currently has two date-fixture failures because fixed August 2026 batches are now expired; repair those fixtures only inside the Zalo test task. API-only baseline is 12 passed; UI baseline is 5 passed; connector baseline is 22 passed.
 
 ---
@@ -102,7 +103,11 @@ Expected: PASS. The second migration invocation makes no change and raises no er
 
 Modify `verify.ps1:92-100` so `Test-ZaloInboxRelevantChange` includes `database.py`; run `verify.bat` and record any pre-existing OCR failure separately.
 
-- [ ] **Step 6: Review and commit Task 1**
+- [ ] **Step 6: Enforce declared foreign keys at the shared connection boundary**
+
+Enable `PRAGMA foreign_keys=ON` for every SQLAlchemy connection and run `PRAGMA foreign_key_check` before normal startup. Add behavioral orphan-insert tests for new Zalo tables plus a valid inheritance-FK smoke on temporary databases. If existing callers fail because they write/delete in the wrong order, stop and report the caller; do not add cascade or broaden the fix.
+
+- [ ] **Step 7: Review and commit Task 1**
 
 Review gate: Terra writer, Sol reviewer. Stage only `models.py`, `database.py`, and the Task 1 test hunks.
 
