@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, Boolean, Float, ForeignKey, Text, DateTime, JSON, UniqueConstraint, Index, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -195,6 +195,13 @@ class ZaloConnectorAccount(Base):
     qr_generated_at = Column(DateTime(timezone=True), nullable=True)
     qr_expires_at = Column(DateTime(timezone=True), nullable=True)
     storage_full = Column(Boolean, nullable=False, default=False)
+    intake_consented_at = Column(DateTime(timezone=True), nullable=True)
+    policy_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    policy_acked_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    source_sync_request_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    source_sync_acked_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    gap_started_at = Column(DateTime(timezone=True), nullable=True)
+    text_storage_full = Column(Boolean, nullable=False, default=False, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -211,6 +218,12 @@ class ZaloSource(Base):
     conversation_type = Column(String(20), nullable=False)
     display_name = Column(String(300), nullable=False)
     enabled = Column(Boolean, nullable=False, default=False)
+    source_type = Column(String(20), nullable=True)
+    enabled_explicit = Column(Boolean, nullable=True, default=False, server_default=text("0"))
+    acked_enabled = Column(Boolean, nullable=True)
+    policy_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    policy_acked_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    last_activity_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -239,6 +252,48 @@ class ZaloMedia(Base):
     sent_at = Column(DateTime(timezone=True), nullable=False)
     payload_digest = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ZaloMessageText(Base):
+    __tablename__ = "zalo_message_texts"
+    __table_args__ = (
+        UniqueConstraint("connector_account_id", "conversation_id", "msg_id", name="uq_zalo_message_text"),
+    )
+
+    id = Column(String(36), primary_key=True)
+    connector_account_id = Column(String(36), ForeignKey("zalo_connector_accounts.id"), nullable=False, index=True)
+    source_id = Column(String(36), ForeignKey("zalo_sources.id"), nullable=False, index=True)
+    conversation_id = Column(String(200), nullable=False)
+    msg_id = Column(String(200), nullable=False)
+    sender_id = Column(String(200), nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False)
+    raw_text = Column(Text, nullable=False)
+    payload_digest = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ZaloDataSyncRun(Base):
+    __tablename__ = "zalo_data_sync_runs"
+    __table_args__ = (
+        Index(
+            "uq_zalo_data_sync_running_account",
+            "connector_account_id",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    connector_account_id = Column(String(36), ForeignKey("zalo_connector_accounts.id"), nullable=False, index=True)
+    status = Column(String(30), nullable=False)
+    cutoff_at = Column(DateTime(timezone=True), nullable=False)
+    deadline_at = Column(DateTime(timezone=True), nullable=False)
+    source_ids_json = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
+    counters_json = Column(JSON, nullable=False, default=dict, server_default=text("'{}'"))
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class ZaloBatch(Base):
