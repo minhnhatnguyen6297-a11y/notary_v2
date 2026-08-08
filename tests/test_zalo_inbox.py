@@ -4,18 +4,32 @@ import asyncio
 import hashlib
 import hmac
 import json
-from datetime import datetime, timedelta, timezone
+import sqlite3
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import fitz
 import pytest
 from PIL import Image
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import database
 from database import Base
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
+from models import (
+    Customer,
+    InheritanceCase,
+    InheritanceParticipant,
+    Property,
+    ZaloBatch,
+    ZaloConnectorAccount,
+    ZaloDataSyncRun,
+    ZaloMedia,
+    ZaloMessageText,
+    ZaloSource,
+)
 from services.zalo_inbox import (
     InboxConfigurationError,
     InboxConflict,
@@ -42,6 +56,57 @@ from services.zalo_inbox import (
 UTC = timezone.utc
 
 
+def _columns(db_path: Path, table: str) -> set[str]:
+    return set(_table_info(db_path, table))
+
+
+def _table_info(db_path: Path, table: str) -> dict[str, tuple[str, int, str | None]]:
+    with sqlite3.connect(db_path) as connection:
+        return {
+            row[1]: (row[2], row[3], row[4])
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+
+
+def _foreign_keys(db_path: Path, table: str) -> set[tuple[str, str, str]]:
+    with sqlite3.connect(db_path) as connection:
+        return {
+            (row[2], row[3], row[4])
+            for row in connection.execute(f"PRAGMA foreign_key_list({table})")
+        }
+
+
+def _indexes(db_path: Path, table: str) -> dict[str, tuple[int, tuple[str, ...]]]:
+    with sqlite3.connect(db_path) as connection:
+        return {
+            row[1]: (
+                row[2],
+                tuple(
+                    index_row[2]
+                    for index_row in connection.execute(f"PRAGMA index_info({row[1]})")
+                ),
+            )
+            for row in connection.execute(f"PRAGMA index_list({table})")
+        }
+
+
+def _scalar(db_path: Path, sql: str):
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute(sql).fetchone()[0]
+
+
+def _fresh_zalo_schema(db_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    database.enable_sqlite_foreign_keys(engine)
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+
+def _foreign_key_check(db_path: Path) -> list[tuple]:
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute("PRAGMA foreign_key_check").fetchall()
+
+
 @pytest.fixture()
 def db():
     engine = create_engine(
@@ -49,6 +114,7 @@ def db():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    database.enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, autocommit=False, autoflush=False)()
     try:
@@ -81,6 +147,120 @@ def _source(db, account, conversation_id="thread-1"):
     db.add(row)
     db.commit()
     return row
+
+
+def _message_text(*, row_id: str, account_id: str, source_id: str) -> ZaloMessageText:
+    return ZaloMessageText(
+        id=row_id,
+        connector_account_id=account_id,
+        source_id=source_id,
+        conversation_id="thread-1",
+        msg_id=f"message-{row_id}",
+        sender_id="sender-1",
+        sent_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        received_at=datetime(2026, 8, 4, 3, 1, tzinfo=UTC),
+        raw_text="Nội dung kiểm thử",
+        payload_digest="a" * 64,
+    )
+
+
+def _sync_run(*, row_id: str, account_id: str) -> ZaloDataSyncRun:
+    return ZaloDataSyncRun(
+        id=row_id,
+        connector_account_id=account_id,
+        status="completed",
+        cutoff_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        deadline_at=datetime(2026, 8, 4, 3, 5, tzinfo=UTC),
+        source_ids_json=[],
+        counters_json={},
+        started_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        completed_at=datetime(2026, 8, 4, 3, 1, tzinfo=UTC),
+    )
+
+
+def test_sqlite_foreign_keys_are_enabled_for_production_and_test_engines(db, tmp_path):
+    assert db.connection().exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    engine = create_engine(f"sqlite:///{(tmp_path / 'production-style.db').as_posix()}")
+    database.enable_sqlite_foreign_keys(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    engine.dispose()
+
+
+def test_zalo_message_text_rejects_orphan_account_and_source_but_accepts_valid_records(db):
+    account = _account(db)
+    source = _source(db, account)
+
+    db.add(_message_text(row_id="valid-text", account_id=account.id, source_id=source.id))
+    db.commit()
+
+    db.add(_message_text(row_id="orphan-account", account_id="missing-account", source_id=source.id))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+    db.add(_message_text(row_id="orphan-source", account_id=account.id, source_id="missing-source"))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_zalo_data_sync_run_rejects_orphan_account_but_accepts_valid_record(db):
+    account = _account(db)
+
+    db.add(_sync_run(row_id="valid-run", account_id=account.id))
+    db.commit()
+
+    db.add(_sync_run(row_id="orphan-run", account_id="missing-account"))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_fk_enforcement_keeps_valid_inheritance_records_insertable(db):
+    deceased = Customer(ho_ten="Người để lại di sản")
+    heir = Customer(ho_ten="Người thừa kế")
+    property_row = Property(so_serial="GCN-FK-1", dia_chi="Hồ Chí Minh")
+    db.add_all([deceased, heir, property_row])
+    db.commit()
+
+    case = InheritanceCase(
+        nguoi_chet_id=deceased.id,
+        tai_san_id=property_row.id,
+        ngay_lap_ho_so=date(2026, 8, 4),
+    )
+    db.add(case)
+    db.commit()
+    db.add(
+        InheritanceParticipant(
+            ho_so_id=case.id,
+            customer_id=heir.id,
+            vai_tro="Con",
+        )
+    )
+    db.commit()
+
+    assert db.connection().exec_driver_sql("PRAGMA foreign_key_check").all() == []
+
+
+def test_zalo_migration_preflight_rejects_existing_foreign_key_violation(tmp_path, monkeypatch):
+    db_path = tmp_path / "invalid.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE parent (id INTEGER PRIMARY KEY);
+            CREATE TABLE child (
+                id INTEGER PRIMARY KEY,
+                parent_id INTEGER NOT NULL REFERENCES parent(id)
+            );
+            INSERT INTO child (id, parent_id) VALUES (1, 999);
+            """
+        )
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+
+    with pytest.raises(RuntimeError, match="foreign key check failed"):
+        database.migrate_zalo_schema()
 
 
 def _png(path: Path, size=(20, 10), color="white") -> None:
@@ -116,6 +296,250 @@ def _media(db, account, source, root: Path, *, media_id: str, object_name: str, 
     db.add(row)
     db.commit()
     return row
+
+
+def test_zalo_policy_migration_is_idempotent(tmp_path, monkeypatch):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE zalo_connector_accounts (id VARCHAR(36) PRIMARY KEY);
+            CREATE TABLE zalo_sources (
+                id VARCHAR(36) PRIMARY KEY,
+                connector_account_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(200) NOT NULL,
+                conversation_type VARCHAR(20) NOT NULL,
+                display_name VARCHAR(300) NOT NULL,
+                enabled BOOLEAN NOT NULL
+            );
+            INSERT INTO zalo_connector_accounts (id) VALUES ('account-1');
+            INSERT INTO zalo_sources (
+                id, connector_account_id, conversation_id, conversation_type, display_name, enabled
+            ) VALUES ('source-1', 'account-1', 'thread-1', 'user', 'Legacy source', 1);
+            """
+        )
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+
+    database.migrate_zalo_schema()
+    database.migrate_zalo_schema()
+
+    assert _foreign_key_check(db_path) == []
+
+    assert {
+        "source_type",
+        "enabled_explicit",
+        "acked_enabled",
+        "policy_version",
+        "policy_acked_version",
+        "last_activity_at",
+    } <= _columns(db_path, "zalo_sources")
+    assert {
+        "intake_consented_at",
+        "policy_version",
+        "policy_acked_version",
+        "source_sync_request_version",
+        "source_sync_acked_version",
+        "gap_started_at",
+        "text_storage_full",
+    } <= _columns(db_path, "zalo_connector_accounts")
+    assert _columns(db_path, "zalo_message_texts")
+    assert _columns(db_path, "zalo_data_sync_runs")
+    assert _scalar(db_path, "SELECT enabled_explicit FROM zalo_sources WHERE id='source-1'") is None
+    assert _scalar(db_path, "SELECT enabled FROM zalo_sources WHERE id='source-1'") == 1
+    index_sql = _scalar(
+        db_path,
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='uq_zalo_data_sync_running_account'",
+    )
+    assert " ".join(index_sql.split()) == (
+        "CREATE UNIQUE INDEX uq_zalo_data_sync_running_account "
+        "ON zalo_data_sync_runs(connector_account_id) WHERE status = 'running'"
+    )
+
+
+def test_zalo_policy_migration_matches_fresh_schema_contract(tmp_path, monkeypatch):
+    migrated_path = tmp_path / "migrated.db"
+    fresh_path = tmp_path / "fresh.db"
+    with sqlite3.connect(migrated_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE zalo_connector_accounts (id VARCHAR(36) PRIMARY KEY);
+            CREATE TABLE zalo_sources (
+                id VARCHAR(36) PRIMARY KEY,
+                connector_account_id VARCHAR(36) NOT NULL,
+                conversation_id VARCHAR(200) NOT NULL,
+                conversation_type VARCHAR(20) NOT NULL,
+                display_name VARCHAR(300) NOT NULL,
+                enabled BOOLEAN NOT NULL
+            );
+            INSERT INTO zalo_connector_accounts (id) VALUES ('account-1');
+            INSERT INTO zalo_sources (
+                id, connector_account_id, conversation_id, conversation_type, display_name, enabled
+            ) VALUES ('source-1', 'account-1', 'thread-1', 'user', 'Legacy source', 1);
+            """
+        )
+    monkeypatch.setattr(database, "DB_PATH", migrated_path)
+
+    database.migrate_zalo_schema()
+    _fresh_zalo_schema(fresh_path)
+
+    assert _foreign_key_check(migrated_path) == []
+    assert _foreign_key_check(fresh_path) == []
+
+    expected_defaults = {
+        "zalo_connector_accounts": {
+            "policy_version": ("INTEGER", 1, "0"),
+            "policy_acked_version": ("INTEGER", 1, "0"),
+            "source_sync_request_version": ("INTEGER", 1, "0"),
+            "source_sync_acked_version": ("INTEGER", 1, "0"),
+            "text_storage_full": ("BOOLEAN", 1, "0"),
+        },
+        "zalo_sources": {
+            "policy_version": ("INTEGER", 1, "0"),
+            "policy_acked_version": ("INTEGER", 1, "0"),
+        },
+        "zalo_message_texts": {
+            "sender_id": ("VARCHAR(200)", 1, None),
+            "sent_at": ("DATETIME", 1, None),
+            "received_at": ("DATETIME", 1, None),
+            "created_at": ("DATETIME", 1, "CURRENT_TIMESTAMP"),
+        },
+        "zalo_data_sync_runs": {
+            "source_ids_json": ("JSON", 1, "'[]'"),
+            "counters_json": ("JSON", 1, "'{}'"),
+        },
+    }
+    for table, columns in expected_defaults.items():
+        fresh_columns = _table_info(fresh_path, table)
+        migrated_columns = _table_info(migrated_path, table)
+        for column, expected in columns.items():
+            assert fresh_columns[column] == expected
+            assert migrated_columns[column] == expected
+
+    assert _table_info(fresh_path, "zalo_sources")["enabled_explicit"] == ("BOOLEAN", 0, "0")
+    assert _table_info(migrated_path, "zalo_sources")["enabled_explicit"] == ("BOOLEAN", 0, None)
+    assert _scalar(migrated_path, "SELECT enabled_explicit FROM zalo_sources WHERE id='source-1'") is None
+
+    expected_text_fks = {
+        ("zalo_connector_accounts", "connector_account_id", "id"),
+        ("zalo_sources", "source_id", "id"),
+    }
+    assert _foreign_keys(fresh_path, "zalo_message_texts") == expected_text_fks
+    assert _foreign_keys(migrated_path, "zalo_message_texts") == expected_text_fks
+    assert _foreign_keys(fresh_path, "zalo_data_sync_runs") == {
+        ("zalo_connector_accounts", "connector_account_id", "id"),
+    }
+    assert _foreign_keys(migrated_path, "zalo_data_sync_runs") == {
+        ("zalo_connector_accounts", "connector_account_id", "id"),
+    }
+
+    for db_path in (fresh_path, migrated_path):
+        indexes = _indexes(db_path, "zalo_message_texts")
+        assert (1, ("connector_account_id", "conversation_id", "msg_id")) in set(
+            indexes.values()
+        )
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO zalo_message_texts (
+                    id, connector_account_id, source_id, conversation_id, msg_id, sender_id,
+                    sent_at, received_at, raw_text, payload_digest
+                ) VALUES ('text-1', 'account-1', 'source-1', 'thread-1', 'message-1', 'sender-1',
+                          '2026-08-04 03:00:00', '2026-08-04 03:01:00', 'text', 'digest')
+                """
+            )
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO zalo_message_texts (
+                        id, connector_account_id, source_id, conversation_id, msg_id, sender_id,
+                        sent_at, received_at, raw_text, payload_digest
+                    ) VALUES ('text-2', 'account-1', 'source-1', 'thread-1', 'message-1', 'sender-2',
+                              '2026-08-04 03:02:00', '2026-08-04 03:03:00', 'text', 'digest')
+                    """
+                )
+
+
+def test_zalo_policy_migration_models_have_additive_defaults(db):
+    account = _account(db)
+    source = _source(db, account)
+
+    assert account.intake_consented_at is None
+    assert account.policy_version == account.policy_acked_version == 0
+    assert account.source_sync_request_version == account.source_sync_acked_version == 0
+    assert account.gap_started_at is None
+    assert account.text_storage_full is False
+    assert source.source_type is None
+    assert source.enabled_explicit is False
+    assert source.acked_enabled is None
+    assert source.policy_version == source.policy_acked_version == 0
+    assert source.last_activity_at is None
+
+
+def test_zalo_message_text_rejects_duplicate_message_identity(db):
+    from models import ZaloMessageText
+
+    account = _account(db)
+    source = _source(db, account)
+    values = dict(
+        connector_account_id=account.id,
+        source_id=source.id,
+        conversation_id=source.conversation_id,
+        msg_id="text-1",
+        sender_id="sender-1",
+        sent_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        received_at=datetime(2026, 8, 4, 3, 1, tzinfo=UTC),
+        raw_text="Nội dung kiểm thử",
+        payload_digest="a" * 64,
+    )
+    db.add(ZaloMessageText(id="text-row-1", **values))
+    db.commit()
+    db.add(ZaloMessageText(id="text-row-2", **values))
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
+
+
+def test_zalo_data_sync_model_persists_frozen_json(db):
+    from models import ZaloDataSyncRun
+
+    account = _account(db)
+    source_ids = ["source-1", "source-2"]
+    counters = {"received": 2, "persisted": 1}
+    run = ZaloDataSyncRun(
+        id="sync-1",
+        connector_account_id=account.id,
+        status="running",
+        cutoff_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+        deadline_at=datetime(2026, 8, 4, 3, 5, tzinfo=UTC),
+        source_ids_json=source_ids,
+        counters_json=counters,
+        started_at=datetime(2026, 8, 4, 3, 0, tzinfo=UTC),
+    )
+    db.add(run)
+    db.commit()
+    source_ids.append("source-3")
+    counters["received"] = 9
+    db.expire_all()
+
+    persisted = db.query(ZaloDataSyncRun).filter_by(id=run.id).one()
+    assert persisted.source_ids_json == ["source-1", "source-2"]
+    assert persisted.counters_json == {"received": 2, "persisted": 1}
+
+    db.add(
+        ZaloDataSyncRun(
+            id="sync-2",
+            connector_account_id=account.id,
+            status="running",
+            cutoff_at=run.cutoff_at,
+            deadline_at=run.deadline_at,
+            source_ids_json=[],
+            counters_json={},
+            started_at=run.started_at,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.commit()
+    db.rollback()
 
 
 def test_expired_qr_is_not_public_state(db):

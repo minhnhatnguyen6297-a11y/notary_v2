@@ -89,7 +89,7 @@ function Test-ZaloInboxRelevantChange {
     foreach ($File in $ChangedFiles) {
         $Normalized = $File -replace "\\", "/"
         if (
-            $Normalized -in @("models.py", "main.py", ".env.example") -or
+            $Normalized -in @("models.py", "database.py", "main.py", ".env.example") -or
             $Normalized -eq "routers/zalo_inbox.py" -or
             $Normalized -eq "services/zalo_inbox.py" -or
             $Normalized -eq "frontend/templates/zalo_inbox.html" -or
