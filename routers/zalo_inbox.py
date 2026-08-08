@@ -466,6 +466,7 @@ def connector_config(
         "sources": [
             {
                 "conversation_id": source.conversation_id,
+                "display_name": source.display_name,
                 "source_type": source.source_type,
                 "enabled": bool(source.enabled),
                 "desired_enabled": bool(source.enabled),

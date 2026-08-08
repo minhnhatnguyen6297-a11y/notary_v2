@@ -142,6 +142,7 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
             "source_sync_acked_version": 0,
             "sources": [{
                 "conversation_id": "friend-thread",
+                "display_name": "Bạn A",
                 "source_type": "friend",
                 "enabled": False,
                 "desired_enabled": False,
@@ -269,6 +270,7 @@ def test_connector_config_returns_requested_account_ack_baselines_as_ints(tmp_pa
         "source_sync_acked_version": 12,
         "sources": [{
             "conversation_id": "selected",
+            "display_name": "Selected",
             "source_type": "friend",
             "enabled": True,
             "desired_enabled": True,
@@ -567,6 +569,7 @@ def test_api_batch_pdf_and_safe_serialization(tmp_path, monkeypatch):
             "source_sync_acked_version": 0,
             "sources": [{
                 "conversation_id": "thread-1",
+                "display_name": "Khách A",
                 "source_type": "friend",
                 "enabled": True,
                 "desired_enabled": True,
