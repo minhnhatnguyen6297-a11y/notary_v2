@@ -44,6 +44,36 @@ test('WebhookClient signs events and reads connector-only allowlist config', asy
   assert.equal(calls[1].url, 'http://backend/zalo-inbox/api/connectors/account-1/config');
 });
 
+test('WebhookClient sends exact versioned policy and source-sync ACK events', async () => {
+  const events = [];
+  const client = new WebhookClient({
+    baseUrl: 'http://backend',
+    secret: 'secret',
+    fetchImpl: async (_url, options) => {
+      events.push(JSON.parse(options.body));
+      return jsonResponse({ack: true});
+    },
+  });
+
+  await client.ackPolicy('account-1', 7);
+  await client.ackSourceSync('account-1', 3);
+
+  assert.deepEqual(events, [
+    {
+      schema_version: 1,
+      event_type: 'policy_ack',
+      connector_account_id: 'account-1',
+      policy_version: 7,
+    },
+    {
+      schema_version: 1,
+      event_type: 'source_sync_ack',
+      connector_account_id: 'account-1',
+      source_sync_request_version: 3,
+    },
+  ]);
+});
+
 test('attachmentEvents ignores disabled/self messages and builds stable media events for enabled sources', () => {
   const base = {
     type: 1,

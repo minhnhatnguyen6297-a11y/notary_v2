@@ -30,6 +30,7 @@ export function readSettings(env = process.env) {
     quotaBytes,
     heartbeatMs: 15000,
     configPollMs: 15000,
+    sourceReconcileMs: 3600000,
   };
 }
 
@@ -39,40 +40,73 @@ export function createZaloClient(Zalo) {
   return new Zalo({logging: false});
 }
 
-export async function discoverSources(api, accountId, client) {
-  const sourceNames = new Map();
-  const friends = await api.getAllFriends();
-  for (const friend of friends) {
-    const id = String(friend.userId);
-    const name = String(friend.displayName || friend.zaloName || id);
-    sourceNames.set(id, name);
+function normalizeActivity(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  const date = Number.isFinite(number)
+    ? new Date(number < 1e12 ? number * 1000 : number)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('last activity is invalid');
+  return date.toISOString();
+}
+
+export function sourceDescriptor({conversationId, sourceType, displayName, lastActivityAt}) {
+  const conversationIdValue = String(conversationId || '').trim();
+  const displayNameValue = String(displayName || '').trim();
+  if (!conversationIdValue) throw new Error('conversation id is required');
+  if (!['friend', 'group', 'stranger', 'my_documents'].includes(sourceType)) throw new Error('source type is invalid');
+  if (!displayNameValue) throw new Error('display name is required');
+  return {
+    conversation_id: conversationIdValue,
+    conversation_type: sourceType === 'group' ? 'group' : 'user',
+    source_display_name: displayNameValue,
+    source_type: sourceType,
+    last_activity_at: normalizeActivity(lastActivityAt),
+  };
+}
+
+export async function syncSources({api, accountId, client, send2meId}) {
+  const sources = new Map();
+  const publish = async (descriptor) => {
+    sources.set(descriptor.conversation_id, descriptor);
     await client.sendEvent({
       schema_version: 1,
       event_type: 'discovery',
       connector_account_id: accountId,
-      conversation_id: id,
-      conversation_type: 'user',
-      source_display_name: name,
+      ...descriptor,
     });
+  };
+  const friends = await api.getAllFriends();
+  for (const friend of friends) {
+    const id = String(friend.userId || '');
+    await publish(sourceDescriptor({
+      conversationId: id,
+      sourceType: 'friend',
+      displayName: friend.displayName || friend.zaloName || id,
+      lastActivityAt: friend.lastActionTime,
+    }));
   }
   const groups = await api.getAllGroups();
   const groupIds = Object.keys(groups.gridVerMap || {});
   if (groupIds.length) {
     const details = await api.getGroupInfo(groupIds);
     for (const id of groupIds) {
-      const name = String(details.gridInfoMap?.[id]?.name || id);
-      sourceNames.set(id, name);
-      await client.sendEvent({
-        schema_version: 1,
-        event_type: 'discovery',
-        connector_account_id: accountId,
-        conversation_id: id,
-        conversation_type: 'group',
-        source_display_name: name,
-      });
+      await publish(sourceDescriptor({
+        conversationId: id,
+        sourceType: 'group',
+        displayName: details.gridInfoMap?.[id]?.name || id,
+      }));
     }
   }
-  return sourceNames;
+  const contextSend2meId = send2meId ?? api.getContext?.()?.loginInfo?.send2me_id;
+  if (contextSend2meId) {
+    await publish(sourceDescriptor({
+      conversationId: contextSend2meId,
+      sourceType: 'my_documents',
+      displayName: 'My Documents',
+    }));
+  }
+  return sources;
 }
 
 export async function processDownloadQueue({downloadQueue, store, outbox, client}) {
@@ -95,7 +129,8 @@ export async function processDownloadQueue({downloadQueue, store, outbox, client
 }
 
 export async function handleMessage({message, accountId, enabledIds, sourceNames, store, outbox, downloadQueue, client}) {
-  const sourceName = sourceNames.get(String(message.threadId));
+  const source = sourceNames.get(String(message.threadId));
+  const sourceName = typeof source === 'string' ? source : source?.source_display_name;
   if (!sourceName) return;
   for (const event of attachmentEvents(message, enabledIds, accountId, sourceName)) {
     const eventId = `${accountId}:${event.conversation_id}:${event.msg_id}:${event.attachment_index}`;
@@ -104,14 +139,100 @@ export async function handleMessage({message, accountId, enabledIds, sourceNames
   await processDownloadQueue({downloadQueue, store, outbox, client});
 }
 
-export async function refreshRuntimeState({accountId, client, store}) {
-  const config = await client.getConfig(accountId);
+function replaceSet(target, values) {
+  target.clear();
+  for (const value of values) target.add(value);
+  return target;
+}
+
+export async function refreshRuntimeState({
+  accountId,
+  client,
+  store,
+  api,
+  activeEnabledIds = new Set(),
+  policyVersion = 0,
+  sourceSyncAckVersion = 0,
+  send2meId,
+}) {
+  let config;
+  try {
+    config = await client.getConfig(accountId);
+  } catch {
+    return {
+      enabledIds: activeEnabledIds,
+      policyVersion,
+      sourceSyncAckVersion,
+      sources: null,
+      storageFull: null,
+    };
+  }
+  const sources = config.sources || [];
+  const ackedPolicyVersion = Number(config.policy_acked_version || 0);
+  const ackActiveIds = sources
+    .filter((source) => source.acked_enabled === true)
+    .map((source) => String(source.conversation_id));
+  replaceSet(activeEnabledIds, ackActiveIds);
+  policyVersion = ackedPolicyVersion;
+  const desiredPolicyVersion = Number(config.policy_version || 0);
+  if (desiredPolicyVersion > ackedPolicyVersion) {
+    const pendingChangedIds = new Set(sources
+      .filter((source) => Boolean(source.desired_enabled) !== Boolean(source.acked_enabled))
+      .map((source) => String(source.conversation_id)));
+    replaceSet(activeEnabledIds, [...activeEnabledIds].filter((id) => !pendingChangedIds.has(id)));
+    const stagedEnabledIds = new Set(sources
+      .filter((source) => Boolean(source.desired_enabled))
+      .map((source) => String(source.conversation_id)));
+    try {
+      await client.ackPolicy(accountId, desiredPolicyVersion);
+      replaceSet(activeEnabledIds, stagedEnabledIds);
+      policyVersion = desiredPolicyVersion;
+    } catch {
+      // Changed sources stay fail-closed until a later exact ACK succeeds.
+    }
+  }
+
+  const requestedSyncVersion = Number(config.source_sync_request_version || 0);
+  sourceSyncAckVersion = Number(config.source_sync_acked_version || 0);
+  let sourceMap = new Map(sources
+    .filter((source) => String(source.conversation_id || '').trim() && String(source.display_name || '').trim())
+    .map((source) => [String(source.conversation_id), String(source.display_name)]));
+  let discoveryComplete = false;
+  if (api && requestedSyncVersion > sourceSyncAckVersion) {
+    try {
+      sourceMap = await syncSources({api, accountId, client, send2meId});
+      discoveryComplete = true;
+    } catch {
+      // A later config poll retries the same unacknowledged request.
+    }
+    if (discoveryComplete) {
+      try {
+        await client.ackSourceSync(accountId, requestedSyncVersion);
+        sourceSyncAckVersion = requestedSyncVersion;
+      } catch {
+        // Keep discovered metadata; only ACK advancement waits for HTTP success.
+      }
+    }
+  }
   const storage = await store.prune({protectedKeys: new Set(config.protected_media_object_keys || [])});
   return {
-    enabledIds: new Set((config.sources || []).filter((source) => source.enabled).map((source) => String(source.conversation_id))),
-    sources: config.sources || [],
+    enabledIds: activeEnabledIds,
+    policyVersion,
+    sourceSyncAckVersion,
+    sources,
+    sourceMap,
     storageFull: Boolean(storage.storageFull),
   };
+}
+
+export async function installSourceSyncTriggers({listener, reconcile, sourceReconcileMs, runInitial = true, setTimer = setInterval}) {
+  const trigger = () => { void reconcile().catch(() => {}); };
+  listener.on('connected', trigger);
+  listener.on('friend_event', trigger);
+  listener.on('group_event', trigger);
+  const timer = setTimer(trigger, sourceReconcileMs);
+  if (runInitial) await reconcile().catch(() => {});
+  return timer;
 }
 
 export async function handleQrLoginEvent({event, eventTypes, stateEvent, rememberSession}) {
@@ -278,20 +399,47 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
     });
   }
 
-  const sourceNames = await discoverSources(api, accountId, client);
   const store = new MediaStore({root: settings.storageRoot, quotaBytes: settings.quotaBytes, retentionHours: settings.retentionHours});
   const outbox = new FileOutbox(path.join(settings.stateRoot, 'webhook-outbox'));
   const downloadQueue = new FileOutbox(path.join(settings.stateRoot, 'download-queue'));
+  let sourceNames = new Map();
   let enabledIds = new Set();
+  let policyVersion = 0;
+  let sourceSyncAckVersion = 0;
   let listenerConnected = false;
+  let closed = false;
+  // ponytail: global connector queue; use per-account queues only if throughput matters.
   let serial = Promise.resolve();
+  const enqueueOperation = (fn) => {
+    if (closed) return Promise.reject(new Error('connector is closed'));
+    const operation = serial.then(() => {
+      if (!closed) return fn();
+    });
+    serial = operation.catch(() => {});
+    return operation;
+  };
+
+  const reconcileSources = async () => {
+    const discovered = await syncSources({api, accountId, client});
+    sourceNames = discovered;
+  };
 
   const refresh = async () => {
     const previousStorageFull = storageFull;
-    const runtime = await refreshRuntimeState({accountId, client, store});
+    const runtime = await refreshRuntimeState({
+      accountId,
+      client,
+      store,
+      api,
+      activeEnabledIds: enabledIds,
+      policyVersion,
+      sourceSyncAckVersion,
+    });
     enabledIds = runtime.enabledIds;
-    for (const source of runtime.sources) sourceNames.set(String(source.conversation_id), String(source.display_name || sourceNames.get(String(source.conversation_id)) || ''));
-    storageFull = runtime.storageFull;
+    policyVersion = runtime.policyVersion;
+    sourceSyncAckVersion = runtime.sourceSyncAckVersion;
+    if (runtime.sourceMap) sourceNames = runtime.sourceMap;
+    if (runtime.storageFull !== null) storageFull = runtime.storageFull;
     if (!storageFull) {
       try {
         await processDownloadQueue({downloadQueue, store, outbox, client});
@@ -302,13 +450,18 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
     }
     if (previousStorageFull !== storageFull) await stateEvent(listenerHeartbeatState(listenerConnected));
     await outbox.flush(client);
+    return runtime;
   };
-  await refresh();
+  const sourceReconcile = await installSourceSyncTriggers({
+    listener: api.listener,
+    reconcile: () => enqueueOperation(reconcileSources),
+    sourceReconcileMs: settings.sourceReconcileMs,
+    runInitial: false,
+  });
 
   api.listener.on('message', (message) => {
     if (storageFull) return;
-    serial = serial
-      .then(() => handleMessage({message, accountId, enabledIds, sourceNames, store, outbox, downloadQueue, client}))
+    void enqueueOperation(() => handleMessage({message, accountId, enabledIds, sourceNames, store, outbox, downloadQueue, client}))
       .catch((error) => {
         if (/quota/i.test(String(error?.message || ''))) {
           storageFull = true;
@@ -328,15 +481,19 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
     listenerConnected = false;
     void stateEvent('disconnected').catch(() => {});
   });
+  const initialRuntime = await refresh();
+  if (initialRuntime.sourceMap === undefined) await reconcileSources().catch(() => {});
   api.listener.start({retryOnClose: true});
 
   const heartbeat = setInterval(() => {
     void stateEvent(listenerHeartbeatState(listenerConnected)).catch(() => {});
   }, settings.heartbeatMs);
-  const poll = setInterval(() => { serial = serial.then(refresh).catch(() => {}); }, settings.configPollMs);
+  const poll = setInterval(() => { void enqueueOperation(refresh).catch(() => {}); }, settings.configPollMs);
   const close = () => {
+    closed = true;
     clearInterval(heartbeat);
     clearInterval(poll);
+    clearInterval(sourceReconcile);
     if (parentWatch) clearInterval(parentWatch);
     api.listener.stop();
   };

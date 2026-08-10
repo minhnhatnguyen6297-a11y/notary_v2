@@ -39,6 +39,24 @@ export class WebhookClient {
     return this.#json(response);
   }
 
+  ackPolicy(accountId, policyVersion) {
+    return this.sendEvent({
+      schema_version: 1,
+      event_type: 'policy_ack',
+      connector_account_id: accountId,
+      policy_version: policyVersion,
+    });
+  }
+
+  ackSourceSync(accountId, sourceSyncRequestVersion) {
+    return this.sendEvent({
+      schema_version: 1,
+      event_type: 'source_sync_ack',
+      connector_account_id: accountId,
+      source_sync_request_version: sourceSyncRequestVersion,
+    });
+  }
+
   async getConfig(accountId) {
     const timestamp = String(Math.floor(this.now() / 1000));
     const response = await this.fetch(`${this.baseUrl}/zalo-inbox/api/connectors/${encodeURIComponent(accountId)}/config`, {
