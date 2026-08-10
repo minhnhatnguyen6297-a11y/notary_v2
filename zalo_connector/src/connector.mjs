@@ -1,7 +1,7 @@
 import {mkdir, readFile, rename, unlink, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
-import {FileOutbox, MediaStore, WebhookClient, attachmentEvents, mediaObjectKey} from './core.mjs';
+import {FileOutbox, MediaStore, WebhookClient, mediaObjectKey, normalizeMessage} from './core.mjs';
 
 const required = [
   'ZALO_INBOX_BACKEND_URL',
@@ -35,9 +35,10 @@ export function readSettings(env = process.env) {
 }
 
 const observedAt = () => new Date().toISOString();
+const MY_DOCUMENTS_REALTIME_VERIFIED = false;
 
 export function createZaloClient(Zalo) {
-  return new Zalo({logging: false});
+  return new Zalo({logging: false, selfListen: true});
 }
 
 function normalizeActivity(value) {
@@ -63,6 +64,96 @@ export function sourceDescriptor({conversationId, sourceType, displayName, lastA
     source_type: sourceType,
     last_activity_at: normalizeActivity(lastActivityAt),
   };
+}
+
+export async function resolveUnknownSource(api, message, send2meId) {
+  const conversationId = String(message?.threadId || '').trim();
+  if (!conversationId) return {status: 'retryable_failure', error_code: 'source_response_invalid'};
+  if (conversationId === String(send2meId || '')) {
+    return {status: 'resolved', source: sourceDescriptor({
+      conversationId,
+      sourceType: 'my_documents',
+      displayName: 'My Documents',
+    })};
+  }
+  if (![0, 1].includes(message?.type)) {
+    return {status: 'retryable_failure', error_code: 'source_response_invalid'};
+  }
+  try {
+    if (message?.type === 1) {
+      const response = await api.getGroupInfo([conversationId]);
+      const profile = response?.gridInfoMap?.[conversationId];
+      const profileId = String(profile?.groupId || profile?.grid || conversationId);
+      if (!profile || profileId !== conversationId || !String(profile.name || '').trim()) {
+        return {status: 'retryable_failure', error_code: 'source_response_invalid'};
+      }
+      return {status: 'resolved', source: sourceDescriptor({
+        conversationId,
+        sourceType: 'group',
+        displayName: profile.name,
+      })};
+    }
+    const response = await api.getUserInfo(conversationId);
+    const profile = response?.changed_profiles?.[conversationId] ?? response?.[conversationId];
+    const profileId = String(profile?.userId || profile?.user_id || '');
+    const displayName = String(profile?.displayName || profile?.zaloName || '').trim();
+    if (!profile || profileId !== conversationId || !displayName || ![0, 1].includes(profile.isFr)) {
+      return {status: 'retryable_failure', error_code: 'source_response_invalid'};
+    }
+    const source = sourceDescriptor({
+      conversationId,
+      sourceType: profile.isFr === 0 ? 'stranger' : 'friend',
+      displayName,
+      lastActivityAt: profile.lastActionTime,
+    });
+    return {status: profile.isFr === 0 ? 'confirmed_stranger' : 'resolved', source};
+  } catch {
+    return {status: 'retryable_failure', error_code: 'source_lookup_failed'};
+  }
+}
+
+export async function processUnknownSourceQueue({
+  api,
+  accountId,
+  send2meId,
+  unknownQueue,
+  client,
+  refresh,
+  enabledIds,
+  sourceNames,
+  handleKnownMessage,
+  reportError = () => {},
+  now = Date.now,
+}) {
+  for (const {name, event} of await unknownQueue.entries()) {
+    const current = now();
+    if (event.next_attempt_at && Date.parse(event.next_attempt_at) > current) continue;
+    const result = await resolveUnknownSource(api, event.message, send2meId);
+    if (result.status === 'retryable_failure') {
+      const attempts = Number(event.attempts || 0) + 1;
+      if (attempts >= 3) {
+        await unknownQueue.remove(name);
+        await reportError(result.error_code);
+      } else {
+        const nextAttemptAt = new Date(current + 1000 * 2 ** (attempts - 1)).toISOString();
+        await unknownQueue.replace(name, {...event, attempts, next_attempt_at: nextAttemptAt});
+      }
+      continue;
+    }
+    await client.sendEvent({
+      schema_version: 1,
+      event_type: 'discovery',
+      connector_account_id: accountId,
+      ...result.source,
+      last_activity_at: normalizeActivity(event.message?.data?.ts) || observedAt(),
+    });
+    sourceNames.set(result.source.conversation_id, result.source);
+    if (result.status === 'resolved') {
+      await refresh();
+      if (enabledIds.has(result.source.conversation_id)) await handleKnownMessage(event.message, false);
+    }
+    await unknownQueue.remove(name);
+  }
 }
 
 export async function syncSources({api, accountId, client, send2meId}) {
@@ -110,31 +201,86 @@ export async function syncSources({api, accountId, client, send2meId}) {
 }
 
 export async function processDownloadQueue({downloadQueue, store, outbox, client}) {
-  for (const {name, event} of await downloadQueue.entries()) {
+  const entries = await downloadQueue.entries();
+  const assemblies = new Map(entries
+    .filter(({event}) => event.record_type === 'message')
+    .map((entry) => [entry.event.message_key, entry]));
+  for (const {name, event} of entries.filter(({event}) => event.record_type === 'attachment')) {
+    const assembly = assemblies.get(event.message_key);
+    if (!assembly) continue;
     const objectKey = mediaObjectKey(
-      event.connector_account_id,
-      event.msg_id,
-      event.attachment_index,
-      event.mime_type,
-      event.sent_at,
+      assembly.event.envelope.connector_account_id,
+      assembly.event.envelope.msg_id,
+      event.attachment.attachment_index,
+      event.attachment.mime_type,
+      assembly.event.envelope.sent_at,
     );
-    const stored = await store.download(objectKey, event.download_url);
-    const published = {...event, media_object_key: objectKey, size_bytes: stored.sizeBytes};
-    delete published.download_url;
-    delete published.original_filename;
-    await outbox.enqueue(`${event.connector_account_id}:${event.conversation_id}:${event.msg_id}:${event.attachment_index}`, published);
+    const stored = await store.download(objectKey, event.attachment.download_url);
+    assembly.event.completed[event.attachment.attachment_index] = {
+      attachment_index: event.attachment.attachment_index,
+      mime_type: event.attachment.mime_type,
+      media_object_key: objectKey,
+      size_bytes: stored.sizeBytes,
+    };
+    await downloadQueue.enqueue(event.message_key, assembly.event);
+    await downloadQueue.remove(name);
+  }
+  for (const {name, event} of assemblies.values()) {
+    if (event.completed.filter(Boolean).length !== event.envelope.attachments.length) continue;
+    const published = {...event.envelope, attachments: event.completed};
+    await outbox.enqueue(event.message_key, published);
     await downloadQueue.remove(name);
   }
   await outbox.flush(client);
 }
 
-export async function handleMessage({message, accountId, enabledIds, sourceNames, store, outbox, downloadQueue, client}) {
-  const source = sourceNames.get(String(message.threadId));
-  const sourceName = typeof source === 'string' ? source : source?.source_display_name;
-  if (!sourceName) return;
-  for (const event of attachmentEvents(message, enabledIds, accountId, sourceName)) {
-    const eventId = `${accountId}:${event.conversation_id}:${event.msg_id}:${event.attachment_index}`;
-    await downloadQueue.enqueue(eventId, event);
+export async function handleMessage({message, accountId, enabledIds, sourceNames, send2meId, store, outbox, downloadQueue, client, storageFull = false}, reportActivity = true) {
+  const conversationId = String(message?.threadId || '');
+  const source = sourceNames.get(conversationId);
+  if (!source?.source_display_name) return;
+  const messageId = String(message?.data?.msgId || message?.data?.cliMsgId || '').trim();
+  const senderId = String(message?.data?.uidFrom || message?.data?.senderId || '').trim();
+  if (!messageId || !senderId) return;
+  if (!enabledIds.has(conversationId)) {
+    if (reportActivity) {
+      const timestamp = Number(message?.data?.ts);
+      await client.sendEvent({schema_version: 1, event_type: 'discovery', connector_account_id: accountId, ...source,
+        last_activity_at: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : observedAt()});
+    }
+    return;
+  }
+  if (source.source_type === 'my_documents' && !MY_DOCUMENTS_REALTIME_VERIFIED) return;
+  let envelope = normalizeMessage(message, accountId, source, send2meId);
+  if (!envelope) {
+    if (reportActivity) {
+      const timestamp = Number(message?.data?.ts);
+      await client.sendEvent({schema_version: 1, event_type: 'discovery', connector_account_id: accountId, ...source,
+        last_activity_at: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : observedAt()});
+    }
+    return;
+  }
+  if (storageFull) envelope = {...envelope, attachments: []};
+  const messageKey = `${accountId}:${envelope.conversation_id}:${envelope.msg_id}`;
+  const existing = (await downloadQueue.entries()).find(({event}) => event.record_type === 'message' && event.message_key === messageKey)?.event;
+  const assembly = existing || {record_type: 'message', message_key: messageKey, envelope, completed: Array(envelope.attachments.length).fill(null)};
+  if (!existing) await downloadQueue.enqueue(messageKey, assembly);
+  const timestamp = Number(message?.data?.ts);
+  if (reportActivity) {
+    await client.sendEvent({
+      schema_version: 1,
+      event_type: 'discovery',
+      connector_account_id: accountId,
+      ...source,
+      last_activity_at: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : observedAt(),
+    });
+  }
+  for (const attachment of envelope.attachments) {
+    if (assembly.completed[attachment.attachment_index]) continue;
+    await downloadQueue.enqueue(`${messageKey}:${attachment.attachment_index}`, {
+      record_type: 'attachment',
+      message_key: messageKey,
+      attachment,
+    });
   }
   await processDownloadQueue({downloadQueue, store, outbox, client});
 }
@@ -167,14 +313,37 @@ export async function refreshRuntimeState({
       storageFull: null,
     };
   }
-  const sources = config.sources || [];
-  const ackedPolicyVersion = Number(config.policy_acked_version || 0);
+  let sources;
+  let sourceMap;
+  let ackedPolicyVersion;
+  let desiredPolicyVersion;
+  let requestedSyncVersion;
+  let configuredSourceSyncAckVersion;
+  let protectedKeys;
+  try {
+    if (!config || !Array.isArray(config.sources) || !Array.isArray(config.protected_media_object_keys)) throw new Error('config is invalid');
+    sources = config.sources;
+    ackedPolicyVersion = Number(config.policy_acked_version || 0);
+    desiredPolicyVersion = Number(config.policy_version || 0);
+    requestedSyncVersion = Number(config.source_sync_request_version || 0);
+    configuredSourceSyncAckVersion = Number(config.source_sync_acked_version || 0);
+    if (![ackedPolicyVersion, desiredPolicyVersion, requestedSyncVersion, configuredSourceSyncAckVersion].every(Number.isSafeInteger)) throw new Error('config version is invalid');
+    protectedKeys = new Set(config.protected_media_object_keys.map((key) => String(key)));
+    sourceMap = new Map(sources.map((source) => [String(source.conversation_id), sourceDescriptor({
+        conversationId: source.conversation_id,
+        sourceType: source.source_type || (source.conversation_type === 'group' ? 'group' : 'friend'),
+        displayName: source.display_name,
+        lastActivityAt: source.last_activity_at,
+      })]));
+  } catch {
+    return {enabledIds: activeEnabledIds, policyVersion, sourceSyncAckVersion, sources: null, sourceMap: null, storageFull: null};
+  }
   const ackActiveIds = sources
     .filter((source) => source.acked_enabled === true)
     .map((source) => String(source.conversation_id));
   replaceSet(activeEnabledIds, ackActiveIds);
   policyVersion = ackedPolicyVersion;
-  const desiredPolicyVersion = Number(config.policy_version || 0);
+
   if (desiredPolicyVersion > ackedPolicyVersion) {
     const pendingChangedIds = new Set(sources
       .filter((source) => Boolean(source.desired_enabled) !== Boolean(source.acked_enabled))
@@ -192,11 +361,7 @@ export async function refreshRuntimeState({
     }
   }
 
-  const requestedSyncVersion = Number(config.source_sync_request_version || 0);
-  sourceSyncAckVersion = Number(config.source_sync_acked_version || 0);
-  let sourceMap = new Map(sources
-    .filter((source) => String(source.conversation_id || '').trim() && String(source.display_name || '').trim())
-    .map((source) => [String(source.conversation_id), String(source.display_name)]));
+  sourceSyncAckVersion = configuredSourceSyncAckVersion;
   let discoveryComplete = false;
   if (api && requestedSyncVersion > sourceSyncAckVersion) {
     try {
@@ -214,7 +379,7 @@ export async function refreshRuntimeState({
       }
     }
   }
-  const storage = await store.prune({protectedKeys: new Set(config.protected_media_object_keys || [])});
+  const storage = await store.prune({protectedKeys});
   return {
     enabledIds: activeEnabledIds,
     policyVersion,
@@ -402,6 +567,8 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
   const store = new MediaStore({root: settings.storageRoot, quotaBytes: settings.quotaBytes, retentionHours: settings.retentionHours});
   const outbox = new FileOutbox(path.join(settings.stateRoot, 'webhook-outbox'));
   const downloadQueue = new FileOutbox(path.join(settings.stateRoot, 'download-queue'));
+  const unknownQueue = new FileOutbox(path.join(settings.stateRoot, 'unknown-source-queue'));
+  const send2meId = api.getContext?.()?.loginInfo?.send2me_id;
   let sourceNames = new Map();
   let enabledIds = new Set();
   let policyVersion = 0;
@@ -420,11 +587,35 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
   };
 
   const reconcileSources = async () => {
-    const discovered = await syncSources({api, accountId, client});
+    const discovered = await syncSources({api, accountId, client, send2meId});
     sourceNames = discovered;
   };
 
-  const refresh = async () => {
+  const handleKnownMessage = (message, reportActivity) => handleMessage({
+    message,
+    accountId,
+    enabledIds,
+    sourceNames,
+    send2meId,
+    store,
+    outbox,
+    downloadQueue,
+    client,
+    storageFull,
+  }, reportActivity);
+  const retryUnknownSources = () => processUnknownSourceQueue({
+    api,
+    accountId,
+    send2meId,
+    unknownQueue,
+    client,
+    refresh: () => refresh(false),
+    enabledIds,
+    sourceNames,
+    handleKnownMessage,
+    reportError: (errorCode) => stateEvent(listenerHeartbeatState(listenerConnected), {error_code: errorCode}),
+  });
+  const refresh = async (retryUnknown = true) => {
     const previousStorageFull = storageFull;
     const runtime = await refreshRuntimeState({
       accountId,
@@ -434,6 +625,7 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
       activeEnabledIds: enabledIds,
       policyVersion,
       sourceSyncAckVersion,
+      send2meId,
     });
     enabledIds = runtime.enabledIds;
     policyVersion = runtime.policyVersion;
@@ -450,6 +642,7 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
     }
     if (previousStorageFull !== storageFull) await stateEvent(listenerHeartbeatState(listenerConnected));
     await outbox.flush(client);
+    if (retryUnknown) await retryUnknownSources();
     return runtime;
   };
   const sourceReconcile = await installSourceSyncTriggers({
@@ -460,8 +653,22 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
   });
 
   api.listener.on('message', (message) => {
-    if (storageFull) return;
-    void enqueueOperation(() => handleMessage({message, accountId, enabledIds, sourceNames, store, outbox, downloadQueue, client}))
+    void enqueueOperation(async () => {
+      const conversationId = String(message?.threadId || '').trim();
+      const messageId = String(message?.data?.msgId || message?.data?.cliMsgId || '').trim();
+      const senderId = String(message?.data?.uidFrom || message?.data?.senderId || '').trim();
+      if (!conversationId || !messageId || !senderId) return;
+      if (sourceNames.has(conversationId)) {
+        await handleKnownMessage(message);
+      } else {
+        await unknownQueue.enqueue(`${accountId}:${conversationId}:${messageId}`, {
+          record_type: 'unknown_source',
+          message,
+          attempts: 0,
+        });
+      }
+      await retryUnknownSources();
+    })
       .catch((error) => {
         if (/quota/i.test(String(error?.message || ''))) {
           storageFull = true;

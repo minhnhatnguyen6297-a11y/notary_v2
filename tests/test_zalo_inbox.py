@@ -45,6 +45,7 @@ from services.zalo_inbox import (
     export_filename,
     freeze_outputs,
     ingest_webhook_event,
+    ingest_message_envelope,
     prepare_batch,
     retry_cached_ocr,
     retry_export,
@@ -1117,6 +1118,311 @@ def test_webhook_duplicate_is_idempotent_and_conflict_is_rejected(db, tmp_path):
     changed = dict(payload, size_bytes=payload["size_bytes"] + 1)
     with pytest.raises(InboxConflict):
         ingest_webhook_event(db, changed, storage_root=tmp_path)
+
+
+def test_message_with_text_and_two_attachments_is_component_idempotent(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "10000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    attachments = []
+    for index in range(2):
+        path = tmp_path / account.id / f"media-{index}.png"
+        path.parent.mkdir(exist_ok=True)
+        _png(path, color=(index * 20, 0, 0))
+        attachments.append({
+            "attachment_index": index,
+            "media_object_key": f"{account.id}/media-{index}.png",
+            "mime_type": "image/png",
+            "size_bytes": path.stat().st_size,
+        })
+    envelope = {
+        "schema_version": 1,
+        "event_type": "message",
+        "connector_account_id": account.id,
+        "conversation_id": source.conversation_id,
+        "conversation_type": "user",
+        "source_type": "friend",
+        "source_display_name": source.display_name,
+        "msg_id": "mixed-1",
+        "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z",
+        "raw_text": "Nội dung nguyên văn",
+        "attachments": attachments,
+    }
+
+    first = ingest_message_envelope(db, envelope, tmp_path)
+    replay = ingest_message_envelope(db, envelope, tmp_path)
+
+    assert first["components"] == {
+        "text": "imported",
+        "media": [
+            {"attachment_index": 0, "status": "imported"},
+            {"attachment_index": 1, "status": "imported"},
+        ],
+    }
+    assert replay["components"] == {
+        "text": "duplicate",
+        "media": [
+            {"attachment_index": 0, "status": "duplicate"},
+            {"attachment_index": 1, "status": "duplicate"},
+        ],
+    }
+    assert db.query(ZaloMessageText).count() == 1
+    assert db.query(ZaloMedia).count() == 2
+
+
+def test_message_ingestion_never_logs_private_sentinels(db, tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "10000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    path = tmp_path / account.id / "private-filename.png"
+    path.parent.mkdir()
+    _png(path)
+    envelope = {
+        "schema_version": 1,
+        "event_type": "message",
+        "connector_account_id": account.id,
+        "conversation_id": "private-conversation",
+        "conversation_type": "user",
+        "source_type": "friend",
+        "source_display_name": "Private Source Name",
+        "msg_id": "private-message-id",
+        "sender_id": "private-sender-id",
+        "sent_at": "2026-08-04T03:00:00Z",
+        "raw_text": "PRIVATE RAW TEXT",
+        "attachments": [{
+            "attachment_index": 0,
+            "media_object_key": f"{account.id}/private-filename.png",
+            "mime_type": "image/png",
+            "size_bytes": path.stat().st_size,
+        }],
+    }
+    source.conversation_id = envelope["conversation_id"]
+    db.commit()
+    caplog.set_level("DEBUG")
+
+    ingest_message_envelope(db, envelope, tmp_path)
+    with pytest.raises(InboxValidationError):
+        ingest_message_envelope(db, {**envelope, "raw_text": {"upstream": "PRIVATE ERROR"}}, tmp_path)
+
+    for sentinel in (
+        "PRIVATE RAW TEXT", "PRIVATE ERROR", "private-sender-id", "private-conversation",
+        "Private Source Name", "private-filename.png", "private-message-id",
+    ):
+        assert sentinel not in caplog.text
+
+
+def test_my_documents_message_remains_metadata_only_until_live_verification(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "10000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account, "my-documents")
+    source.source_type = "my_documents"
+    source.enabled_explicit = False
+    source.acked_enabled = True
+    account.intake_consented_at = datetime(2026, 8, 4, 2, tzinfo=UTC)
+    source.policy_version = source.policy_acked_version = account.policy_version = account.policy_acked_version = 1
+    path = tmp_path / account.id / "my-documents.png"
+    path.parent.mkdir()
+    _png(path)
+    db.commit()
+
+    result = ingest_message_envelope(db, {
+        "schema_version": 1, "event_type": "message", "connector_account_id": account.id,
+        "conversation_id": source.conversation_id, "conversation_type": "user",
+        "source_type": "my_documents", "source_display_name": source.display_name,
+        "msg_id": "my-documents-1", "sender_id": "sender-secret",
+        "sent_at": "2026-08-04T03:00:00Z", "raw_text": "private saved text",
+        "attachments": [{
+            "attachment_index": 0, "media_object_key": f"{account.id}/my-documents.png",
+            "mime_type": "image/png", "size_bytes": path.stat().st_size,
+        }],
+    }, tmp_path)
+
+    assert result["ignored"] is True
+    assert db.query(ZaloMessageText).count() == 0
+    assert db.query(ZaloMedia).count() == 0
+    assert source.last_activity_at.replace(tzinfo=UTC) == datetime(2026, 8, 4, 3, tzinfo=UTC)
+
+
+def test_changed_text_rejects_whole_envelope_without_partial_persistence(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "10000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    path = tmp_path / account.id / "atomic-text.png"
+    path.parent.mkdir()
+    _png(path)
+    envelope = {
+        "schema_version": 1, "event_type": "message", "connector_account_id": account.id,
+        "conversation_id": source.conversation_id, "conversation_type": "user", "source_type": "friend",
+        "source_display_name": source.display_name, "msg_id": "atomic-text", "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z", "raw_text": "original",
+        "attachments": [{"attachment_index": 0, "media_object_key": f"{account.id}/atomic-text.png",
+                         "mime_type": "image/png", "size_bytes": path.stat().st_size}],
+    }
+    ingest_message_envelope(db, envelope, tmp_path)
+
+    with pytest.raises(InboxConflict):
+        ingest_message_envelope(db, {**envelope, "raw_text": "changed"}, tmp_path)
+
+    assert db.query(ZaloMessageText).one().raw_text == "original"
+    assert db.query(ZaloMedia).count() == 1
+
+
+def test_changed_one_attachment_rejects_whole_envelope_without_text_overwrite(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "10000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    attachments = []
+    for name, color in (("first.png", (0, 0, 0)), ("changed.png", (20, 0, 0))):
+        path = tmp_path / account.id / name
+        path.parent.mkdir(exist_ok=True)
+        _png(path, color=color)
+        attachments.append({"attachment_index": 0, "media_object_key": f"{account.id}/{name}",
+                            "mime_type": "image/png", "size_bytes": path.stat().st_size})
+    envelope = {
+        "schema_version": 1, "event_type": "message", "connector_account_id": account.id,
+        "conversation_id": source.conversation_id, "conversation_type": "user", "source_type": "friend",
+        "source_display_name": source.display_name, "msg_id": "atomic-media", "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z", "raw_text": "original", "attachments": [attachments[0]],
+    }
+    ingest_message_envelope(db, envelope, tmp_path)
+
+    with pytest.raises(InboxConflict):
+        ingest_message_envelope(db, {**envelope, "raw_text": "original", "attachments": [attachments[1]]}, tmp_path)
+
+    assert db.query(ZaloMessageText).one().raw_text == "original"
+    assert db.query(ZaloMedia).one().media_object_key == attachments[0]["media_object_key"]
+
+
+def test_text_quota_pressure_does_not_block_media_and_updates_activity(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "1")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    path = tmp_path / account.id / "quota.png"
+    path.parent.mkdir()
+    _png(path)
+    result = ingest_message_envelope(db, {
+        "schema_version": 1,
+        "event_type": "message",
+        "connector_account_id": account.id,
+        "conversation_id": source.conversation_id,
+        "conversation_type": "user",
+        "source_type": "friend",
+        "source_display_name": source.display_name,
+        "msg_id": "quota-1",
+        "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z",
+        "raw_text": "too large",
+        "attachments": [{
+            "attachment_index": 0,
+            "media_object_key": f"{account.id}/quota.png",
+            "mime_type": "image/png",
+            "size_bytes": path.stat().st_size,
+        }],
+    }, tmp_path)
+
+    assert result["components"] == {
+        "text": "ignored",
+        "media": [{"attachment_index": 0, "status": "imported"}],
+    }
+    assert db.query(ZaloMessageText).count() == 0
+    assert db.query(ZaloMedia).count() == 1
+    assert account.text_storage_full is True
+    assert source.last_activity_at.replace(tzinfo=UTC) == datetime(2026, 8, 4, 3, 0, tzinfo=UTC)
+
+
+def test_oversized_incoming_text_keeps_existing_retained_text(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "5")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    retained = _message_text(row_id="retained", account_id=account.id, source_id=source.id)
+    retained.raw_text = "keep"
+    retained.received_at = datetime.now(UTC)
+    db.add(retained)
+    db.commit()
+
+    result = ingest_message_envelope(db, {
+        "schema_version": 1, "event_type": "message", "connector_account_id": account.id,
+        "conversation_id": source.conversation_id, "conversation_type": "user", "source_type": "friend",
+        "source_display_name": source.display_name, "msg_id": "oversized", "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z", "raw_text": "123456", "attachments": [],
+    }, tmp_path)
+
+    assert result["components"]["text"] == "ignored"
+    assert [row.raw_text for row in db.query(ZaloMessageText).all()] == ["keep"]
+    assert account.text_storage_full is True
+
+
+def test_invalid_text_storage_configuration_does_not_block_media(db, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "invalid")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    account = _account(db)
+    source = _source(db, account)
+    source.source_type = "friend"
+    source.enabled_explicit = None
+    db.commit()
+    assert ack_policy(db, account.id, apply_intake_consent(db, account.id)) == 1
+    path = tmp_path / account.id / "config.png"
+    path.parent.mkdir()
+    _png(path)
+
+    result = ingest_message_envelope(db, {
+        "schema_version": 1,
+        "event_type": "message",
+        "connector_account_id": account.id,
+        "conversation_id": source.conversation_id,
+        "conversation_type": "user",
+        "source_type": "friend",
+        "source_display_name": source.display_name,
+        "msg_id": "config-1",
+        "sender_id": "sender-1",
+        "sent_at": "2026-08-04T03:00:00Z",
+        "raw_text": "text",
+        "attachments": [{
+            "attachment_index": 0,
+            "media_object_key": f"{account.id}/config.png",
+            "mime_type": "image/png",
+            "size_bytes": path.stat().st_size,
+        }],
+    }, tmp_path)
+
+    assert result["components"] == {
+        "text": "ignored",
+        "media": [{"attachment_index": 0, "status": "imported"}],
+    }
+    assert account.text_storage_full is True
+    assert db.query(ZaloMedia).count() == 1
 
 
 def test_webhook_acks_but_does_not_publish_media_from_disabled_source(db, tmp_path):

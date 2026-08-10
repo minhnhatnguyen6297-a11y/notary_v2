@@ -20,10 +20,11 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
+from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloMessageText, ZaloSource
 
 UTC = timezone.utc
 QR_TTL_SECONDS = 100
+MY_DOCUMENTS_REALTIME_VERIFIED = False
 SUPPORTED_MIME = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
 PERSON_FIELDS = (
     "ho_ten",
@@ -468,6 +469,155 @@ def _source_from_payload(db: Session, payload: dict[str, Any], *, require_source
     return source
 
 
+def _positive_env_int(name: str) -> int:
+    try:
+        value = int(os.environ[name])
+    except (KeyError, ValueError) as exc:
+        raise InboxConfigurationError(f"{name} phải là số nguyên dương") from exc
+    if value <= 0:
+        raise InboxConfigurationError(f"{name} phải là số nguyên dương")
+    return value
+
+
+def ingest_message_envelope(db: Session, payload: dict[str, Any], storage_root: str | Path) -> dict[str, Any]:
+    required = ("connector_account_id", "conversation_id", "conversation_type", "source_type", "source_display_name", "msg_id", "sender_id", "sent_at")
+    if payload.get("schema_version") != 1 or payload.get("event_type") != "message" or any(payload.get(field) is None for field in required):
+        raise InboxValidationError("Message envelope thiếu field bắt buộc")
+    account_id = str(payload["connector_account_id"])
+    conversation_id = str(payload["conversation_id"])
+    msg_id = str(payload["msg_id"])
+    sender_id = str(payload["sender_id"])
+    if not account_id or not conversation_id or not msg_id or not sender_id:
+        raise InboxValidationError("Message envelope có định danh không hợp lệ")
+    account = _account_or_error(db, account_id)
+    sent_at = _parse_timestamp(payload["sent_at"])
+    raw_text = payload.get("raw_text")
+    if raw_text is not None and not isinstance(raw_text, str):
+        raise InboxValidationError("raw_text không hợp lệ")
+    attachments = payload.get("attachments", [])
+    if not isinstance(attachments, list):
+        raise InboxValidationError("attachments không hợp lệ")
+
+    checked: list[tuple[dict[str, Any], int, str]] = []
+    indexes: set[int] = set()
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or any(attachment.get(field) is None for field in ("attachment_index", "media_object_key", "mime_type", "size_bytes")):
+            raise InboxValidationError("Attachment thiếu field bắt buộc")
+        index = attachment["attachment_index"]
+        size = attachment["size_bytes"]
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0 or index in indexes:
+            raise InboxValidationError("attachment_index không hợp lệ")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise InboxValidationError("size_bytes không hợp lệ")
+        indexes.add(index)
+        resolve_media_object(storage_root, account_id, str(attachment["media_object_key"]), str(attachment["mime_type"]), size)
+        component = {
+            "connector_account_id": account_id,
+            "conversation_id": conversation_id,
+            "msg_id": msg_id,
+            "attachment_index": index,
+            "media_object_key": str(attachment["media_object_key"]),
+            "mime_type": str(attachment["mime_type"]),
+            "size_bytes": size,
+            "sent_at": _iso(sent_at),
+        }
+        checked.append((component, index, _canonical_digest(component)))
+
+    text_component = {
+        "connector_account_id": account_id,
+        "conversation_id": conversation_id,
+        "msg_id": msg_id,
+        "sender_id": sender_id,
+        "sent_at": _iso(sent_at),
+        "raw_text": raw_text,
+    }
+    existing_text = None
+    if raw_text is not None:
+        existing_text = db.query(ZaloMessageText).filter_by(
+            connector_account_id=account_id, conversation_id=conversation_id, msg_id=msg_id
+        ).first()
+        if existing_text is not None and existing_text.payload_digest != _canonical_digest(text_component):
+            raise InboxConflict("Message text trùng khóa nhưng payload khác")
+    existing_media: dict[int, ZaloMedia] = {}
+    for _component, index, digest in checked:
+        row = db.query(ZaloMedia).filter_by(
+            connector_account_id=account_id, conversation_id=conversation_id, msg_id=msg_id, attachment_index=index
+        ).first()
+        if row is not None and row.payload_digest != digest:
+            raise InboxConflict("Message media trùng khóa nhưng payload khác")
+        if row is not None:
+            existing_media[index] = row
+
+    source_payload = dict(payload, last_activity_at=_iso(sent_at))
+    source = _source_from_payload(db, source_payload, require_source_type=True)
+    eligible = (
+        account.intake_consented_at is not None
+        and source_ready(source)
+        and bool(source.enabled)
+        and source.source_type != "stranger"
+        and (source.source_type != "my_documents" or MY_DOCUMENTS_REALTIME_VERIFIED)
+    )
+    text_status = "absent" if raw_text is None else ("duplicate" if existing_text is not None else "ignored")
+    media_statuses = [
+        {"attachment_index": index, "status": "duplicate" if index in existing_media else "ignored"}
+        for _component, index, _digest in checked
+    ]
+    text_id = existing_text.id if existing_text is not None else None
+    media_ids = [existing_media[index].id for _component, index, _digest in checked if index in existing_media]
+
+    if eligible:
+        if raw_text is not None and existing_text is None:
+            try:
+                quota = _positive_env_int("ZALO_INBOX_TEXT_QUOTA_BYTES")
+                retention = _positive_env_int("ZALO_INBOX_TEXT_RETENTION_HOURS")
+            except InboxConfigurationError:
+                account.text_storage_full = True
+            else:
+                cutoff = utcnow() - timedelta(hours=retention)
+                db.query(ZaloMessageText).filter(ZaloMessageText.received_at < cutoff).delete(synchronize_session=False)
+                rows = db.query(ZaloMessageText).filter(ZaloMessageText.connector_account_id == account_id).order_by(ZaloMessageText.received_at.asc()).all()
+                needed = len(raw_text.encode("utf-8"))
+                usage = sum(len(row.raw_text.encode("utf-8")) for row in rows)
+                if needed <= quota:
+                    for row in rows:
+                        if usage + needed <= quota:
+                            break
+                        usage -= len(row.raw_text.encode("utf-8"))
+                        db.delete(row)
+                if needed <= quota and usage + needed <= quota:
+                    text = ZaloMessageText(
+                        id=_uuid(), connector_account_id=account_id, source_id=source.id,
+                        conversation_id=conversation_id, msg_id=msg_id, sender_id=sender_id,
+                        sent_at=sent_at, received_at=utcnow(), raw_text=raw_text,
+                        payload_digest=_canonical_digest(text_component),
+                    )
+                    db.add(text)
+                    text_id = text.id
+                    text_status = "imported"
+                    account.text_storage_full = False
+                else:
+                    account.text_storage_full = True
+        for component, index, digest in checked:
+            if index in existing_media:
+                continue
+            media = ZaloMedia(
+                id=_uuid(), connector_account_id=account_id, source_id=source.id,
+                conversation_id=conversation_id, msg_id=msg_id, attachment_index=index,
+                media_object_key=component["media_object_key"], mime_type=component["mime_type"],
+                size_bytes=component["size_bytes"], sent_at=sent_at, payload_digest=digest,
+            )
+            db.add(media)
+            media_ids.append(media.id)
+            next(item for item in media_statuses if item["attachment_index"] == index)["status"] = "imported"
+    db.commit()
+    return {
+        "text_id": text_id,
+        "media_ids": media_ids,
+        "ignored": not eligible,
+        "components": {"text": text_status, "media": media_statuses},
+    }
+
+
 def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: str | Path) -> Any:
     if payload.get("schema_version") != 1:
         raise InboxValidationError("schema_version không được hỗ trợ")
@@ -508,6 +658,8 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         )
         db.commit()
         return {"changed": changed, "state": connector_state(account)}
+    if event_type == "message":
+        return ingest_message_envelope(db, payload, storage_root)
     if event_type != "media":
         raise InboxValidationError("event_type không được hỗ trợ")
 

@@ -85,6 +85,38 @@ def _manual_watcher_threads(monkeypatch):
     return threads
 
 
+def test_message_webhook_ack_passes_through_component_statuses(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    monkeypatch.setenv("ZALO_INBOX_TEXT_QUOTA_BYTES", "1000")
+    monkeypatch.setenv("ZALO_INBOX_TEXT_RETENTION_HOURS", "72")
+    with TestClient(app) as client:
+        account_id = client.post(
+            "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
+        ).json()["connector_account_id"]
+        db = factory()
+        source = ZaloSource(
+            id="source-1", connector_account_id=account_id, conversation_id="friend-1",
+            conversation_type="user", display_name="Friend", source_type="friend",
+            enabled=True, enabled_explicit=False, acked_enabled=True,
+            policy_version=0, policy_acked_version=0,
+        )
+        account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
+        account.intake_consented_at = datetime.now(timezone.utc)
+        db.add(source)
+        db.commit()
+        db.close()
+
+        response = _signed_post(client, {
+            "schema_version": 1, "event_type": "message", "connector_account_id": account_id,
+            "conversation_id": "friend-1", "conversation_type": "user", "source_type": "friend",
+            "source_display_name": "Friend", "msg_id": "text-1", "sender_id": "sender-1",
+            "sent_at": "2026-08-04T03:00:00Z", "raw_text": "hello", "attachments": [],
+        })
+
+        assert response.status_code == 200
+        assert response.json() == {"ack": True, "components": {"text": "imported", "media": []}}
+
+
 def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkeypatch):
     app, factory = _app(tmp_path, monkeypatch)
     with TestClient(app) as client:
@@ -109,6 +141,7 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
         state = client.get("/zalo-inbox/api/state").json()
         source_id = state["sources"][0]["id"]
         assert state["consent_required"] is False
+        assert state["my_documents_verification_required"] is True
         assert state["policy_pending"] is True
         assert state["sources"] == [{
             "id": source_id,
@@ -173,7 +206,7 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
             "policy_version": 2,
         }
         assert _signed_post(client, exact_ack).status_code == 200
-        assert _signed_post(client, exact_ack).status_code == 200
+        assert _signed_post(client, exact_ack).json() == {"ack": True, "policy_version": 2}
         assert client.get("/zalo-inbox/api/state").json()["policy_pending"] is False
 
         refresh = client.post(f"/zalo-inbox/api/connectors/{account_id}/sources/refresh")
@@ -186,7 +219,7 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
             "source_sync_request_version": 1,
         }
         assert _signed_post(client, sync_ack).status_code == 200
-        assert _signed_post(client, sync_ack).status_code == 200
+        assert _signed_post(client, sync_ack).json() == {"ack": True, "source_sync_request_version": 1}
 
         db = factory()
         account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()

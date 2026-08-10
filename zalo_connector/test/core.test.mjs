@@ -9,7 +9,7 @@ import {
   FileOutbox,
   MediaStore,
   WebhookClient,
-  attachmentEvents,
+  normalizeMessage,
   mediaObjectKey,
   signBody,
 } from '../src/core.mjs';
@@ -51,7 +51,10 @@ test('WebhookClient sends exact versioned policy and source-sync ACK events', as
     secret: 'secret',
     fetchImpl: async (_url, options) => {
       events.push(JSON.parse(options.body));
-      return jsonResponse({ack: true});
+      const event = events.at(-1);
+      return jsonResponse(event.event_type === 'policy_ack'
+        ? {ack: true, policy_version: event.policy_version}
+        : {ack: true, source_sync_request_version: event.source_sync_request_version});
     },
   });
 
@@ -74,46 +77,68 @@ test('WebhookClient sends exact versioned policy and source-sync ACK events', as
   ]);
 });
 
-test('attachmentEvents ignores disabled/self messages and builds stable media events for enabled sources', () => {
+test('WebhookClient rejects malformed 2xx and non-matching version ACKs', async () => {
+  for (const body of [{}, {ack: false}, {ack: true, policy_version: 6}]) {
+    const client = new WebhookClient({
+      baseUrl: 'http://backend', secret: 'secret', fetchImpl: async () => jsonResponse(body),
+    });
+    await assert.rejects(() => client.ackPolicy('account-1', 7), /ack/i);
+  }
+});
+
+test('normalizeMessage keeps text and all supported attachments in one descriptor', () => {
   const base = {
     type: 1,
     threadId: 'g-1',
     isSelf: false,
     data: {
       msgId: 'm-1',
+      uidFrom: 'sender-1',
       ts: '1785812400000',
       dName: 'Người gửi',
-      content: {href: 'https://cdn.example/document.pdf', title: 'hop-dong.pdf', type: 'application/pdf'},
+      content: 'Nội dung',
+      attachments: [
+        {href: 'https://cdn.example/document.pdf', title: 'hop-dong.pdf', type: 'application/pdf'},
+        {hdUrl: 'https://cdn.example/image-hd', title: 'anh.png', type: 'image/png'},
+        {href: 'https://cdn.example/video.mp4', title: 'video.mp4', type: 'video/mp4'},
+      ],
     },
   };
-  assert.deepEqual(attachmentEvents(base, new Set(), 'account-1', 'Nhóm A'), []);
-  assert.deepEqual(attachmentEvents({...base, isSelf: true}, new Set(['g-1']), 'account-1', 'Nhóm A'), []);
-
-  const [event] = attachmentEvents(base, new Set(['g-1']), 'account-1', 'Nhóm A');
+  const event = normalizeMessage(base, 'account-1', {
+    source_type: 'group', source_display_name: 'Nhóm A',
+  }, 'send2me');
+  assert.equal(event.raw_text, 'Nội dung');
   assert.equal(event.conversation_id, 'g-1');
   assert.equal(event.conversation_type, 'group');
   assert.equal(event.msg_id, 'm-1');
-  assert.equal(event.attachment_index, 0);
-  assert.equal(event.mime_type, 'application/pdf');
-  assert.equal(event.download_url, 'https://cdn.example/document.pdf');
+  assert.deepEqual(event.attachments, [
+    {attachment_index: 0, mime_type: 'application/pdf', download_url: 'https://cdn.example/document.pdf', original_filename: 'hop-dong.pdf'},
+    {attachment_index: 1, mime_type: 'image/png', download_url: 'https://cdn.example/image-hd', original_filename: 'anh.png'},
+  ]);
   assert.match(event.sent_at, /^2026-08-04T/);
 });
 
-test('attachmentEvents accepts zca image payload and rejects unsupported media', () => {
+test('normalizeMessage accepts exact My Documents self thread and rejects other self messages', () => {
   const image = {
     type: 0,
     threadId: 'u-1',
     isSelf: false,
-    data: {msgId: 'm-img', ts: '1785812400000', content: {href: 'https://cdn.example/image', hdUrl: 'https://cdn.example/image-hd'}},
+    data: {msgId: 'm-img', uidFrom: 'sender-1', ts: '1785812400000', content: {href: 'https://cdn.example/image', hdUrl: 'https://cdn.example/image-hd'}},
   };
-  const [event] = attachmentEvents(image, new Set(['u-1']), 'account-1', 'Bạn A');
+  const event = normalizeMessage(image, 'account-1', {source_type: 'friend', source_display_name: 'Bạn A'}, 'my-docs');
   assert.equal(event.conversation_type, 'user');
-  assert.equal(event.mime_type, 'image/jpeg');
-  assert.equal(event.download_url, 'https://cdn.example/image-hd');
-  assert.deepEqual(
-    attachmentEvents({...image, data: {...image.data, content: {href: 'https://cdn.example/file.zip', title: 'file.zip'}}}, new Set(['u-1']), 'account-1', 'Bạn A'),
-    [],
-  );
+  assert.equal(event.attachments[0].mime_type, 'image/jpeg');
+  assert.equal(normalizeMessage({...image, isSelf: true}, 'account-1', {source_type: 'friend', source_display_name: 'Bạn A'}, 'my-docs'), null);
+  const mine = {...image, isSelf: true, threadId: 'my-docs'};
+  assert.equal(normalizeMessage(mine, 'account-1', {source_type: 'my_documents', source_display_name: 'My Documents'}, 'my-docs').source_type, 'my_documents');
+});
+
+test('normalizeMessage rejects empty message and sender identifiers without inventing fallbacks', () => {
+  const source = {source_type: 'friend', source_display_name: 'Bạn A'};
+  const base = {type: 0, threadId: 'u-1', data: {msgId: 'm-1', uidFrom: 'sender-1', content: 'private'}};
+  assert.equal(normalizeMessage({...base, data: {...base.data, msgId: '', cliMsgId: ''}}, 'account-1', source, ''), null);
+  assert.equal(normalizeMessage({...base, data: {...base.data, uidFrom: '', senderId: ''}}, 'account-1', source, ''), null);
+  assert.equal(normalizeMessage({...base, data: {...base.data, uidFrom: '', senderId: 'sender-2'}}, 'account-1', source, '').sender_id, 'sender-2');
 });
 
 test('FileOutbox keeps failed events and removes only acknowledged events', async () => {
@@ -123,7 +148,31 @@ test('FileOutbox keeps failed events and removes only acknowledged events', asyn
   await outbox.enqueue('event-1', event);
   await assert.rejects(() => outbox.flush({sendEvent: async () => { throw new Error('offline'); }}), /offline/);
   assert.equal((await outbox.pending()).length, 1);
-  await outbox.flush({sendEvent: async (payload) => assert.deepEqual(payload, event)});
+  await outbox.flush({sendEvent: async (payload) => { assert.deepEqual(payload, event); return {ack: true}; }});
+  assert.deepEqual(await outbox.pending(), []);
+});
+
+test('FileOutbox retains message until exact component ACK', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-outbox-message-'));
+  const outbox = new FileOutbox(root);
+  const event = {
+    schema_version: 1, event_type: 'message', connector_account_id: 'a', raw_text: 'private',
+    attachments: [{attachment_index: 0}, {attachment_index: 1}],
+  };
+  await outbox.enqueue('message-1', event);
+  for (const response of [
+    {ack: true},
+    {ack: true, components: {text: 'imported', media: [{attachment_index: 0, status: 'imported'}]}},
+    {ack: true, components: {text: 'imported', media: [
+      {attachment_index: 0, status: 'imported'}, {attachment_index: 1, status: 'wrong'},
+    ]}},
+  ]) {
+    await assert.rejects(() => outbox.flush({sendEvent: async () => response}), /ack/i);
+    assert.equal((await outbox.pending()).length, 1);
+  }
+  await outbox.flush({sendEvent: async () => ({ack: true, components: {text: 'imported', media: [
+    {attachment_index: 0, status: 'duplicate'}, {attachment_index: 1, status: 'ignored'},
+  ]}})});
   assert.deepEqual(await outbox.pending(), []);
 });
 

@@ -412,6 +412,10 @@ async def webhook(
             db.rollback()
             _raise_http(exc)
         raise HTTPException(status_code=400, detail="Webhook JSON không hợp lệ") from exc
+    if payload.get("event_type") == "message":
+        return {"ack": True, "components": result["components"]}
+    if payload.get("event_type") in {"policy_ack", "source_sync_ack"}:
+        return {"ack": True, **result}
     return {"ack": True, "id": getattr(result, "id", None)}
 
 
@@ -554,6 +558,7 @@ def state_snapshot(db: Session = Depends(get_db)):
             }
         ),
         "consent_required": not bool(account and account.intake_consented_at),
+        "my_documents_verification_required": True,
         "policy_pending": bool(
             account
             and (
