@@ -5,6 +5,7 @@ import hmac
 import io
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -18,9 +19,10 @@ from fastapi import UploadFile
 from openpyxl import Workbook
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloMessageText, ZaloSource
+from models import ZaloBatch, ZaloConnectorAccount, ZaloDataSyncRun, ZaloMedia, ZaloMessageText, ZaloSource
 
 UTC = timezone.utc
 QR_TTL_SECONDS = 100
@@ -479,6 +481,145 @@ def _positive_env_int(name: str) -> int:
     return value
 
 
+DATA_SYNC_COUNTERS = (
+    "received", "duplicates", "imported_text", "imported_media", "media_download_failures",
+)
+
+
+def start_data_sync(db: Session, account_id: str, now: datetime | None = None) -> ZaloDataSyncRun:
+    account = _account_or_error(db, account_id)
+    current = _aware(now) or utcnow()
+    sources = db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).all()
+    if account.intake_consented_at is None:
+        raise InboxValidationError("Chưa đồng ý tiếp nhận dữ liệu")
+    if connector_state(account, now=current) != "connected":
+        raise InboxConflict("Connector chưa kết nối")
+    if account.policy_version != account.policy_acked_version or any(not source_ready(source) for source in sources):
+        raise InboxConflict("Chính sách nguồn đang chờ đồng bộ")
+    source_ids = sorted(
+        source.conversation_id for source in sources
+        if source.enabled and source.acked_enabled and source_ready(source)
+        and source.source_type != "my_documents"
+    )
+    if not source_ids:
+        raise InboxValidationError("Không có nguồn phù hợp để đồng bộ")
+    run = ZaloDataSyncRun(
+        id=_uuid(), connector_account_id=account.id, status="running",
+        cutoff_at=current,
+        deadline_at=current + timedelta(seconds=_positive_env_int("ZALO_DATA_SYNC_TIMEOUT_SECONDS")),
+        source_ids_json=source_ids,
+        counters_json={key: 0 for key in DATA_SYNC_COUNTERS},
+        started_at=current,
+    )
+    db.add(run)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "zalo_data_sync_runs.connector_account_id" not in str(getattr(exc, "orig", exc)).lower():
+            raise
+        raise InboxConflict("Đang có Data Sync hoạt động") from exc
+    db.refresh(run)
+    return run
+
+
+def _timeout_data_sync_run(db: Session, run: ZaloDataSyncRun, account_id: str, current: datetime) -> bool:
+    return db.query(ZaloDataSyncRun).filter(
+            ZaloDataSyncRun.id == run.id,
+            ZaloDataSyncRun.connector_account_id == account_id,
+            ZaloDataSyncRun.status == "running",
+            ZaloDataSyncRun.deadline_at <= current,
+        ).update(
+            {
+                ZaloDataSyncRun.status: "error",
+                ZaloDataSyncRun.error_message: "timeout",
+                ZaloDataSyncRun.completed_at: current,
+            },
+            synchronize_session=False,
+        ) == 1
+
+
+def data_sync_command(db: Session, account_id: str, now: datetime | None = None) -> dict[str, Any] | None:
+    run = db.query(ZaloDataSyncRun).filter_by(connector_account_id=account_id, status="running").first()
+    if run is None:
+        return None
+    current = _aware(now) or utcnow()
+    if (_aware(run.deadline_at) or run.deadline_at) <= current:
+        if _timeout_data_sync_run(db, run, account_id, current):
+            db.commit()
+        else:
+            db.rollback()
+            db.expire_all()
+        return None
+    return {
+        "command_type": "data_sync", "run_id": run.id,
+        "cutoff_at": _iso(run.cutoff_at), "deadline_at": _iso(run.deadline_at),
+        "source_ids": run.source_ids_json,
+    }
+
+
+def apply_data_sync_report(db: Session, payload: dict[str, Any]) -> ZaloDataSyncRun:
+    event_type = payload.get("event_type")
+    expected = {"schema_version", "event_type", "connector_account_id", "run_id", "counters"}
+    if event_type == "data_sync_failed":
+        expected.add("error_code")
+    if payload.get("schema_version") != 1 or set(payload) != expected:
+        raise InboxValidationError("Data Sync report không hợp lệ")
+    if event_type not in {"data_sync_progress", "data_sync_complete", "data_sync_failed"}:
+        raise InboxValidationError("Data Sync event không hợp lệ")
+    counters = payload.get("counters")
+    if not isinstance(counters, dict) or set(counters) != set(DATA_SYNC_COUNTERS) or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counters.values()
+    ):
+        raise InboxValidationError("Data Sync counters không hợp lệ")
+    error_code = payload.get("error_code")
+    if event_type == "data_sync_failed" and (
+        not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code)
+    ):
+        raise InboxValidationError("Data Sync error_code không hợp lệ")
+    run_id = str(payload.get("run_id") or "")
+    account_id = str(payload.get("connector_account_id") or "")
+    terminal_status = {"data_sync_complete": "completed_best_effort", "data_sync_failed": "error"}.get(event_type)
+    for _attempt in range(3):
+        db.expire_all()
+        run = db.query(ZaloDataSyncRun).filter_by(id=run_id).first()
+        if run is None or run.connector_account_id != account_id:
+            raise InboxConflict("Data Sync report không khớp account/run")
+        if run.status != "running":
+            if terminal_status == run.status and run.counters_json == counters and run.error_message == error_code:
+                return run
+            raise InboxConflict("Data Sync run đã kết thúc")
+        current = utcnow()
+        if (_aware(run.deadline_at) or run.deadline_at) <= current:
+            if _timeout_data_sync_run(db, run, account_id, current):
+                db.commit()
+                raise InboxConflict("Data Sync run đã hết hạn")
+            db.rollback()
+            continue
+        prior_counters = dict(run.counters_json)
+        if any(counters[key] < prior_counters[key] for key in DATA_SYNC_COUNTERS):
+            raise InboxConflict("Data Sync counters không được giảm")
+        values = {ZaloDataSyncRun.counters_json: dict(counters)}
+        if terminal_status:
+            values.update({
+                ZaloDataSyncRun.status: terminal_status,
+                ZaloDataSyncRun.error_message: error_code,
+                ZaloDataSyncRun.completed_at: utcnow(),
+            })
+        updated = db.query(ZaloDataSyncRun).filter(
+            ZaloDataSyncRun.id == run_id,
+            ZaloDataSyncRun.connector_account_id == account_id,
+            ZaloDataSyncRun.status == "running",
+            ZaloDataSyncRun.counters_json == prior_counters,
+        ).update(values, synchronize_session=False)
+        if updated == 1:
+            db.commit()
+            db.expire_all()
+            return db.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+        db.rollback()
+    raise InboxConflict("Data Sync report xung đột đồng thời")
+
+
 def ingest_message_envelope(db: Session, payload: dict[str, Any], storage_root: str | Path) -> dict[str, Any]:
     required = ("connector_account_id", "conversation_id", "conversation_type", "source_type", "source_display_name", "msg_id", "sender_id", "sent_at")
     if payload.get("schema_version") != 1 or payload.get("event_type") != "message" or any(payload.get(field) is None for field in required):
@@ -660,6 +801,8 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         return {"changed": changed, "state": connector_state(account)}
     if event_type == "message":
         return ingest_message_envelope(db, payload, storage_root)
+    if event_type in {"data_sync_progress", "data_sync_complete", "data_sync_failed"}:
+        return apply_data_sync_report(db, payload)
     if event_type != "media":
         raise InboxValidationError("event_type không được hỗ trợ")
 

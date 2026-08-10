@@ -6,13 +6,14 @@ import hmac
 import json
 import sqlite3
 import threading
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import fitz
 import pytest
 from PIL import Image
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -37,6 +38,9 @@ from services.zalo_inbox import (
     InboxLimits,
     InboxTerminalError,
     InboxValidationError,
+    apply_data_sync_report,
+    data_sync_command,
+    start_data_sync,
     apply_connector_report,
     cleanup_expired_batch,
     connector_state,
@@ -62,6 +66,9 @@ from services.zalo_inbox import (
 )
 
 UTC = timezone.utc
+DATA_SYNC_COUNTER_NAMES = (
+    "received", "duplicates", "imported_text", "imported_media", "media_download_failures",
+)
 
 
 def _columns(db_path: Path, table: str) -> set[str]:
@@ -155,6 +162,427 @@ def _source(db, account, conversation_id="thread-1"):
     db.add(row)
     db.commit()
     return row
+
+
+def _data_sync_account(db, *, now: datetime, account_id="11111111-1111-4111-8111-111111111111"):
+    account = _account(db, account_id=account_id)
+    account.session_state = "usable"
+    account.last_seen_at = now
+    account.intake_consented_at = now
+    account.policy_version = account.policy_acked_version = 1
+    db.commit()
+    return account
+
+
+def _data_sync_source(db, account, conversation_id: str, source_type: str, **values):
+    defaults = {"enabled": True, "acked_enabled": True, "policy_version": 1, "policy_acked_version": 1}
+    defaults.update(values)
+    source = ZaloSource(
+        id=str(uuid.uuid4()), connector_account_id=account.id, conversation_id=conversation_id,
+        conversation_type="group" if source_type == "group" else "user",
+        display_name=conversation_id, source_type=source_type, **defaults,
+    )
+    db.add(source)
+    db.commit()
+    return source
+
+
+def test_start_data_sync_freezes_only_current_acked_enabled_sources(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    account = _data_sync_account(db, now=now)
+    source = _data_sync_source(db, account, "thread-b", "friend")
+    _data_sync_source(db, account, "thread-a", "group")
+    _data_sync_source(db, account, "stranger", "stranger")
+    _data_sync_source(db, account, "my-documents", "my_documents")
+    _data_sync_source(db, account, "disabled", "friend", enabled=False, acked_enabled=False)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+
+    run = start_data_sync(db, account.id, now=now)
+
+    assert run.source_ids_json == ["stranger", "thread-a", "thread-b"]
+    assert run.counters_json == {
+        "received": 0, "duplicates": 0, "imported_text": 0,
+        "imported_media": 0, "media_download_failures": 0,
+    }
+    assert run.cutoff_at.replace(tzinfo=UTC) == run.started_at.replace(tzinfo=UTC) == now
+    assert run.deadline_at.replace(tzinfo=UTC) == now + timedelta(seconds=300)
+    assert run.status == "running"
+
+    source.enabled = source.acked_enabled = False
+    db.commit()
+    db.refresh(run)
+    assert run.source_ids_json == ["stranger", "thread-a", "thread-b"]
+
+
+def _file_data_sync(tmp_path, monkeypatch, name="data-sync.sqlite"):
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / name).as_posix()}", connect_args={"check_same_thread": False}
+    )
+    database.enable_sqlite_foreign_keys(engine)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    setup = factory()
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr("services.zalo_inbox.utcnow", lambda: now)
+    account = _data_sync_account(setup, now=now)
+    _data_sync_source(setup, account, "thread-1", "friend")
+    return engine, factory, setup, account, now
+
+
+def test_concurrent_data_sync_start_allows_exactly_one_running_run(tmp_path, monkeypatch):
+    engine, factory, setup, account, now = _file_data_sync(tmp_path, monkeypatch, "concurrent-start.sqlite")
+    account_id = account.id
+    setup.close()
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def start():
+        session = factory()
+        try:
+            barrier.wait()
+            try:
+                outcomes.append(("started", start_data_sync(session, account_id, now).id))
+            except InboxConflict:
+                outcomes.append(("conflict", None))
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=start) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    verify = factory()
+    try:
+        assert sorted(outcome for outcome, _ in outcomes) == ["conflict", "started"]
+        assert verify.query(ZaloDataSyncRun).filter_by(status="running").count() == 1
+    finally:
+        verify.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_start_data_sync_preserves_unrelated_integrity_error(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    account = _data_sync_account(db, now=now)
+    _data_sync_source(db, account, "thread-1", "friend")
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    original = IntegrityError("insert", {}, sqlite3.IntegrityError("foreign key failed"))
+    monkeypatch.setattr(db, "commit", lambda: (_ for _ in ()).throw(original))
+
+    with pytest.raises(IntegrityError) as raised:
+        start_data_sync(db, account.id, now)
+
+    assert raised.value is original
+
+
+def test_start_data_sync_enforces_gates_conflict_and_terminal_rerun(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    with pytest.raises(InboxValidationError):
+        start_data_sync(db, "missing", now)
+    account = _account(db)
+    with pytest.raises(InboxValidationError):
+        start_data_sync(db, account.id, now)
+    account.intake_consented_at = now
+    db.commit()
+    with pytest.raises(InboxConflict):
+        start_data_sync(db, account.id, now)
+    account.session_state, account.last_seen_at = "usable", now
+    account.policy_version, account.policy_acked_version = 1, 0
+    db.commit()
+    with pytest.raises(InboxConflict):
+        start_data_sync(db, account.id, now)
+    account.policy_acked_version = 1
+    source = _data_sync_source(db, account, "pending", "friend", policy_acked_version=0)
+    with pytest.raises(InboxConflict):
+        start_data_sync(db, account.id, now)
+    source.policy_acked_version = 1
+    source.enabled = source.acked_enabled = False
+    db.commit()
+    with pytest.raises(InboxValidationError):
+        start_data_sync(db, account.id, now)
+    source.enabled = source.acked_enabled = True
+    db.commit()
+    run = start_data_sync(db, account.id, now)
+    with pytest.raises(InboxConflict):
+        start_data_sync(db, account.id, now)
+    assert db.is_active
+    run.status, run.completed_at = "error", now
+    account.last_seen_at = now + timedelta(minutes=1)
+    db.commit()
+    assert start_data_sync(db, account.id, now + timedelta(minutes=1)).status == "running"
+
+
+def test_data_sync_command_is_account_bound_and_times_out_at_deadline(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    account = _data_sync_account(db, now=now)
+    _data_sync_source(db, account, "thread-1", "friend")
+    run = start_data_sync(db, account.id, now)
+
+    assert data_sync_command(db, "other-account", now=now) is None
+    assert data_sync_command(db, account.id, now=now) == {
+        "command_type": "data_sync", "run_id": run.id,
+        "cutoff_at": "2026-08-07T10:00:00Z", "deadline_at": "2026-08-07T10:05:00Z",
+        "source_ids": ["thread-1"],
+    }
+    assert data_sync_command(db, account.id, now=now + timedelta(minutes=5)) is None
+    db.refresh(run)
+    assert (run.status, run.error_message) == ("error", "timeout")
+    assert run.completed_at.replace(tzinfo=UTC) == now + timedelta(minutes=5)
+
+
+def _data_sync_report(account, run, event_type, counters, **extra):
+    return {
+        "schema_version": 1, "event_type": event_type,
+        "connector_account_id": account.id, "run_id": run.id,
+        "counters": counters, **extra,
+    }
+
+
+@pytest.mark.parametrize("event_type", ["data_sync_progress", "data_sync_complete"])
+def test_apply_data_sync_report_times_out_expired_run_before_late_report(db, monkeypatch, event_type):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    monkeypatch.setattr("services.zalo_inbox.utcnow", lambda: now + timedelta(minutes=5))
+    account = _data_sync_account(db, now=now)
+    _data_sync_source(db, account, "thread-1", "friend")
+    run = start_data_sync(db, account.id, now)
+    prior = {key: 1 for key in DATA_SYNC_COUNTER_NAMES}
+    run.counters_json = prior
+    db.commit()
+    late = {key: 2 for key in DATA_SYNC_COUNTER_NAMES}
+
+    with pytest.raises(InboxConflict):
+        apply_data_sync_report(db, _data_sync_report(account, run, event_type, late))
+
+    db.refresh(run)
+    assert (run.status, run.error_message, run.counters_json) == ("error", "timeout", prior)
+    assert run.completed_at.replace(tzinfo=UTC) == now + timedelta(minutes=5)
+
+
+def test_expired_data_sync_timeout_cannot_overwrite_concurrent_complete(tmp_path, monkeypatch):
+    engine, factory, setup, account, now = _file_data_sync(tmp_path, monkeypatch, "timeout-report.sqlite")
+    run = start_data_sync(setup, account.id, now)
+    account_id, run_id = account.id, run.id
+    setup.close()
+    timeout_ready = threading.Barrier(2)
+    report_committed = threading.Barrier(2)
+    counters = {key: 3 for key in DATA_SYNC_COUNTER_NAMES}
+    outcomes = {}
+
+    def pause_timeout_update(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if threading.current_thread().name == "data-sync-timeout" and statement.lstrip().upper().startswith(
+            "UPDATE ZALO_DATA_SYNC_RUNS"
+        ):
+            timeout_ready.wait()
+            report_committed.wait()
+
+    event.listen(engine, "before_cursor_execute", pause_timeout_update)
+
+    def timeout():
+        session = factory()
+        try:
+            outcomes["command"] = data_sync_command(session, account_id, now + timedelta(minutes=5))
+        finally:
+            session.close()
+
+    def complete():
+        session = factory()
+        try:
+            timeout_ready.wait()
+            finished = apply_data_sync_report(
+                session,
+                _data_sync_report(
+                    type("Account", (), {"id": account_id}),
+                    type("Run", (), {"id": run_id}),
+                    "data_sync_complete",
+                    counters,
+                ),
+            )
+            outcomes["report"] = (finished.status, finished.completed_at)
+        finally:
+            report_committed.wait()
+            session.close()
+
+    threads = [
+        threading.Thread(target=timeout, name="data-sync-timeout"),
+        threading.Thread(target=complete, name="data-sync-report"),
+    ]
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        verify = factory()
+        try:
+            persisted = verify.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+            assert outcomes["command"] is None
+            assert outcomes["report"][0] == "completed_best_effort"
+            assert (
+                persisted.status,
+                persisted.counters_json,
+                persisted.error_message,
+                persisted.completed_at,
+            ) == ("completed_best_effort", counters, None, outcomes["report"][1])
+        finally:
+            verify.close()
+    finally:
+        for thread in threads:
+            thread.join(timeout=1)
+        event.remove(engine, "before_cursor_execute", pause_timeout_update)
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_apply_data_sync_report_transitions_monotonically_and_replays_terminal(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    monkeypatch.setattr("services.zalo_inbox.utcnow", lambda: now)
+    account = _data_sync_account(db, now=now)
+    account.gap_started_at = now - timedelta(days=1)
+    _data_sync_source(db, account, "thread-1", "friend")
+    run = start_data_sync(db, account.id, now)
+    progress = {"received": 5, "duplicates": 1, "imported_text": 2, "imported_media": 1, "media_download_failures": 1}
+    assert apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_progress", progress)).status == "running"
+    complete = dict(progress, received=6, imported_text=3)
+    payload = _data_sync_report(account, run, "data_sync_complete", complete)
+    finished = apply_data_sync_report(db, payload)
+    completed_at = finished.completed_at
+    assert (finished.status, finished.counters_json) == ("completed_best_effort", complete)
+    assert apply_data_sync_report(db, payload).completed_at == completed_at
+    db.refresh(account)
+    assert account.gap_started_at.replace(tzinfo=UTC) == now - timedelta(days=1)
+    with pytest.raises(InboxConflict):
+        apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_complete", dict(complete, received=7)))
+    with pytest.raises(InboxConflict):
+        apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_progress", complete))
+
+
+def test_apply_data_sync_report_rejects_invalid_shape_binding_counters_and_error_code(db, monkeypatch):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    monkeypatch.setattr("services.zalo_inbox.utcnow", lambda: now)
+    account = _data_sync_account(db, now=now)
+    _data_sync_source(db, account, "thread-1", "friend")
+    run = start_data_sync(db, account.id, now)
+    zero = {key: 0 for key in ("received", "duplicates", "imported_text", "imported_media", "media_download_failures")}
+    invalid = [
+        dict(_data_sync_report(account, run, "data_sync_progress", zero), extra=True),
+        _data_sync_report(account, run, "data_sync_progress", dict(zero, extra=0)),
+        _data_sync_report(account, run, "data_sync_progress", dict(zero, received=True)),
+        _data_sync_report(account, run, "data_sync_progress", dict(zero, received=-1)),
+        _data_sync_report(account, run, "data_sync_failed", zero),
+        _data_sync_report(account, run, "data_sync_failed", zero, error_code="Raw Error!"),
+        _data_sync_report(account, run, "data_sync_failed", zero, error_code="x" * 65),
+        dict(_data_sync_report(account, run, "data_sync_progress", zero), connector_account_id="wrong"),
+        dict(_data_sync_report(account, run, "data_sync_progress", zero), run_id="stale"),
+    ]
+    for payload in invalid:
+        with pytest.raises((InboxValidationError, InboxConflict)):
+            apply_data_sync_report(db, payload)
+    progress = dict(zero, received=2)
+    apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_progress", progress))
+    with pytest.raises(InboxConflict):
+        apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_progress", zero))
+    failed = apply_data_sync_report(db, _data_sync_report(account, run, "data_sync_failed", progress, error_code="media_timeout"))
+    assert (failed.status, failed.error_message, failed.counters_json) == ("error", "media_timeout", progress)
+
+
+def test_stale_data_sync_session_cannot_overwrite_higher_terminal_counters(tmp_path, monkeypatch):
+    engine, factory, setup, account, now = _file_data_sync(tmp_path, monkeypatch, "stale-report.sqlite")
+    run = start_data_sync(setup, account.id, now)
+    account_id, run_id = account.id, run.id
+    setup.close()
+    lower_session, higher_session = factory(), factory()
+    lower_run = lower_session.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+    higher_session.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+    lower = {key: 1 for key in DATA_SYNC_COUNTER_NAMES}
+    higher = {key: 2 for key in DATA_SYNC_COUNTER_NAMES}
+
+    try:
+        apply_data_sync_report(
+            higher_session,
+            _data_sync_report(type("Account", (), {"id": account_id}), run, "data_sync_complete", higher),
+        )
+        assert lower_run.status == "running"
+        with pytest.raises(InboxConflict):
+            apply_data_sync_report(
+                lower_session,
+                _data_sync_report(type("Account", (), {"id": account_id}), run, "data_sync_progress", lower),
+            )
+        verify = factory()
+        try:
+            persisted = verify.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+            assert (persisted.status, persisted.counters_json) == ("completed_best_effort", higher)
+        finally:
+            verify.close()
+    finally:
+        lower_session.close()
+        higher_session.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_stale_data_sync_sessions_cannot_both_win_conflicting_terminals(tmp_path, monkeypatch):
+    engine, factory, setup, account, now = _file_data_sync(tmp_path, monkeypatch, "terminal-report.sqlite")
+    run = start_data_sync(setup, account.id, now)
+    account_id, run_id = account.id, run.id
+    setup.close()
+    complete_session, failed_session = factory(), factory()
+    complete_session.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+    stale_failed_run = failed_session.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+    counters = {key: 2 for key in DATA_SYNC_COUNTER_NAMES}
+
+    try:
+        complete = _data_sync_report(
+            type("Account", (), {"id": account_id}), run, "data_sync_complete", counters
+        )
+        failed = _data_sync_report(
+            type("Account", (), {"id": account_id}), run, "data_sync_failed", counters,
+            error_code="media_timeout",
+        )
+        assert apply_data_sync_report(complete_session, complete).status == "completed_best_effort"
+        assert stale_failed_run.status == "running"
+        with pytest.raises(InboxConflict):
+            apply_data_sync_report(failed_session, failed)
+        verify = factory()
+        try:
+            assert verify.query(ZaloDataSyncRun).filter_by(id=run_id).one().status == "completed_best_effort"
+        finally:
+            verify.close()
+    finally:
+        complete_session.close()
+        failed_session.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("event_type", "extra", "status"),
+    [
+        ("data_sync_progress", {}, "running"),
+        ("data_sync_complete", {}, "completed_best_effort"),
+        ("data_sync_failed", {"error_code": "media_timeout"}, "error"),
+    ],
+)
+def test_ingest_webhook_event_routes_data_sync_reports(db, monkeypatch, tmp_path, event_type, extra, status):
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
+    monkeypatch.setattr("services.zalo_inbox.utcnow", lambda: now)
+    account = _data_sync_account(db, now=now)
+    _data_sync_source(db, account, "thread-1", "friend")
+    run = start_data_sync(db, account.id, now)
+    counters = {key: 0 for key in ("received", "duplicates", "imported_text", "imported_media", "media_download_failures")}
+
+    result = ingest_webhook_event(
+        db, _data_sync_report(account, run, event_type, counters, **extra), storage_root=tmp_path,
+    )
+
+    assert result.status == status
 
 
 def _message_text(*, row_id: str, account_id: str, source_id: str) -> ZaloMessageText:

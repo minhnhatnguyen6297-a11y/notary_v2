@@ -10,12 +10,13 @@ import threading
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from database import Base, get_db
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
+from models import ZaloBatch, ZaloConnectorAccount, ZaloDataSyncRun, ZaloMedia, ZaloSource
 from routers import zalo_inbox
 
 
@@ -32,6 +33,7 @@ def _app(tmp_path, monkeypatch):
     monkeypatch.setenv("ZALO_INBOX_MAX_ITEMS", "10")
     monkeypatch.setenv("ZALO_INBOX_MAX_TOTAL_BYTES", str(2 * 1024 * 1024))
     monkeypatch.setenv("ZALO_INBOX_MAX_RENDERED_PIXELS", "10000")
+    monkeypatch.setenv("ZALO_DATA_SYNC_TIMEOUT_SECONDS", "300")
 
     app = FastAPI()
     app.include_router(zalo_inbox.router)
@@ -66,6 +68,13 @@ def _signed_post(client, payload):
 def _signed_config_headers():
     timestamp = str(int(datetime.now(timezone.utc).timestamp()))
     signature = hmac.new(b"webhook-test", timestamp.encode() + b".", hashlib.sha256).hexdigest()
+    return {"x-zalo-timestamp": timestamp, "x-zalo-signature": signature}
+
+
+def _signed_command_headers(account_id):
+    timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+    account_key = hmac.new(b"webhook-test", account_id.encode(), hashlib.sha256).hexdigest().encode()
+    signature = hmac.new(account_key, timestamp.encode() + b".", hashlib.sha256).hexdigest()
     return {"x-zalo-timestamp": timestamp, "x-zalo-signature": signature}
 
 
@@ -1113,3 +1122,189 @@ def test_main_lifespan_stops_the_managed_connector(monkeypatch):
 
     asyncio.run(exercise())
     assert stopped == [True]
+
+
+def test_data_sync_start_returns_only_run_identity_and_maps_conflict(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    db = factory()
+    db.add(ZaloConnectorAccount(
+        id="sync-account", session_state="usable", listener_generation=1,
+        last_seen_at=now, intake_consented_at=now, policy_version=1, policy_acked_version=1,
+    ))
+    db.add(ZaloSource(
+        id="sync-source", connector_account_id="sync-account", conversation_id="thread-1",
+        conversation_type="user", display_name="Friend", source_type="friend",
+        enabled=True, acked_enabled=True, policy_version=1, policy_acked_version=1,
+    ))
+    db.commit()
+    db.close()
+
+    with TestClient(app) as client:
+        started = client.post("/zalo-inbox/api/connectors/sync-account/data-sync")
+        conflict = client.post("/zalo-inbox/api/connectors/sync-account/data-sync")
+
+    assert started.status_code == 200
+    assert set(started.json()) == {"run_id", "status"}
+    assert started.json()["status"] == "running"
+    assert conflict.status_code == 409
+    db = factory()
+    assert started.json()["run_id"] == db.query(ZaloDataSyncRun).one().id
+    db.close()
+
+
+def test_data_sync_command_is_signed_account_bound_and_times_out(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    db = factory()
+    db.add_all([
+        ZaloConnectorAccount(id="sync-account", session_state="usable", listener_generation=1),
+        ZaloConnectorAccount(id="other-account", session_state="usable", listener_generation=1),
+    ])
+    db.add(ZaloDataSyncRun(
+        id="sync-run", connector_account_id="sync-account", status="running",
+        cutoff_at=now, deadline_at=now + timedelta(minutes=5), source_ids_json=["thread-1"],
+        counters_json={"received": 0, "duplicates": 0, "imported_text": 0, "imported_media": 0,
+                       "media_download_failures": 0}, started_at=now,
+    ))
+    db.commit()
+    db.close()
+
+    with TestClient(app) as client:
+        unsigned = client.get("/zalo-inbox/api/connectors/sync-account/commands/next")
+        replayed = client.get(
+            "/zalo-inbox/api/connectors/other-account/commands/next",
+            headers=_signed_command_headers("sync-account"),
+        )
+        missing = client.get(
+            "/zalo-inbox/api/connectors/missing/commands/next", headers=_signed_command_headers("missing")
+        )
+        command = client.get(
+            "/zalo-inbox/api/connectors/sync-account/commands/next", headers=_signed_command_headers("sync-account")
+        )
+        db = factory()
+        run = db.query(ZaloDataSyncRun).one()
+        run.deadline_at = now - timedelta(seconds=1)
+        db.commit()
+        db.close()
+        expired = client.get(
+            "/zalo-inbox/api/connectors/sync-account/commands/next", headers=_signed_command_headers("sync-account")
+        )
+
+    assert unsigned.status_code == 400
+    assert replayed.status_code == 400
+    assert missing.status_code == 404
+    assert command.status_code == 200
+    assert command.json() == {
+        "command_type": "data_sync", "run_id": "sync-run",
+        "cutoff_at": now.isoformat().replace("+00:00", "Z"),
+        "deadline_at": (now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+        "source_ids": ["thread-1"],
+    }
+    assert expired.status_code == 204
+    assert expired.content == b""
+    db = factory()
+    run = db.query(ZaloDataSyncRun).one()
+    assert (run.status, run.error_message) == ("error", "timeout")
+    db.close()
+
+
+@pytest.mark.parametrize("configured_secret", [None, ""])
+def test_data_sync_command_rejects_publicly_derived_key_without_master_secret(
+    tmp_path, monkeypatch, configured_secret,
+):
+    app, factory = _app(tmp_path, monkeypatch)
+    if configured_secret is None:
+        monkeypatch.delenv("ZALO_INBOX_WEBHOOK_SECRET")
+    else:
+        monkeypatch.setenv("ZALO_INBOX_WEBHOOK_SECRET", configured_secret)
+    now = datetime.now(timezone.utc)
+    db = factory()
+    db.add(ZaloConnectorAccount(id="sync-account", session_state="usable", listener_generation=1))
+    db.add(ZaloDataSyncRun(
+        id="secret-command", connector_account_id="sync-account", status="running",
+        cutoff_at=now, deadline_at=now + timedelta(minutes=5), source_ids_json=["secret-source"],
+        counters_json={"received": 0, "duplicates": 0, "imported_text": 0, "imported_media": 0,
+                       "media_download_failures": 0}, started_at=now,
+    ))
+    db.commit()
+    db.close()
+    timestamp = str(int(now.timestamp()))
+    public_key = hmac.new(b"", b"sync-account", hashlib.sha256).hexdigest().encode()
+    signature = hmac.new(public_key, timestamp.encode() + b".", hashlib.sha256).hexdigest()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/zalo-inbox/api/connectors/sync-account/commands/next",
+            headers={"x-zalo-timestamp": timestamp, "x-zalo-signature": signature},
+        )
+
+    assert response.status_code == 400
+    assert "secret-command" not in response.text
+    assert "secret-source" not in response.text
+
+
+def test_data_sync_webhook_returns_only_ack_and_persists_progress(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    counters = {"received": 2, "duplicates": 1, "imported_text": 1, "imported_media": 0,
+                "media_download_failures": 0}
+    db = factory()
+    db.add(ZaloConnectorAccount(id="sync-account", session_state="usable", listener_generation=1))
+    db.add(ZaloDataSyncRun(
+        id="sync-run", connector_account_id="sync-account", status="running",
+        cutoff_at=now, deadline_at=now + timedelta(minutes=5), source_ids_json=["thread-secret"],
+        counters_json={key: 0 for key in counters}, started_at=now,
+    ))
+    db.commit()
+    db.close()
+
+    with TestClient(app) as client:
+        response = _signed_post(client, {
+            "schema_version": 1, "event_type": "data_sync_progress",
+            "connector_account_id": "sync-account", "run_id": "sync-run", "counters": counters,
+        })
+
+    assert response.status_code == 200
+    assert response.json() == {"ack": True}
+    db = factory()
+    assert db.query(ZaloDataSyncRun).one().counters_json == counters
+    db.close()
+
+
+def test_state_exposes_only_latest_public_data_sync_status(tmp_path, monkeypatch):
+    app, factory = _app(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    counters = {"received": 3, "duplicates": 1, "imported_text": 1, "imported_media": 1,
+                "media_download_failures": 0}
+    db = factory()
+    db.add(ZaloConnectorAccount(id="sync-account", session_state="usable", listener_generation=1))
+    db.add_all([
+        ZaloDataSyncRun(
+            id="old-secret-run", connector_account_id="sync-account", status="completed_best_effort",
+            cutoff_at=now - timedelta(hours=1), deadline_at=now, source_ids_json=["old-secret-thread"],
+            counters_json={key: 0 for key in counters}, started_at=now - timedelta(hours=1), completed_at=now,
+        ),
+        ZaloDataSyncRun(
+            id="latest-secret-run", connector_account_id="sync-account", status="error",
+            cutoff_at=now, deadline_at=now + timedelta(minutes=5), source_ids_json=["latest-secret-thread"],
+            counters_json=counters, error_message="media_timeout", started_at=now,
+            completed_at=now + timedelta(minutes=1),
+        ),
+    ])
+    db.commit()
+    db.close()
+
+    with TestClient(app) as client:
+        state = client.get("/zalo-inbox/api/state").json()
+
+    assert state["data_sync"] == {
+        "status": "error", "cutoff_at": now.isoformat().replace("+00:00", "Z"),
+        "deadline_at": (now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+        "counters": counters, "error_code": "media_timeout",
+        "started_at": now.isoformat().replace("+00:00", "Z"),
+        "completed_at": (now + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+    }
+    serialized = json.dumps(state)
+    assert "secret-run" not in serialized
+    assert "secret-thread" not in serialized

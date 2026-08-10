@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -18,18 +20,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
+from models import ZaloBatch, ZaloConnectorAccount, ZaloDataSyncRun, ZaloMedia, ZaloSource
 from routers import ocr_ai
 from services.zalo_inbox import (
     InboxConflict,
     InboxConfigurationError,
     InboxError,
     InboxLimits,
+    InboxValidationError,
     apply_intake_consent,
     cleanup_expired_batch,
     confirm_batch,
     connector_state,
     create_batch,
+    data_sync_command,
     freeze_outputs,
     ingest_webhook_event,
     prepare_batch,
@@ -40,6 +44,7 @@ from services.zalo_inbox import (
     resolve_media_object,
     run_outputs,
     set_source_policy,
+    start_data_sync,
     source_ready,
     _aware,
     update_preview,
@@ -416,6 +421,8 @@ async def webhook(
         return {"ack": True, "components": result["components"]}
     if payload.get("event_type") in {"policy_ack", "source_sync_ack"}:
         return {"ack": True, **result}
+    if payload.get("event_type") in {"data_sync_progress", "data_sync_complete", "data_sync_failed"}:
+        return {"ack": True}
     return {"ack": True, "id": getattr(result, "id", None)}
 
 
@@ -483,6 +490,32 @@ def connector_config(
     }
 
 
+@router.get("/api/connectors/{account_id}/commands/next")
+def next_connector_command(
+    account_id: str,
+    x_zalo_timestamp: str | None = Header(default=None),
+    x_zalo_signature: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        master_secret = os.getenv("ZALO_INBOX_WEBHOOK_SECRET", "")
+        if not master_secret:
+            raise InboxValidationError("Thiếu cấu hình xác thực connector")
+        command_secret = hmac.new(
+            master_secret.encode(), account_id.encode(), hashlib.sha256,
+        ).hexdigest()
+        verify_webhook_signature(
+            b"", x_zalo_timestamp or "", x_zalo_signature or "",
+            command_secret,
+        )
+    except InboxError as exc:
+        _raise_http(exc)
+    if db.query(ZaloConnectorAccount).filter(ZaloConnectorAccount.id == account_id).first() is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy connector")
+    command = data_sync_command(db, account_id)
+    return command if command is not None else Response(status_code=204)
+
+
 @router.post("/api/connectors/{account_id}/consent")
 def consent_intake(account_id: str, db: Session = Depends(get_db)):
     try:
@@ -497,6 +530,15 @@ def refresh_sources(account_id: str, db: Session = Depends(get_db)):
         return {"source_sync_request_version": request_source_sync(db, account_id)}
     except InboxError as exc:
         _raise_http(exc)
+
+
+@router.post("/api/connectors/{account_id}/data-sync")
+def start_manual_data_sync(account_id: str, db: Session = Depends(get_db)):
+    try:
+        run = start_data_sync(db, account_id)
+    except InboxError as exc:
+        _raise_http(exc)
+    return {"run_id": run.id, "status": run.status}
 
 
 @router.get("/api/state")
@@ -531,6 +573,14 @@ def state_snapshot(db: Session = Depends(get_db)):
         db.query(ZaloBatch)
         .filter(ZaloBatch.connector_account_id == account.id)
         .order_by(ZaloBatch.created_at.desc())
+        .first()
+        if account
+        else None
+    )
+    latest_data_sync = (
+        db.query(ZaloDataSyncRun)
+        .filter(ZaloDataSyncRun.connector_account_id == account.id)
+        .order_by(ZaloDataSyncRun.started_at.desc(), ZaloDataSyncRun.id.desc())
         .first()
         if account
         else None
@@ -613,6 +663,19 @@ def state_snapshot(db: Session = Depends(get_db)):
                 "unfinished": _batch_unfinished(latest),
             }
             if latest
+            else None
+        ),
+        "data_sync": (
+            {
+                "status": latest_data_sync.status,
+                "cutoff_at": _as_iso(latest_data_sync.cutoff_at),
+                "deadline_at": _as_iso(latest_data_sync.deadline_at),
+                "counters": latest_data_sync.counters_json,
+                "error_code": latest_data_sync.error_message,
+                "started_at": _as_iso(latest_data_sync.started_at),
+                "completed_at": _as_iso(latest_data_sync.completed_at),
+            }
+            if latest_data_sync
             else None
         ),
     }
