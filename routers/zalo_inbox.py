@@ -608,6 +608,7 @@ def state_snapshot(db: Session = Depends(get_db)):
             }
         ),
         "consent_required": not bool(account and account.intake_consented_at),
+        "gap_started_at": _as_iso(account.gap_started_at) if account else None,
         "my_documents_verification_required": True,
         "policy_pending": bool(
             account
@@ -616,6 +617,16 @@ def state_snapshot(db: Session = Depends(get_db)):
                 or any(not source_ready(source) for source in all_sources)
             )
         ),
+        "source_sync": {
+            "status": (
+                "error"
+                if connector_error and account and account.source_sync_request_version != account.source_sync_acked_version
+                else "pending"
+                if account and account.source_sync_request_version != account.source_sync_acked_version
+                else "ready"
+            ),
+            "error": connector_error if account and account.source_sync_request_version != account.source_sync_acked_version else None,
+        },
         "sources": [
             {
                 "id": source.id,
