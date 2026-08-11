@@ -3,7 +3,7 @@
 Status: active
 Owner: platform/document-intake
 Source of truth: Cloud AI OCR flow, endpoints, response contracts, and QR exclusion
-**Cap nhat:** 2026-07-10
+**Cap nhat:** 2026-08-11
 **Files lien quan:** `routers/ocr_ai.py`, `frontend/templates/cases/form.html`
 **API endpoint:** `POST /api/ocr/analyze`, `GET /api/ocr/config`
 
@@ -223,6 +223,12 @@ Hoac neu chua muon doi contract:
 - Local OCR khong phai noi de tham chieu trong plan nay, tru khi can so sanh/ranh gioi pham vi o muc rat ngan.
 - Bai toan normalize tieng Viet da duoc mo ra, nhung chua chot architecture cuoi cung.
 - De xuat hien tai la: OCR raw bang Qwen, normalize hau xu ly o backend bang layer rieng de de test/audit.
+
+## Decision confirmation 2026-08-11
+
+- User confirmed the active Cloud AI OCR runtime must remove QR OCR completely.
+- Do not restore server/client QR scan, QR rescue/fallback, QR-first routing, or QR/source priority to resolve shared OCR failures.
+- The remaining shared runtime mismatch is tracked in `../zalo-document-inbox/open-issues.md` and requires a separate OCR implementation task.
 
 ---
 
