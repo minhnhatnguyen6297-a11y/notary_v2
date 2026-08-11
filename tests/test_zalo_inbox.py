@@ -2089,6 +2089,7 @@ def test_export_filename_uses_ho_chi_minh_time():
 
 
 def test_end_to_end_outputs_keep_frozen_order_and_provenance(db, tmp_path):
+    now = datetime.now(UTC)
     account = _account(db)
     source = _source(db, account)
     first = _media(db, account, source, tmp_path / "source", media_id="m-first", object_name="first.png")
@@ -2099,7 +2100,7 @@ def test_end_to_end_outputs_keep_frozen_order_and_provenance(db, tmp_path):
         storage_root=tmp_path / "source",
         batch_root=tmp_path / "batches",
         limits=InboxLimits(max_file_bytes=1024 * 1024, max_items=10, max_total_bytes=2 * 1024 * 1024, max_pixels=10000),
-        now=datetime(2026, 8, 4, 3, 30, tzinfo=UTC),
+        now=now,
     )
     prepare_batch(db, batch.id, batch_root=tmp_path / "batches")
     db.refresh(batch)
@@ -2315,6 +2316,7 @@ def test_parse_retry_uses_raw_cache(db):
 
 
 def test_retry_export_reuses_confirmed_snapshot(db, tmp_path):
+    now = datetime.now(UTC)
     account = _account(db)
     confirmed = {
         "persons": [{"ho_ten": "NGUYỄN VĂN A", "source_refs": ["item-1"]}],
@@ -2332,8 +2334,8 @@ def test_retry_export_reuses_confirmed_snapshot(db, tmp_path):
         outputs_json={"json": {"status": "error", "retryable": True, "error": "disk busy"}},
         ocr_status="confirmed",
         confirmed_json=confirmed,
-        created_at=datetime(2026, 8, 4, 3, 30, tzinfo=UTC),
-        expires_at=datetime(2026, 8, 7, 3, 30, tzinfo=UTC),
+        created_at=now,
+        expires_at=now + timedelta(hours=72),
     )
     db.add(batch)
     db.commit()

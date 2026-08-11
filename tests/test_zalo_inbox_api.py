@@ -47,6 +47,7 @@ def _app(tmp_path, monkeypatch):
 
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[zalo_inbox.get_session_factory] = lambda: factory
+    monkeypatch.setattr(zalo_inbox, "SessionLocal", factory)
     return app, factory
 
 
@@ -1322,3 +1323,96 @@ def test_state_exposes_only_latest_public_data_sync_status(tmp_path, monkeypatch
     serialized = json.dumps(state)
     assert "secret-run" not in serialized
     assert "secret-thread" not in serialized
+
+
+def test_data_sync_lifecycle_freezes_public_contract_and_reruns_without_private_logs(
+    tmp_path, monkeypatch, caplog,
+):
+    app, factory = _app(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc)
+    gap = now - timedelta(hours=2)
+    db = factory()
+    db.add(ZaloConnectorAccount(
+        id="sync-account", session_state="usable", listener_generation=1,
+        last_seen_at=now, intake_consented_at=now, policy_version=1, policy_acked_version=1,
+        gap_started_at=gap,
+    ))
+    db.add_all([
+        ZaloSource(
+            id="source-friend", connector_account_id="sync-account", conversation_id="PRIVATE_FRIEND_ID",
+            conversation_type="user", display_name="Friend", source_type="friend", enabled=True,
+            acked_enabled=True, policy_version=1, policy_acked_version=1,
+        ),
+        ZaloSource(
+            id="source-group", connector_account_id="sync-account", conversation_id="PRIVATE_GROUP_ID",
+            conversation_type="group", display_name="Group", source_type="group", enabled=True,
+            acked_enabled=True, policy_version=1, policy_acked_version=1,
+        ),
+    ])
+    db.commit()
+    db.close()
+    counters = {
+        "received": 4, "duplicates": 1, "imported_text": 2,
+        "imported_media": 0, "media_download_failures": 1,
+    }
+    caplog.set_level("DEBUG")
+
+    with TestClient(app) as client:
+        started = client.post("/zalo-inbox/api/connectors/sync-account/data-sync").json()
+        db = factory()
+        frozen = db.query(ZaloDataSyncRun).filter_by(id=started["run_id"]).one()
+        frozen_cutoff = frozen.cutoff_at.replace(tzinfo=timezone.utc)
+        group = db.query(ZaloSource).filter_by(id="source-group").one()
+        group.enabled = group.acked_enabled = False
+        db.commit()
+        db.close()
+        command = client.get(
+            "/zalo-inbox/api/connectors/sync-account/commands/next",
+            headers=_signed_command_headers("sync-account"),
+        ).json()
+
+        assert command == {
+            "command_type": "data_sync", "run_id": started["run_id"],
+            "cutoff_at": frozen_cutoff.isoformat().replace("+00:00", "Z"),
+            "deadline_at": (frozen_cutoff + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+            "source_ids": ["PRIVATE_FRIEND_ID", "PRIVATE_GROUP_ID"],
+        }
+        progress = {
+            "schema_version": 1, "event_type": "data_sync_progress",
+            "connector_account_id": "sync-account", "run_id": started["run_id"], "counters": counters,
+        }
+        assert _signed_post(client, progress).json() == {"ack": True}
+        invalid = _signed_post(client, {
+            **progress, "event_type": "data_sync_failed",
+            "error_code": "UPSTREAM_ERROR_SENTINEL https://REMOTE_URL_SENTINEL/PRIVATE_FILE",
+        })
+        assert invalid.status_code == 400
+        assert "UPSTREAM_ERROR_SENTINEL" not in invalid.text
+        complete = {**progress, "event_type": "data_sync_complete"}
+        assert _signed_post(client, complete).json() == {"ack": True}
+        assert _signed_post(client, complete).json() == {"ack": True}
+
+        state = client.get("/zalo-inbox/api/state").json()
+        assert state["data_sync"]["status"] == "completed_best_effort"
+        assert state["data_sync"]["counters"] == counters
+        assert state["gap_started_at"] == gap.isoformat().replace("+00:00", "Z")
+        serialized = json.dumps(state)
+        for private in (
+            started["run_id"], "PRIVATE_FRIEND_ID", "PRIVATE_GROUP_ID", "UPSTREAM_ERROR_SENTINEL",
+            "REMOTE_URL_SENTINEL", str(tmp_path), "webhook-test", "bootstrap-test",
+        ):
+            assert private not in serialized
+
+        rerun = client.post("/zalo-inbox/api/connectors/sync-account/data-sync")
+        assert rerun.status_code == 200
+        assert rerun.json()["status"] == "running"
+        assert rerun.json()["run_id"] != started["run_id"]
+
+    captured = [record.getMessage() for record in caplog.records]
+    assert any("/zalo-inbox/api/webhook" in message and "200 OK" in message for message in captured)
+    assert any("/zalo-inbox/api/webhook" in message and "400 Bad Request" in message for message in captured)
+    for private in (
+        "PRIVATE_FRIEND_ID", "PRIVATE_GROUP_ID", "UPSTREAM_ERROR_SENTINEL",
+        "REMOTE_URL_SENTINEL", "PRIVATE_FILE", "webhook-test", "bootstrap-test",
+    ):
+        assert private not in caplog.text
