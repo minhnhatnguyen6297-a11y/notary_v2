@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {mkdtemp, readFile, stat, utimes, writeFile} from 'node:fs/promises';
+import {mkdtemp, readFile, rm, stat, utimes, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -42,6 +42,86 @@ test('WebhookClient signs events and reads connector-only allowlist config', asy
   assert.equal(calls[0].options.headers['x-zalo-signature'], signBody(sentBody, '123', 'secret'));
   assert.equal(calls[1].options.headers['x-zalo-signature'], signBody('', '123', 'secret'));
   assert.equal(calls[1].url, 'http://backend/zalo-inbox/api/connectors/account-1/config');
+});
+
+test('WebhookClient passes an optional abort signal to event fetch', async () => {
+  const controller = new AbortController();
+  let options;
+  const client = new WebhookClient({
+    baseUrl: 'http://backend', secret: 'secret',
+    fetchImpl: async (_url, value) => { options = value; return jsonResponse({ack: true}); },
+  });
+
+  await client.sendEvent({schema_version: 1, event_type: 'heartbeat'}, controller.signal);
+
+  assert.equal(options.signal, controller.signal);
+});
+
+test('WebhookClient gets an account-signed command from the encoded connector URL', async () => {
+  const calls = [];
+  const command = {
+    command_type: 'data_sync',
+    run_id: 'run-1',
+    cutoff_at: '2026-08-07T10:00:00Z',
+    deadline_at: '2026-08-07T10:05:00Z',
+    source_ids: ['thread-1'],
+  };
+  const client = new WebhookClient({
+    baseUrl: 'http://backend',
+    secret: 'master-secret',
+    now: () => 123000,
+    fetchImpl: async (url, options) => {
+      calls.push({url, options});
+      return jsonResponse(command);
+    },
+  });
+
+  assert.deepEqual(await client.getNextCommand('account/one'), command);
+  await client.getNextCommand('account-two');
+
+  const accountKey = createHmac('sha256', 'master-secret').update('account/one').digest('hex');
+  const expected = createHmac('sha256', accountKey).update('123.').digest('hex');
+  assert.equal(calls[0].url, 'http://backend/zalo-inbox/api/connectors/account%2Fone/commands/next');
+  assert.equal(calls[0].options.headers['x-zalo-timestamp'], '123');
+  assert.equal(calls[0].options.headers['x-zalo-signature'], expected);
+  assert.notEqual(calls[1].options.headers['x-zalo-signature'], expected);
+});
+
+test('WebhookClient returns null for an empty command response without parsing JSON', async () => {
+  const client = new WebhookClient({
+    baseUrl: 'http://backend',
+    secret: 'master-secret',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 204,
+      json: async () => assert.fail('HTTP 204 must not parse JSON'),
+    }),
+  });
+  assert.equal(await client.getNextCommand('account-1'), null);
+});
+
+test('WebhookClient rejects malformed commands, sanitized HTTP failures, and missing command auth', async () => {
+  const valid = {
+    command_type: 'data_sync', run_id: 'run-1',
+    cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z', source_ids: [],
+  };
+  for (const command of [
+    {...valid, command_type: 'other'},
+    {...valid, run_id: '   '},
+    {...valid, cutoff_at: 'not-a-date'},
+    {...valid, deadline_at: ''},
+    {...valid, source_ids: 'thread-1'},
+  ]) {
+    const client = new WebhookClient({baseUrl: 'http://backend', secret: 'master-secret', fetchImpl: async () => jsonResponse(command)});
+    await assert.rejects(() => client.getNextCommand('account-1'), /command/i);
+  }
+  const failed = new WebhookClient({
+    baseUrl: 'http://backend', secret: 'master-secret',
+    fetchImpl: async () => ({ok: false, status: 503, json: async () => ({private: 'must-not-leak'})}),
+  });
+  await assert.rejects(() => failed.getNextCommand('account-1'), /^Error: backend returned HTTP 503$/);
+  const unsigned = new WebhookClient({baseUrl: 'http://backend', fetchImpl: async () => assert.fail('unsigned command must not fetch')});
+  await assert.rejects(() => unsigned.getNextCommand('account-1'));
 });
 
 test('WebhookClient sends exact versioned policy and source-sync ACK events', async () => {
@@ -197,4 +277,39 @@ test('MediaStore enforces quota and retention without deleting protected media',
   await store.put(protectedKey, Buffer.alloc(8));
   const full = await store.prune({protectedKeys: new Set([protectedKey]), now: new Date()});
   assert.deepEqual(full, {usageBytes: 8, storageFull: false});
+});
+
+test('MediaStore passes an optional abort signal to download fetch', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-media-signal-'));
+  try {
+    const controller = new AbortController();
+    let options;
+    const store = new MediaStore({root, quotaBytes: 8, retentionHours: 1});
+    await store.download('account-1/file.png', 'https://private.example/file.png', controller.signal, async (_url, value) => {
+      options = value;
+      return new Response(Buffer.from('data'));
+    });
+    assert.equal(options.signal, controller.signal);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('MediaStore does not write media when an abort-ignoring fetch releases late', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-media-late-abort-'));
+  try {
+    let release;
+    const response = new Promise((resolve) => { release = resolve; });
+    const controller = new AbortController();
+    const store = new MediaStore({root, quotaBytes: 8, retentionHours: 1});
+    const target = path.join(root, 'account-1', 'file.png');
+    const downloading = store.download('account-1/file.png', 'https://private.example/file.png', controller.signal, async () => response);
+    controller.abort();
+    release(new Response(Buffer.from('data')));
+
+    await assert.rejects(downloading, /abort/i);
+    await assert.rejects(() => stat(target), /ENOENT/);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
 });

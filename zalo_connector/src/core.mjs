@@ -44,7 +44,7 @@ export class WebhookClient {
     return this.#json(response);
   }
 
-  async sendEvent(event) {
+  async sendEvent(event, signal) {
     const body = JSON.stringify(event);
     const timestamp = String(Math.floor(this.now() / 1000));
     const response = await this.fetch(`${this.baseUrl}/zalo-inbox/api/webhook`, {
@@ -55,6 +55,7 @@ export class WebhookClient {
         'x-zalo-signature': signBody(body, timestamp, this.secret),
       },
       body,
+      ...(signal ? {signal} : {}),
     });
     return requireExactAck(event, await this.#json(response));
   }
@@ -86,6 +87,27 @@ export class WebhookClient {
       },
     });
     return this.#json(response);
+  }
+
+  async getNextCommand(accountId) {
+    const timestamp = String(Math.floor(this.now() / 1000));
+    const accountKeyHex = createHmac('sha256', this.secret).update(String(accountId)).digest('hex');
+    const response = await this.fetch(`${this.baseUrl}/zalo-inbox/api/connectors/${encodeURIComponent(accountId)}/commands/next`, {
+      headers: {
+        'x-zalo-timestamp': timestamp,
+        'x-zalo-signature': signBody('', timestamp, accountKeyHex),
+      },
+    });
+    if (response.status === 204) return null;
+    const command = await this.#json(response);
+    if (
+      command?.command_type !== 'data_sync'
+      || !String(command.run_id || '').trim()
+      || typeof command.cutoff_at !== 'string' || Number.isNaN(Date.parse(command.cutoff_at))
+      || typeof command.deadline_at !== 'string' || Number.isNaN(Date.parse(command.deadline_at))
+      || !Array.isArray(command.source_ids)
+    ) throw new Error('backend command is invalid');
+    return command;
   }
 
   async #json(response) {
@@ -202,6 +224,7 @@ export class FileOutbox {
     const temporary = `${target}.${process.pid}.tmp`;
     await writeFile(temporary, JSON.stringify(event), {encoding: 'utf8', mode: 0o600});
     await rename(temporary, target);
+    return name;
   }
 
   async pending() {
@@ -283,9 +306,10 @@ export class MediaStore {
     return target;
   }
 
-  async download(key, url, fetchImpl = fetch) {
+  async download(key, url, signal, fetchImpl = fetch) {
     const {target} = this.#target(key);
-    const response = await fetchImpl(url);
+    const response = await fetchImpl(url, signal ? {signal} : undefined);
+    signal?.throwIfAborted();
     if (!response.ok || !response.body) throw new Error(`attachment download returned HTTP ${response.status}`);
     const baseUsage = await this.#usage(target);
     const announced = Number(response.headers.get('content-length'));
@@ -296,10 +320,12 @@ export class MediaStore {
     let written = 0;
     try {
       for await (const chunk of response.body) {
+        signal?.throwIfAborted();
         written += chunk.length;
         if (baseUsage + written > this.quotaBytes) throw new Error('connector storage quota exceeded');
         await handle.write(chunk);
       }
+      signal?.throwIfAborted();
       await handle.close();
       await rename(temporary, target);
       return {path: target, sizeBytes: written};

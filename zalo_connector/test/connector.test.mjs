@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import {mkdir, mkdtemp, rm, stat, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, rm, stat, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import {FileOutbox} from '../src/core.mjs';
-import {createZaloClient, finalizeQrLogin, handleMessage, handleQrLoginEvent, installSourceSyncTriggers, isParentAlive, listenerHeartbeatState, processUnknownSourceQueue, publishConnectedState, readSettings, refreshRuntimeState, resolveUnknownSource, shouldRestoreSession, sourceDescriptor, startConnector, startParentWatch, syncSources, verifyRestoredSession} from '../src/connector.mjs';
+import {createZaloClient, finalizeQrLogin, handleMessage, handleQrLoginEvent, installCommandPoll, installSourceSyncTriggers, isParentAlive, listenerHeartbeatState, processUnknownSourceQueue, publishConnectedState, readSettings, refreshRuntimeState, resolveUnknownSource, runDataSync, shouldRestoreSession, sourceDescriptor, startConnector, startParentWatch, syncSources, verifyRestoredSession} from '../src/connector.mjs';
 
 test('readSettings requires deployment quota and retention instead of inventing defaults', () => {
   assert.throws(() => readSettings({}), /required/i);
@@ -21,7 +21,772 @@ test('readSettings requires deployment quota and retention instead of inventing 
   assert.equal(settings.quotaBytes, 1000);
   assert.equal(settings.heartbeatMs, 15000);
   assert.equal(settings.configPollMs, 15000);
+  assert.equal(settings.commandPollMs, 1000);
   assert.equal(settings.sourceReconcileMs, 3600000);
+});
+
+test('command polling uses a dedicated timer and contains poll rejection', async () => {
+  let callback;
+  let polls = 0;
+  const timer = installCommandPoll({
+    poll: async () => { polls += 1; throw new Error('offline'); },
+    setTimer: (fn, milliseconds) => {
+      callback = fn;
+      assert.equal(milliseconds, 1000);
+      return 'command-timer';
+    },
+  });
+
+  assert.equal(timer, 'command-timer');
+  callback();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(polls, 1);
+});
+
+test('command polling ignores ticks while the previous poll is in flight', async () => {
+  let callback;
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  let polls = 0;
+  installCommandPoll({
+    poll: async () => { polls += 1; await pending; },
+    setTimer: (fn) => { callback = fn; return 'command-timer'; },
+  });
+
+  callback();
+  callback();
+  await Promise.resolve();
+  assert.equal(polls, 1);
+
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  callback();
+  await Promise.resolve();
+  assert.equal(polls, 2);
+});
+
+function historyFixture(extra = {}) {
+  const handlers = new Map();
+  const requests = [];
+  const events = [];
+  const listener = {
+    on: (name, callback) => handlers.set(name, [...(handlers.get(name) || []), callback]),
+    off: (name, callback) => handlers.set(name, (handlers.get(name) || []).filter((item) => item !== callback)),
+    requestOldMessages: async (type, lastMsgId) => requests.push([type, lastMsgId]),
+  };
+  const now = Date.parse('2026-08-07T10:00:00Z');
+  const fixture = {
+    api: {listener},
+    command: {
+      command_type: 'data_sync', run_id: 'run-1', source_ids: ['u-1', 'g-1'],
+      cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+    },
+    accountId: 'account-1', sourceNames: new Map(), store: {}, outbox: {}, downloadQueue: {},
+    client: {sendEvent: async (event) => { events.push(event); return {ack: true}; }},
+    now: () => now,
+    ...extra,
+  };
+  return {fixture, handlers, requests, events};
+}
+
+function emitHistory(testCase, type, messages = []) {
+  for (const handler of testCase.handlers.get('old_messages') || []) handler(messages, type);
+}
+
+const emptySyncCounters = {
+  received: 0,
+  duplicates: 0,
+  imported_text: 0,
+  imported_media: 0,
+  media_download_failures: 0,
+};
+
+test('runDataSync requests User and Group once, correlates callbacks, ignores active duplicate, and cleans up', async () => {
+  const testCase = historyFixture();
+  const first = runDataSync(testCase.fixture);
+  const duplicate = await runDataSync(testCase.fixture);
+  assert.equal(duplicate, undefined);
+  assert.deepEqual(testCase.requests, [[0, null], [1, null]]);
+  assert.equal(testCase.handlers.get('old_messages').length, 1);
+
+  emitHistory(testCase, 1);
+  await Promise.resolve();
+  assert.equal(testCase.events.some(({event_type}) => event_type === 'data_sync_complete'), false);
+  emitHistory(testCase, 0);
+  await first;
+
+  assert.deepEqual(testCase.events, [{
+    schema_version: 1, event_type: 'data_sync_complete', connector_account_id: 'account-1', run_id: 'run-1',
+    counters: {received: 0, duplicates: 0, imported_text: 0, imported_media: 0, media_download_failures: 0},
+  }]);
+  assert.deepEqual(testCase.handlers.get('old_messages'), []);
+});
+
+test('runDataSync treats only terminal HTTP 409 as already reported and still cleans up', async () => {
+  let timerId = 0;
+  const cleared = [];
+  const terminalAttempts = [];
+  const testCase = historyFixture({
+    setTimer: () => ++timerId,
+    clearTimer: (id) => cleared.push(id),
+    client: {sendEvent: async (event) => {
+      terminalAttempts.push(event.event_type);
+      throw new Error(timerId === 1 ? 'backend returned HTTP 409' : 'backend returned HTTP 503');
+    }},
+  });
+
+  const first = runDataSync(testCase.fixture);
+  emitHistory(testCase, 0);
+  emitHistory(testCase, 1);
+  await first;
+
+  assert.deepEqual(terminalAttempts, ['data_sync_complete']);
+  assert.deepEqual(testCase.handlers.get('old_messages'), []);
+  assert.deepEqual(testCase.handlers.get('disconnected'), []);
+  assert.deepEqual(testCase.handlers.get('error'), []);
+  assert.deepEqual(cleared, [1]);
+
+  const rerun = runDataSync(testCase.fixture);
+  emitHistory(testCase, 0);
+  emitHistory(testCase, 1);
+  await assert.rejects(rerun, /backend returned HTTP 503/);
+  assert.deepEqual(testCase.requests, [[0, null], [1, null], [0, null], [1, null]]);
+  assert.deepEqual(terminalAttempts, ['data_sync_complete', 'data_sync_complete']);
+  assert.deepEqual(testCase.handlers.get('old_messages'), []);
+  assert.deepEqual(testCase.handlers.get('disconnected'), []);
+  assert.deepEqual(testCase.handlers.get('error'), []);
+  assert.deepEqual(cleared, [1, 2]);
+});
+
+test('runDataSync fails once when its listener disconnects, cleans up, and permits a rerun', async () => {
+  let deadlineCallback;
+  let timerId = 0;
+  const cleared = [];
+  const testCase = historyFixture({
+    setTimer: (callback) => { deadlineCallback = callback; return ++timerId; },
+    clearTimer: (id) => cleared.push(id),
+  });
+
+  const first = runDataSync(testCase.fixture);
+  const disconnected = [...(testCase.handlers.get('disconnected') || [])];
+  const errors = [...(testCase.handlers.get('error') || [])];
+  disconnected.forEach((callback) => callback());
+  errors.forEach((callback) => callback(new Error('listener failed')));
+  errors.forEach((callback) => callback(new Error('listener failed again')));
+  deadlineCallback();
+  await first;
+
+  assert.deepEqual(testCase.events, [{
+    schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1', run_id: 'run-1',
+    error_code: 'listener_disconnected', counters: emptySyncCounters,
+  }]);
+  assert.equal(testCase.events.some(({event_type}) => event_type === 'data_sync_complete'), false);
+  assert.deepEqual(testCase.handlers.get('old_messages'), []);
+  assert.deepEqual(testCase.handlers.get('disconnected'), []);
+  assert.deepEqual(testCase.handlers.get('error'), []);
+  assert.deepEqual(cleared, [1]);
+
+  const rerun = runDataSync(testCase.fixture);
+  assert.deepEqual(testCase.requests, [[0, null], [1, null], [0, null], [1, null]]);
+  emitHistory(testCase, 0);
+  emitHistory(testCase, 1);
+  await rerun;
+  assert.equal(testCase.events.filter(({event_type}) => event_type === 'data_sync_complete').length, 1);
+  assert.deepEqual(cleared, [1, 2]);
+});
+
+test('runDataSync sends only pending complete when the listener disconnects after terminal starts', async () => {
+  let releaseComplete;
+  const completePending = new Promise((resolve) => { releaseComplete = resolve; });
+  const terminal = [];
+  const testCase = historyFixture();
+  testCase.fixture.client.sendEvent = async (event) => {
+    if (event.event_type.startsWith('data_sync_')) terminal.push(event.event_type);
+    if (event.event_type === 'data_sync_complete') await completePending;
+    return {ack: true};
+  };
+
+  const running = runDataSync(testCase.fixture);
+  emitHistory(testCase, 0);
+  emitHistory(testCase, 1);
+  while (!terminal.length) await new Promise((resolve) => setImmediate(resolve));
+  for (const handler of testCase.handlers.get('disconnected') || []) handler();
+  releaseComplete();
+  await running;
+
+  assert.deepEqual(terminal, ['data_sync_complete']);
+});
+
+test('runDataSync reports a sanitized request failure with backend-shaped counters and cleanup', async () => {
+  const testCase = historyFixture();
+  testCase.fixture.api.listener.requestOldMessages = async () => { throw new Error('PRIVATE_UPSTREAM_REQUEST'); };
+
+  await runDataSync(testCase.fixture);
+
+  assert.deepEqual(testCase.events, [{
+    schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1', run_id: 'run-1',
+    error_code: 'history_request_failed', counters: emptySyncCounters,
+  }]);
+  assert.equal(JSON.stringify(testCase.events).includes('PRIVATE_UPSTREAM_REQUEST'), false);
+  assert.deepEqual(testCase.handlers.get('old_messages'), []);
+  assert.deepEqual(testCase.handlers.get('disconnected'), []);
+  assert.deepEqual(testCase.handlers.get('error'), []);
+});
+
+test('runDataSync reports one sanitized ordinary processing failure with current counters', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-processing-failure-'));
+  try {
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async () => assert.fail('text must not download')},
+      outbox: {enqueue: async () => { throw new Error('PRIVATE_PROCESSING_FAILURE'); }},
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+    });
+    const at = String(Date.parse('2026-08-03T10:00:00Z'));
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {msgId: 'broken', uidFrom: 'sender-1', ts: at, content: 'private'}}]);
+    emitHistory(testCase, 1);
+    await running;
+
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type.startsWith('data_sync_')), [{
+      schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1', run_id: 'run-1',
+      error_code: 'history_processing_failed',
+      counters: {received: 1, duplicates: 0, imported_text: 0, imported_media: 0, media_download_failures: 0},
+    }]);
+    assert.equal(JSON.stringify(testCase.events).includes('PRIVATE_PROCESSING_FAILURE'), false);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync collects both callbacks before importing only locally eligible messages at inclusive boundaries', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-filter-'));
+  try {
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'filter-run',
+        source_ids: ['u-1', 'g-1', 'missing-source', 'my-docs'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([
+        ['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})],
+        ['u-2', sourceDescriptor({conversationId: 'u-2', sourceType: 'friend', displayName: 'Other'})],
+        ['g-1', sourceDescriptor({conversationId: 'g-1', sourceType: 'group', displayName: 'Group'})],
+        ['my-docs', sourceDescriptor({conversationId: 'my-docs', sourceType: 'my_documents', displayName: 'My Documents'})],
+      ]),
+      store: {download: async () => assert.fail('text history must not download')},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      testCase.events.push(event);
+      return event.event_type === 'message'
+        ? {ack: true, components: {text: 'imported', media: []}}
+        : {ack: true};
+    };
+    const message = (threadId, msgId, sentAt, content = `text-${msgId}`) => ({
+      type: threadId === 'g-1' ? 1 : 0, threadId,
+      data: {msgId, uidFrom: 'sender-1', ts: String(Date.parse(sentAt)), content},
+    });
+
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 1, [
+      message('g-1', 'at-start', '2026-07-31T10:00:00Z'),
+      message('g-1', 'at-end', '2026-08-07T10:00:00Z'),
+    ]);
+    await Promise.resolve();
+    assert.deepEqual(testCase.events, []);
+    emitHistory(testCase, 0, [
+      message('u-1', 'inside', '2026-08-03T10:00:00Z'),
+      message('u-1', 'before', '2026-07-31T09:59:59.999Z'),
+      message('u-1', 'after', '2026-08-07T10:00:00.001Z'),
+      message('u-2', 'not-commanded', '2026-08-03T10:00:00Z'),
+      message('missing-source', 'unknown', '2026-08-03T10:00:00Z'),
+      message('my-docs', 'private-self', '2026-08-03T10:00:00Z'),
+      message('u-1', 'unsupported', '2026-08-03T10:00:00Z', {href: 'https://private.example/video.mp4', title: 'private.mp4', type: 'video/mp4'}),
+    ]);
+    await running;
+
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type === 'message').map(({msg_id}) => msg_id), [
+      'at-start', 'at-end', 'inside',
+    ]);
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type === 'data_sync_progress').map(({counters}) => counters.received), [1, 2, 3]);
+    assert.equal(testCase.events.at(-1).event_type, 'data_sync_complete');
+    assert.equal(testCase.events.at(-1).counters.received, 3);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync counts imported and duplicate text and media from the exact message ACK', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-counters-'));
+  try {
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'counter-run', source_ids: ['g-1'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([['g-1', sourceDescriptor({conversationId: 'g-1', sourceType: 'group', displayName: 'Group'})]]),
+      store: {download: async (key) => ({path: key, sizeBytes: 3})},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      testCase.events.push(event);
+      return event.event_type === 'message'
+        ? {ack: true, components: {text: 'imported', media: [
+          {attachment_index: 0, status: 'imported'},
+          {attachment_index: 1, status: 'duplicate'},
+        ]}}
+        : {ack: true};
+    };
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0);
+    emitHistory(testCase, 1, [{
+      type: 1, threadId: 'g-1', data: {
+        msgId: 'mixed', uidFrom: 'sender-1', ts: String(Date.parse('2026-08-03T10:00:00Z')),
+        content: 'text', attachments: [
+          {href: 'https://private.example/a.png', title: 'a.png', type: 'image/png'},
+          {href: 'https://private.example/b.pdf', title: 'b.pdf', type: 'application/pdf'},
+        ],
+      },
+    }]);
+    await running;
+
+    const expected = {received: 1, duplicates: 1, imported_text: 1, imported_media: 1, media_download_failures: 0};
+    assert.deepEqual(testCase.events.find(({event_type}) => event_type === 'data_sync_progress').counters, expected);
+    assert.deepEqual(testCase.events.at(-1).counters, expected);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync preserves history text and successful siblings while counting every failed attachment', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-download-failure-'));
+  try {
+    const downloadQueue = new FileOutbox(path.join(root, 'download-queue'));
+    await downloadQueue.enqueue('realtime-unrelated', {record_type: 'realtime_marker', message_key: 'account-1:u-live:live'});
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'failure-run', source_ids: ['u-1'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async (key, url) => {
+        if (url.includes('expired')) throw new Error('PRIVATE_DOWNLOAD_ERROR');
+        return {path: key, sizeBytes: 3};
+      }},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue,
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      testCase.events.push(event);
+      return event.event_type === 'message'
+        ? {ack: true, components: {
+          text: event.raw_text == null ? 'absent' : 'imported',
+          media: event.attachments.map(({attachment_index}) => ({attachment_index, status: 'imported'})),
+        }}
+        : {ack: true};
+    };
+    const at = String(Date.parse('2026-08-03T10:00:00Z'));
+    const attachment = (name) => ({href: `https://private.example/${name}.png`, title: `${name}.png`, type: 'image/png'});
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [
+      {type: 0, threadId: 'u-1', data: {msgId: 'mixed', uidFrom: 'sender-1', ts: at, content: 'keep text', attachments: [
+        attachment('expired-a'), attachment('success'), attachment('expired-b'),
+      ]}},
+      {type: 0, threadId: 'u-1', data: {msgId: 'text-only-fallback', uidFrom: 'sender-1', ts: at, content: 'also keep', attachments: [attachment('expired-c')]}},
+      {type: 0, threadId: 'u-1', data: {msgId: 'media-only-failure', uidFrom: 'sender-1', ts: at, content: attachment('expired-d')}},
+    ]);
+    emitHistory(testCase, 1);
+    await running;
+
+    const messages = testCase.events.filter(({event_type}) => event_type === 'message');
+    assert.deepEqual(messages.map(({msg_id, raw_text, attachments}) => ({msg_id, raw_text, indexes: attachments.map(({attachment_index}) => attachment_index)})), [
+      {msg_id: 'mixed', raw_text: 'keep text', indexes: [1]},
+      {msg_id: 'text-only-fallback', raw_text: 'also keep', indexes: []},
+    ]);
+    assert.deepEqual((await downloadQueue.entries()).map(({event}) => event.message_key), ['account-1:u-live:live']);
+    assert.deepEqual(testCase.events.at(-1).counters, {
+      received: 3, duplicates: 0, imported_text: 2, imported_media: 1, media_download_failures: 4,
+    });
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync preserves exact-key realtime queue and outbox records byte-for-byte', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-owned-collision-'));
+  try {
+    const messageKey = 'account-1:u-1:pending';
+    const downloadQueue = new FileOutbox(path.join(root, 'download-queue'));
+    const outbox = new FileOutbox(path.join(root, 'outbox'));
+    await downloadQueue.enqueue(messageKey, {
+      record_type: 'message', message_key: messageKey, owner: 'realtime',
+      envelope: {connector_account_id: 'account-1', conversation_id: 'u-1', msg_id: 'pending'}, completed: [],
+    });
+    await outbox.enqueue(messageKey, {
+      schema_version: 1, event_type: 'message', connector_account_id: 'account-1', conversation_id: 'u-1',
+      msg_id: 'pending', raw_text: 'realtime pending', attachments: [], owner: 'realtime',
+    });
+    const queueFile = path.join(downloadQueue.root, (await downloadQueue.pending())[0]);
+    const outboxFile = path.join(outbox.root, (await outbox.pending())[0]);
+    const before = [await readFile(queueFile), await readFile(outboxFile)];
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async () => assert.fail('collision must not download')}, outbox, downloadQueue,
+    });
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {
+      msgId: 'pending', uidFrom: 'sender-1', ts: String(Date.parse('2026-08-03T10:00:00Z')), content: 'history copy',
+    }}]);
+    emitHistory(testCase, 1);
+    await running;
+
+    assert.deepEqual([await readFile(queueFile), await readFile(outboxFile)], before);
+    assert.equal(testCase.events.some(({event_type}) => event_type === 'message'), false);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync late cancelled enqueue cannot overwrite a newer realtime record with the same key', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-late-enqueue-'));
+  try {
+    const messageKey = 'account-1:u-1:late-owner';
+    const baseQueue = new FileOutbox(path.join(root, 'download-queue'));
+    let releaseHistory;
+    const historyReleased = new Promise((resolve) => { releaseHistory = resolve; });
+    let markHistoryStarted;
+    const historyStarted = new Promise((resolve) => { markHistoryStarted = resolve; });
+    let markHistoryFinished;
+    const historyFinished = new Promise((resolve) => { markHistoryFinished = resolve; });
+    const downloadQueue = {
+      entries: (...args) => baseQueue.entries(...args),
+      remove: (...args) => baseQueue.remove(...args),
+      enqueue: async (eventId, event) => {
+        if (event.record_type === 'message' && event.owner === 'history') {
+          markHistoryStarted();
+          await historyReleased;
+        }
+        const name = await baseQueue.enqueue(eventId, event);
+        if (event.record_type === 'message' && event.owner === 'history') markHistoryFinished();
+        return name;
+      },
+    };
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {}, outbox: new FileOutbox(path.join(root, 'outbox')), downloadQueue,
+    });
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {
+      msgId: 'late-owner', uidFrom: 'sender-1', ts: String(Date.parse('2026-08-03T10:00:00Z')), content: 'history',
+    }}]);
+    emitHistory(testCase, 1);
+    await Promise.race([
+      historyStarted,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('history enqueue did not start')), 100)),
+    ]);
+    for (const handler of testCase.handlers.get('disconnected') || []) handler();
+    await running;
+
+    const realtime = {record_type: 'message', message_key: messageKey, owner: 'realtime', envelope: {raw_text: 'realtime'}, completed: []};
+    await baseQueue.enqueue(messageKey, realtime);
+    releaseHistory();
+    await historyFinished;
+
+    assert.deepEqual((await baseQueue.entries()).map(({event}) => event), [realtime]);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync awaits one enqueueHistory chunk and yields to realtime before queueing the next', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-priority-'));
+  try {
+    let releaseFirst;
+    const firstReleased = new Promise((resolve) => { releaseFirst = resolve; });
+    const order = [];
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'priority-run', source_ids: ['u-1'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async () => assert.fail('text history must not download')},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+      enqueueHistory: async (fn) => {
+        const chunk = order.filter((item) => item.startsWith('queued')).length + 1;
+        order.push(`queued-${chunk}`);
+        if (chunk === 1) await firstReleased;
+        await fn();
+      },
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      if (event.event_type === 'message') order.push(`message-${event.msg_id}`);
+      return event.event_type === 'message'
+        ? {ack: true, components: {text: 'imported', media: []}}
+        : {ack: true};
+    };
+    const at = String(Date.parse('2026-08-03T10:00:00Z'));
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [
+      {type: 0, threadId: 'u-1', data: {msgId: 'one', uidFrom: 'sender-1', ts: at, content: 'one'}},
+      {type: 0, threadId: 'u-1', data: {msgId: 'two', uidFrom: 'sender-1', ts: at, content: 'two'}},
+    ]);
+    emitHistory(testCase, 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!order.includes('queued-1')) {
+      await running;
+      assert.deepEqual(order, ['queued-1']);
+    }
+    assert.deepEqual(order, ['queued-1']);
+
+    setImmediate(() => order.push('realtime'));
+    releaseFirst();
+    await running;
+    assert.ok(order.indexOf('realtime') < order.indexOf('queued-2'));
+    assert.deepEqual(order.filter((item) => item.startsWith('queued')), ['queued-1', 'queued-2']);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync stops before the next chunk when its deadline expires', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-deadline-'));
+  try {
+    let now = Date.parse('2026-08-07T10:00:00Z');
+    const deadline = Date.parse('2026-08-07T10:05:00Z');
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'deadline-run', source_ids: ['u-1'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async () => assert.fail('text history must not download')},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+      now: () => now,
+      enqueueHistory: async (fn) => { await fn(); now = deadline; },
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      testCase.events.push(event);
+      return event.event_type === 'message'
+        ? {ack: true, components: {text: 'imported', media: []}}
+        : {ack: true};
+    };
+    const at = String(Date.parse('2026-08-03T10:00:00Z'));
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [
+      {type: 0, threadId: 'u-1', data: {msgId: 'one', uidFrom: 'sender-1', ts: at, content: 'one'}},
+      {type: 0, threadId: 'u-1', data: {msgId: 'two', uidFrom: 'sender-1', ts: at, content: 'two'}},
+    ]);
+    emitHistory(testCase, 1);
+    await running;
+
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type === 'message').map(({msg_id}) => msg_id), ['one']);
+    assert.deepEqual(testCase.events.at(-1), {
+      schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1',
+      run_id: 'deadline-run', error_code: 'deadline_expired',
+      counters: {received: 1, duplicates: 0, imported_text: 1, imported_media: 0, media_download_failures: 0},
+    });
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync disconnects an in-flight history download without completing and cleans only its queue entries', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-inflight-disconnect-'));
+  try {
+    let downloadStarted;
+    const started = new Promise((resolve) => { downloadStarted = resolve; });
+    let releaseDownload;
+    const released = new Promise((resolve) => { releaseDownload = resolve; });
+    const downloadQueue = new FileOutbox(path.join(root, 'download-queue'));
+    await downloadQueue.enqueue('realtime-unrelated', {record_type: 'realtime_marker', message_key: 'account-1:u-live:live'});
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'User'})]]),
+      store: {download: async (key) => { downloadStarted(); await released; return {path: key, sizeBytes: 3}; }},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue,
+    });
+    testCase.fixture.client.sendEvent = async (event) => {
+      testCase.events.push(event);
+      return event.event_type === 'message'
+        ? {ack: true, components: {text: 'absent', media: event.attachments.map(({attachment_index}) => ({attachment_index, status: 'imported'}))}}
+        : {ack: true};
+    };
+    const at = String(Date.parse('2026-08-03T10:00:00Z'));
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {msgId: 'in-flight', uidFrom: 'sender-1', ts: at, content: {
+      href: 'https://private.example/a.png', title: 'a.png', type: 'image/png',
+    }}}]);
+    emitHistory(testCase, 1);
+    await started;
+    for (const callback of testCase.handlers.get('disconnected') || []) callback();
+    releaseDownload();
+    await running;
+
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type.startsWith('data_sync_')), [{
+      schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1', run_id: 'run-1',
+      error_code: 'listener_disconnected',
+      counters: {received: 1, duplicates: 0, imported_text: 0, imported_media: 0, media_download_failures: 0},
+    }]);
+    assert.deepEqual((await downloadQueue.entries()).map(({event}) => event.message_key), ['account-1:u-live:live']);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync cancels and cleans up when an in-flight history operation never settles', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-hung-download-'));
+  try {
+    const cleared = [];
+    let markDownloadStarted;
+    const downloadStarted = new Promise((resolve) => { markDownloadStarted = resolve; });
+    let downloadAborted = false;
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'Bạn A'})]]),
+      store: {download: async (_key, _url, signal) => {
+        markDownloadStarted();
+        return new Promise((_, reject) => signal.addEventListener('abort', () => {
+          downloadAborted = true;
+          reject(signal.reason);
+        }, {once: true}));
+      }},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+      setTimer: () => 1,
+      clearTimer: (id) => cleared.push(id),
+    });
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {
+      msgId: 'hung-media', uidFrom: 'sender-1', ts: String(Date.parse('2026-08-03T10:00:00Z')),
+      content: {href: 'https://private.example/hung.png', title: 'hung.png', type: 'image/png'},
+    }}]);
+    emitHistory(testCase, 1);
+    await downloadStarted;
+    for (const handler of testCase.handlers.get('disconnected') || []) handler();
+
+    await Promise.race([
+      running,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('run remained pending')), 100)),
+    ]);
+
+    assert.deepEqual(testCase.events.filter(({event_type}) => event_type.startsWith('data_sync_')), [{
+      schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1', run_id: 'run-1',
+      error_code: 'listener_disconnected',
+      counters: {received: 1, duplicates: 0, imported_text: 0, imported_media: 0, media_download_failures: 0},
+    }]);
+    assert.deepEqual(testCase.handlers.get('old_messages'), []);
+    assert.deepEqual(testCase.handlers.get('disconnected'), []);
+    assert.deepEqual(testCase.handlers.get('error'), []);
+    assert.deepEqual(cleared, [1]);
+    assert.equal(downloadAborted, true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync abandoned history send never flushes unrelated realtime outbox entries', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-late-send-'));
+  try {
+    let releaseMessage;
+    const messageRelease = new Promise((resolve) => { releaseMessage = resolve; });
+    let markMessageStarted;
+    const messageStarted = new Promise((resolve) => { markMessageStarted = resolve; });
+    const outbox = new FileOutbox(path.join(root, 'outbox'));
+    await outbox.enqueue('unrelated', {schema_version: 1, event_type: 'heartbeat', connector_account_id: 'account-1'});
+    const testCase = historyFixture({
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'Bạn A'})]]),
+      store: {}, outbox,
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+    });
+    const sent = [];
+    let messageSignal;
+    testCase.fixture.client.sendEvent = async (event, signal) => {
+      sent.push(event.event_type);
+      if (event.event_type.startsWith('data_sync_')) testCase.events.push(event);
+      if (event.event_type === 'message') {
+        messageSignal = signal;
+        markMessageStarted();
+        await messageRelease;
+        return {ack: true, components: {text: 'imported', media: []}};
+      }
+      return {ack: true};
+    };
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {
+      msgId: 'late-message', uidFrom: 'sender-1', ts: String(Date.parse('2026-08-03T10:00:00Z')), content: 'private',
+    }}]);
+    emitHistory(testCase, 1);
+    await messageStarted;
+    for (const handler of testCase.handlers.get('disconnected') || []) handler();
+    await running;
+    const rerun = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0);
+    emitHistory(testCase, 1);
+    await rerun;
+    releaseMessage();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual((await outbox.entries()).map(({event}) => event.event_type), ['heartbeat']);
+    assert.equal(sent.includes('heartbeat'), false);
+    assert.equal(messageSignal.aborted, true);
+    assert.equal(testCase.events.find(({event_type}) => event_type === 'data_sync_failed').counters.imported_text, 0);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('runDataSync never logs private history content or download errors', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-history-privacy-'));
+  const captured = [];
+  const originals = Object.fromEntries(['log', 'info', 'warn', 'error', 'debug'].map((name) => [name, console[name]]));
+  for (const name of Object.keys(originals)) console[name] = (...args) => captured.push(args.join(' '));
+  try {
+    const testCase = historyFixture({
+      command: {
+        command_type: 'data_sync', run_id: 'privacy-run', source_ids: ['u-1'],
+        cutoff_at: '2026-08-07T10:00:00Z', deadline_at: '2026-08-07T10:05:00Z',
+      },
+      sourceNames: new Map([['u-1', sourceDescriptor({conversationId: 'u-1', sourceType: 'friend', displayName: 'PRIVATE_NAME'})]]),
+      store: {download: async () => { throw new Error('PRIVATE_ERROR'); }},
+      outbox: new FileOutbox(path.join(root, 'outbox')),
+      downloadQueue: new FileOutbox(path.join(root, 'download-queue')),
+    });
+    const running = runDataSync(testCase.fixture);
+    emitHistory(testCase, 0, [{type: 0, threadId: 'u-1', data: {
+      msgId: 'private-id', uidFrom: 'private-sender', ts: String(Date.parse('2026-08-03T10:00:00Z')),
+      content: {href: 'https://PRIVATE_URL/file.png', title: 'PRIVATE_FILE.png', type: 'image/png'},
+    }}]);
+    emitHistory(testCase, 1);
+    await running;
+  } finally {
+    Object.assign(console, originals);
+    await rm(root, {recursive: true, force: true});
+  }
+  assert.equal(captured.join('\n'), '');
+});
+
+test('runDataSync fails an expired command without requesting history and cleans up', async () => {
+  const testCase = historyFixture({
+    command: {
+      command_type: 'data_sync', run_id: 'expired-run', source_ids: ['u-1'],
+      cutoff_at: '2026-08-07T09:00:00Z', deadline_at: '2026-08-07T09:59:59Z',
+    },
+  });
+
+  await runDataSync(testCase.fixture);
+
+  assert.deepEqual(testCase.events, [{
+    schema_version: 1, event_type: 'data_sync_failed', connector_account_id: 'account-1',
+    run_id: 'expired-run', error_code: 'deadline_expired', counters: emptySyncCounters,
+  }]);
+  assert.deepEqual(testCase.requests, []);
+  assert.deepEqual(testCase.handlers.get('old_messages') || [], []);
 });
 
 test('zca-js logging is disabled and exact My Documents self messages are enabled', () => {
@@ -564,6 +1329,219 @@ test('startConnector refreshes config and fallback source map before listener.st
   } finally {
     connector?.close();
     globalThis.fetch = originalFetch;
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('startConnector installs and clears independent command and config polls without history on 204', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-command-poll-'));
+  const stateRoot = path.join(root, 'state');
+  await mkdir(stateRoot, {recursive: true});
+  await writeFile(path.join(stateRoot, 'account.json'), JSON.stringify({connector_account_id: 'account-1'}));
+  await writeFile(path.join(stateRoot, 'session.json'), JSON.stringify({cookie: []}));
+  const timers = [];
+  const cleared = [];
+  const listener = {on: () => {}, start: () => {}, stop: () => {}};
+  const api = {
+    listener,
+    getOwnId: () => 'zalo-owner-1',
+    getContext: () => ({loginInfo: {send2me_id: ''}}),
+    getAllFriends: async () => [],
+    getAllGroups: async () => ({gridVerMap: {}}),
+    requestOldMessages: async () => assert.fail('HTTP 204 must not request history'),
+  };
+  class FakeZalo { async login() { return api; } }
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/commands/next')) {
+      return {ok: true, status: 204, json: async () => assert.fail('HTTP 204 must not parse JSON')};
+    }
+    if (url.endsWith('/config')) return new Response(JSON.stringify({
+      policy_version: 0, policy_acked_version: 0,
+      source_sync_request_version: 0, source_sync_acked_version: 0,
+      sources: [], protected_media_object_keys: [],
+    }), {status: 200});
+    const event = JSON.parse(options.body || '{}');
+    return new Response(JSON.stringify({ack: true, ...(event.event_type === 'message' ? {components: {text: 'absent', media: []}} : {})}), {status: 200});
+  };
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  globalThis.setInterval = (callback, milliseconds) => {
+    const timer = {callback, milliseconds};
+    timers.push(timer);
+    return timer;
+  };
+  globalThis.clearInterval = (timer) => { cleared.push(timer); };
+  let connector;
+  try {
+    connector = await startConnector({
+      Zalo: FakeZalo,
+      LoginQRCallbackEventType: {},
+      fetchImpl,
+      onCommand: async () => assert.fail('HTTP 204 must not dispatch a command'),
+      env: {
+        ZALO_INBOX_BACKEND_URL: 'http://backend',
+        ZALO_INBOX_BOOTSTRAP_SECRET: 'bootstrap',
+        ZALO_INBOX_WEBHOOK_SECRET: 'webhook',
+        ZALO_INBOX_STORAGE_ROOT: path.join(root, 'media'),
+        ZALO_CONNECTOR_STATE_ROOT: stateRoot,
+        ZALO_CONNECTOR_RETENTION_HOURS: '72',
+        ZALO_CONNECTOR_QUOTA_BYTES: '1000',
+      },
+    });
+    const commandTimer = timers.find(({milliseconds}) => milliseconds === 1000);
+    assert.ok(commandTimer);
+    assert.ok(timers.some(({milliseconds}) => milliseconds === 15000));
+    commandTimer.callback();
+    await Promise.resolve();
+    await Promise.resolve();
+    connector.close();
+    assert.ok(cleared.includes(commandTimer));
+    assert.ok(timers.every((timer) => cleared.includes(timer)));
+  } finally {
+    connector?.close();
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('startConnector runs polled history behind realtime and close cleans the active sync', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zalo-command-history-'));
+  const stateRoot = path.join(root, 'state');
+  await mkdir(stateRoot, {recursive: true});
+  await writeFile(path.join(stateRoot, 'account.json'), JSON.stringify({connector_account_id: 'account-1'}));
+  await writeFile(path.join(stateRoot, 'session.json'), JSON.stringify({cookie: []}));
+  const intervalTimers = [];
+  const deadlineTimers = [];
+  const clearedDeadlines = [];
+  const handlers = new Map();
+  const requests = [];
+  const order = [];
+  const events = [];
+  const now = Date.now();
+  const command = {
+    command_type: 'data_sync', run_id: 'run-wired', source_ids: ['u-1'],
+    cutoff_at: new Date(now).toISOString(), deadline_at: new Date(now + 300000).toISOString(),
+  };
+  let commandPolls = 0;
+  let releaseRealtime;
+  const realtimeReleased = new Promise((resolve) => { releaseRealtime = resolve; });
+  let realtimeStarted;
+  const realtimePending = new Promise((resolve) => { realtimeStarted = resolve; });
+  let terminalSeen;
+  const terminalObserved = new Promise((resolve) => { terminalSeen = resolve; });
+  let connector;
+  const listener = {
+    on: (name, callback) => handlers.set(name, [...(handlers.get(name) || []), callback]),
+    off: (name, callback) => handlers.set(name, (handlers.get(name) || []).filter((item) => item !== callback)),
+    start: () => {},
+    stop: () => { for (const callback of [...(handlers.get('disconnected') || [])]) callback(); },
+    requestOldMessages: async (type, lastMsgId) => requests.push([type, lastMsgId]),
+  };
+  const api = {
+    listener,
+    getOwnId: () => 'zalo-owner-1',
+    getContext: () => ({loginInfo: {send2me_id: ''}}),
+    getAllFriends: async () => [],
+    getAllGroups: async () => ({gridVerMap: {}}),
+  };
+  class FakeZalo { async login() { return api; } }
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/commands/next')) {
+      commandPolls += 1;
+      if (commandPolls <= 2) return new Response(JSON.stringify(command), {status: 200});
+      return new Response(null, {status: 204});
+    }
+    if (url.endsWith('/config')) return new Response(JSON.stringify({
+      policy_version: 1, policy_acked_version: 1,
+      source_sync_request_version: 0, source_sync_acked_version: 0,
+      sources: [{conversation_id: 'u-1', display_name: 'User', source_type: 'friend', acked_enabled: true}],
+      protected_media_object_keys: [],
+    }), {status: 200});
+    const event = JSON.parse(options.body || '{}');
+    events.push(event);
+    if (event.event_type === 'message') {
+      order.push(event.msg_id);
+      if (event.msg_id === 'realtime') {
+        realtimeStarted();
+        await realtimeReleased;
+      }
+      return new Response(JSON.stringify({ack: true, components: {text: 'imported', media: []}}), {status: 200});
+    }
+    if (event.event_type === 'data_sync_progress') connector.close();
+    if (event.event_type === 'data_sync_failed' || event.event_type === 'data_sync_complete') terminalSeen();
+    return new Response(JSON.stringify({ack: true}), {status: 200});
+  };
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  globalThis.setInterval = (callback, milliseconds) => {
+    const timer = {callback, milliseconds};
+    intervalTimers.push(timer);
+    return timer;
+  };
+  globalThis.clearInterval = () => {};
+  globalThis.setTimeout = (callback, milliseconds) => {
+    const timer = {callback, milliseconds};
+    deadlineTimers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => { clearedDeadlines.push(timer); };
+  try {
+    connector = await startConnector({
+      Zalo: FakeZalo,
+      LoginQRCallbackEventType: {},
+      fetchImpl,
+      env: {
+        ZALO_INBOX_BACKEND_URL: 'http://backend',
+        ZALO_INBOX_BOOTSTRAP_SECRET: 'bootstrap',
+        ZALO_INBOX_WEBHOOK_SECRET: 'webhook',
+        ZALO_INBOX_STORAGE_ROOT: path.join(root, 'media'),
+        ZALO_CONNECTOR_STATE_ROOT: stateRoot,
+        ZALO_CONNECTOR_RETENTION_HOURS: '72',
+        ZALO_CONNECTOR_QUOTA_BYTES: '1000',
+      },
+    });
+    for (const callback of handlers.get('message') || []) callback({
+      type: 0, threadId: 'u-1', data: {msgId: 'realtime', uidFrom: 'sender-1', ts: String(now - 100000), content: 'live'},
+    });
+    await realtimePending;
+    const commandTimer = intervalTimers.find(({milliseconds}) => milliseconds === 1000);
+    commandTimer.callback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requests, [[0, null], [1, null]]);
+    commandTimer.callback();
+    commandTimer.callback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requests, [[0, null], [1, null]]);
+    for (const callback of handlers.get('old_messages') || []) callback([{
+      type: 0, threadId: 'u-1', data: {msgId: 'history', uidFrom: 'sender-1', ts: String(now - 200000), content: 'old'},
+    }], 0);
+    for (const callback of handlers.get('old_messages') || []) callback([], 1);
+    releaseRealtime();
+    await terminalObserved;
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(order, ['realtime', 'history']);
+    assert.equal(commandPolls, 1);
+    assert.deepEqual(handlers.get('old_messages'), []);
+    assert.equal(handlers.get('disconnected').length, 1);
+    assert.equal(handlers.get('error').length, 1);
+    assert.equal(deadlineTimers.length, 1);
+    assert.deepEqual(clearedDeadlines, deadlineTimers);
+    assert.deepEqual(events
+      .filter(({event_type}) => event_type === 'data_sync_failed' || event_type === 'data_sync_complete')
+      .map(({event_type, error_code, counters}) => ({event_type, error_code, counters})), [{
+        event_type: 'data_sync_failed', error_code: 'listener_disconnected',
+        counters: {received: 1, duplicates: 0, imported_text: 1, imported_media: 0, media_download_failures: 0},
+      }]);
+  } finally {
+    connector?.close();
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
     await rm(root, {recursive: true, force: true});
   }
 });

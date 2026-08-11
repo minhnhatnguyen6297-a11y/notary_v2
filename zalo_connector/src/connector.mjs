@@ -30,6 +30,7 @@ export function readSettings(env = process.env) {
     quotaBytes,
     heartbeatMs: 15000,
     configPollMs: 15000,
+    commandPollMs: 1000,
     sourceReconcileMs: 3600000,
   };
 }
@@ -400,6 +401,236 @@ export async function installSourceSyncTriggers({listener, reconcile, sourceReco
   return timer;
 }
 
+export function installCommandPoll({poll, commandPollMs = 1000, setTimer = setInterval}) {
+  let polling = false;
+  return setTimer(() => {
+    if (polling) return;
+    polling = true;
+    void poll().catch(() => {}).finally(() => { polling = false; });
+  }, commandPollMs);
+}
+
+async function processHistoryMessage({envelope, accountId, runId, store, outbox, downloadQueue, client, counters, guard, signal}) {
+  const messageKey = `${accountId}:${envelope.conversation_id}:${envelope.msg_id}`;
+  const historyKey = `history:${runId}:${messageKey}`;
+  const ownedDownload = new Set();
+  const ownedOutbox = new Set();
+  const enqueueOwned = async (queue, eventId, event, owned) => {
+    const name = await queue.enqueue(eventId, event);
+    if (signal.aborted) {
+      await queue.remove(name).catch(() => {});
+      signal.throwIfAborted();
+    }
+    owned.add(name);
+    return name;
+  };
+  const sameEnvelope = (event) => event.connector_account_id === accountId
+    && event.conversation_id === envelope.conversation_id && event.msg_id === envelope.msg_id;
+  if ((await guard(() => downloadQueue.entries())).some(({event}) => event.message_key === messageKey)
+    || (outbox.entries && (await guard(() => outbox.entries())).some(({event}) => sameEnvelope(event)))) return;
+  const assembly = {record_type: 'message', message_key: messageKey, owner: 'history', envelope, completed: Array(envelope.attachments.length).fill(null)};
+  await guard(() => enqueueOwned(downloadQueue, historyKey, assembly, ownedDownload));
+  try {
+    for (const attachment of envelope.attachments) {
+      let attachmentName;
+      await guard(async () => {
+        attachmentName = await enqueueOwned(downloadQueue, `${historyKey}:${attachment.attachment_index}`, {record_type: 'attachment', message_key: messageKey, owner: 'history', attachment}, ownedDownload);
+      });
+      try {
+        const objectKey = mediaObjectKey(accountId, envelope.msg_id, attachment.attachment_index, attachment.mime_type, envelope.sent_at);
+        const stored = await guard(() => store.download(objectKey, attachment.download_url, signal));
+        assembly.completed[attachment.attachment_index] = {
+          attachment_index: attachment.attachment_index, mime_type: attachment.mime_type,
+          media_object_key: objectKey, size_bytes: stored.sizeBytes,
+        };
+        await guard(() => downloadQueue.replace([...ownedDownload][0], assembly));
+      } catch (error) {
+        if (error?.dataSyncFailure) throw error;
+        counters.media_download_failures += 1;
+      }
+      await downloadQueue.remove(attachmentName);
+      ownedDownload.delete(attachmentName);
+    }
+    const attachments = assembly.completed.filter(Boolean);
+    if (envelope.raw_text !== null || attachments.length) {
+      const published = {...envelope, attachments};
+      await guard(() => enqueueOwned(outbox, historyKey, published, ownedOutbox));
+      await guard(() => client.sendEvent(published));
+      for (const name of ownedOutbox) await outbox.remove(name);
+      ownedOutbox.clear();
+    }
+  } finally {
+    for (const name of ownedDownload) await downloadQueue.remove(name).catch(() => {});
+    for (const name of ownedOutbox) await outbox.remove(name).catch(() => {});
+  }
+}
+
+let dataSyncActive = false;
+
+export async function runDataSync({
+  api,
+  command,
+  accountId,
+  sourceNames,
+  store,
+  outbox,
+  downloadQueue,
+  client,
+  enqueueHistory = async (fn) => fn(),
+  now = Date.now,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  if (
+    command?.command_type !== 'data_sync'
+    || !String(command.run_id || '').trim()
+    || typeof command.cutoff_at !== 'string' || Number.isNaN(Date.parse(command.cutoff_at))
+    || typeof command.deadline_at !== 'string' || Number.isNaN(Date.parse(command.deadline_at))
+    || !Array.isArray(command.source_ids)
+    || command.source_ids.some((id) => !String(id || '').trim())
+  ) throw new Error('data sync command is invalid');
+  if (dataSyncActive) return undefined;
+
+  dataSyncActive = true;
+  let deadlineTimer;
+  let historyHandler;
+  let disconnectedHandler;
+  let errorHandler;
+  let phase = 'request';
+  let runFailure;
+  const abortController = new AbortController();
+  let terminalPromise;
+  const counters = {received: 0, duplicates: 0, imported_text: 0, imported_media: 0, media_download_failures: 0};
+  const event = {
+    schema_version: 1,
+    connector_account_id: accountId,
+    run_id: command.run_id,
+  };
+  const sendTerminal = async (payload) => {
+    if (terminalPromise) return terminalPromise;
+    terminalPromise = client.sendEvent(payload).catch((error) => {
+      if (error?.message === 'backend returned HTTP 409') return;
+      error.terminalTransport = true;
+      throw error;
+    });
+    return terminalPromise;
+  };
+  try {
+    const deadlineMs = Date.parse(command.deadline_at) - now();
+    if (deadlineMs <= 0) {
+      await sendTerminal({...event, event_type: 'data_sync_failed', error_code: 'deadline_expired', counters});
+      return undefined;
+    }
+
+    const batches = new Map();
+    const historyComplete = new Promise((resolve) => {
+      historyHandler = (messages, type) => {
+        if ((type !== 0 && type !== 1) || batches.has(type)) return;
+        batches.set(type, Array.isArray(messages) ? messages : []);
+        if (batches.size === 2) resolve();
+      };
+      api.listener.on('old_messages', historyHandler);
+    });
+    const failure = new Promise((resolve, reject) => {
+      const fail = (code) => {
+        if (runFailure) return;
+        runFailure = Object.assign(new Error(code), {code, dataSyncFailure: true});
+        abortController.abort(runFailure);
+        reject(runFailure);
+      };
+      disconnectedHandler = () => fail('listener_disconnected');
+      errorHandler = () => fail('listener_disconnected');
+      api.listener.on('disconnected', disconnectedHandler);
+      api.listener.on('error', errorHandler);
+      deadlineTimer = setTimer(() => fail('deadline_expired'), deadlineMs);
+    });
+    const guard = async (operation) => {
+      if (runFailure) throw runFailure;
+      const work = Promise.resolve().then(operation);
+      try {
+        const result = await Promise.race([work, failure]);
+        if (runFailure) throw runFailure;
+        return result;
+      } catch (error) {
+        if (!runFailure) throw error;
+        void work.catch(() => {});
+        throw runFailure;
+      }
+    };
+    await Promise.race([
+      Promise.all([
+        api.listener.requestOldMessages(0, null),
+        api.listener.requestOldMessages(1, null),
+        historyComplete,
+      ]),
+      failure,
+    ]);
+    phase = 'processing';
+    const historyClient = {
+      ...client,
+      sendEvent: async (payload) => {
+        const response = await client.sendEvent(payload, abortController.signal);
+        abortController.signal.throwIfAborted();
+        if (payload.event_type === 'message') {
+          if (response?.components?.text === 'imported') counters.imported_text += 1;
+          if (response?.components?.text === 'duplicate') counters.duplicates += 1;
+          for (const component of response?.components?.media || []) {
+            if (component.status === 'imported') counters.imported_media += 1;
+            if (component.status === 'duplicate') counters.duplicates += 1;
+          }
+        }
+        return response;
+      },
+    };
+    const enabledIds = new Set(command.source_ids.map(String));
+    const cutoff = Date.parse(command.cutoff_at);
+    const start = cutoff - 7 * 24 * 60 * 60 * 1000;
+    for (const messages of batches.values()) {
+      for (const message of messages) {
+        const conversationId = String(message?.threadId || '');
+        const source = sourceNames?.get(conversationId);
+        if (!enabledIds.has(conversationId) || !source || source.source_type === 'my_documents') continue;
+        const envelope = normalizeMessage(message, accountId, source, '');
+        const sent = envelope && Date.parse(envelope.sent_at);
+        if (!envelope || sent < start || sent > cutoff) continue;
+        if (now() >= Date.parse(command.deadline_at)) throw Object.assign(new Error('data sync deadline expired'), {code: 'deadline_expired'});
+        await guard(() => enqueueHistory(async () => {
+          if (runFailure) throw runFailure;
+          counters.received += 1;
+          await processHistoryMessage({
+            envelope, accountId, runId: command.run_id, store, outbox, downloadQueue, client: historyClient, counters, guard,
+            signal: abortController.signal,
+          });
+          await guard(() => client.sendEvent({...event, event_type: 'data_sync_progress', counters: {...counters}}, abortController.signal));
+        }));
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    }
+    await guard(() => sendTerminal({...event, event_type: 'data_sync_complete', counters}));
+  } catch (error) {
+    if (error?.terminalTransport) throw error;
+    abortController.abort(error);
+    const errorCode = error?.code === 'deadline_expired' || error?.code === 'listener_disconnected'
+      ? error.code
+      : phase === 'request' ? 'history_request_failed' : 'history_processing_failed';
+    await sendTerminal({
+      ...event,
+      event_type: 'data_sync_failed',
+      error_code: errorCode,
+      counters,
+    });
+  } finally {
+    const remove = api.listener.off || api.listener.removeListener;
+    if (historyHandler) {
+      remove?.call(api.listener, 'old_messages', historyHandler);
+    }
+    if (disconnectedHandler) remove?.call(api.listener, 'disconnected', disconnectedHandler);
+    if (errorHandler) remove?.call(api.listener, 'error', errorHandler);
+    if (deadlineTimer !== undefined) clearTimer(deadlineTimer);
+    dataSyncActive = false;
+  }
+}
+
 export async function handleQrLoginEvent({event, eventTypes, stateEvent, rememberSession}) {
   if (event.type === eventTypes.QRCodeGenerated) {
     try {
@@ -492,7 +723,7 @@ async function nextGeneration(filename) {
   return generation;
 }
 
-export async function startConnector({Zalo, LoginQRCallbackEventType, env = process.env, fetchImpl = fetch}) {
+export async function startConnector({Zalo, LoginQRCallbackEventType, env = process.env, fetchImpl = fetch, onCommand}) {
   const parentWatch = startParentWatch(env.ZALO_CONNECTOR_PARENT_PID);
   const settings = readSettings(env);
   await mkdir(settings.stateRoot, {recursive: true});
@@ -696,10 +927,20 @@ export async function startConnector({Zalo, LoginQRCallbackEventType, env = proc
     void stateEvent(listenerHeartbeatState(listenerConnected)).catch(() => {});
   }, settings.heartbeatMs);
   const poll = setInterval(() => { void enqueueOperation(refresh).catch(() => {}); }, settings.configPollMs);
+  const commandPoll = installCommandPoll({
+    commandPollMs: settings.commandPollMs,
+    poll: async () => {
+      const command = await client.getNextCommand(accountId);
+      if (command) await (onCommand
+        ? onCommand(command)
+        : runDataSync({api, command, accountId, sourceNames, store, outbox, downloadQueue, client, enqueueHistory: enqueueOperation}));
+    },
+  });
   const close = () => {
     closed = true;
     clearInterval(heartbeat);
     clearInterval(poll);
+    clearInterval(commandPoll);
     clearInterval(sourceReconcile);
     if (parentWatch) clearInterval(parentWatch);
     api.listener.stop();
