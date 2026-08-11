@@ -157,3 +157,11 @@ test('source rendering cannot mutate media selection and media remains in backen
   assert.match(renderMediaBody, /state\.media\.forEach/);
   assert.doesNotMatch(renderMediaBody, /\.sort\(|\.reverse\(/);
 });
+
+test('normal launcher provisions independent text quota and retention', async () => {
+  const launcher = await readFile(new URL('../run.bat', import.meta.url), 'utf8');
+  const example = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
+  assert.match(launcher, /ensure_zalo_env\.py "\.env" 5368709120 168 104857600 168/);
+  assert.match(example, /ZALO_INBOX_TEXT_QUOTA_BYTES=/);
+  assert.match(example, /ZALO_INBOX_TEXT_RETENTION_HOURS=/);
+});

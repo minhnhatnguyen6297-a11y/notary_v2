@@ -96,7 +96,7 @@ if not exist ".env" (
     )
 )
 
-"%VENV_PYTHON%" scripts\ensure_zalo_env.py ".env" 5368709120 168
+"%VENV_PYTHON%" scripts\ensure_zalo_env.py ".env" 5368709120 168 104857600 168
 if errorlevel 1 (
     echo [LOI] Khong the chuan bi cau hinh Zalo connector.
     pause & exit /b 1
