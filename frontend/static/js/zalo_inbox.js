@@ -7,6 +7,8 @@
   let state = null;
   let batch = null;
   let loginRequested = false;
+  let sourceRefreshPending = false;
+  let sourceRefreshError = '';
   const selectedMedia = new Set();
 
   const $ = (id) => document.getElementById(id);
@@ -69,18 +71,22 @@
   }
 
   function renderSources() {
-    const list = $('source-list');
-    if (!state.sources.length) {
-      list.innerHTML = '<p class="text-muted mb-0">Connector chưa phát hiện cuộc trò chuyện nào.</p>';
-      return;
-    }
-    list.innerHTML = state.sources.map((source) => `
+    const query = $('source-search').value.trim().toLocaleLowerCase('vi-VN');
+    const typeLabels = {friend: 'Bạn bè', group: 'Nhóm', my_documents: 'My Documents', stranger: 'Người lạ'};
+    const row = (source) => `
       <label class="d-flex justify-content-between align-items-center border rounded p-3 mb-2">
-        <span><strong>${esc(source.display_name)}</strong><br><small class="text-muted">${source.conversation_type === 'group' ? 'Nhóm' : 'Cá nhân'}</small></span>
-        <input class="form-check-input source-toggle" type="checkbox" data-id="${esc(source.id)}" ${source.enabled ? 'checked' : ''}>
+        <span><strong>${esc(source.display_name)}</strong><br><small class="text-muted">${esc(typeLabels[source.source_type] || source.conversation_type)}${source.last_activity_at ? ` · ${new Date(source.last_activity_at).toLocaleString('vi-VN')}` : ''}</small></span>
+        <span class="d-flex gap-2 align-items-center">${source.pending ? '<small class="text-warning">Đang áp dụng</small>' : ''}<input class="form-check-input source-toggle" type="checkbox" aria-label="Cho phép nhận từ ${esc(source.display_name)}" data-id="${esc(source.id)}" ${source.desired_enabled ? 'checked' : ''} ${source.pending ? 'disabled' : ''}></span>
       </label>
-    `).join('');
-    list.querySelectorAll('.source-toggle').forEach((input) => input.addEventListener('change', async () => {
+    `;
+    const renderSection = (id, rows, empty) => {
+      const filtered = rows.filter((source) => source.display_name.toLocaleLowerCase('vi-VN').includes(query));
+      $(id).innerHTML = filtered.length ? filtered.map(row).join('') : `<p class="text-muted mb-0">${empty}</p>`;
+    };
+    renderSection('source-list', state.sources, 'Connector chưa phát hiện friend, group hoặc My Documents nào.');
+    renderSection('stranger-source-list', state.stranger_sources, 'Chưa phát hiện stranger nào.');
+    document.querySelectorAll('.source-toggle').forEach((input) => input.addEventListener('change', async () => {
+      input.disabled = true;
       try {
         await api(`/zalo-inbox/api/sources/${encodeURIComponent(input.dataset.id)}`, {
           method: 'PATCH', body: JSON.stringify({enabled: input.checked}),
@@ -91,6 +97,45 @@
         notice(error.message);
       }
     }));
+
+    $('consent-panel').classList.toggle('d-none', !state.consent_required);
+    $('confirm-intake-consent').disabled = !state.consent_required;
+    $('confirm-intake-consent').textContent = state.consent_required ? 'Xác nhận cho phép nhận dữ liệu' : 'Đã xác nhận';
+    const policy = $('policy-status');
+    policy.classList.toggle('d-none', !state.policy_pending && !state.consent_required);
+    policy.textContent = state.consent_required ? 'Cần xác nhận lại chính sách nhận dữ liệu.' : 'Đang áp dụng chính sách nguồn.';
+    const sourceSync = state.source_sync || {status: 'ready', error: null};
+    $('refresh-sources').disabled = sourceRefreshPending || sourceSync.status === 'pending' || !state.connector.id;
+    $('source-refresh-status').textContent = sourceRefreshPending || sourceSync.status === 'pending'
+      ? 'Đang làm mới nguồn…'
+      : sourceSync.status === 'error' ? sourceSync.error || 'Làm mới nguồn thất bại.' : sourceRefreshError;
+  }
+
+  function renderDataSync() {
+    const sync = state.data_sync;
+    const statuses = {running: 'Đang đồng bộ', completed_best_effort: 'Hoàn tất best-effort', error: 'Lỗi'};
+    const counters = sync?.counters || {};
+    const counterLabels = {
+      received: 'received', duplicates: 'duplicates', imported_text: 'imported text',
+      imported_media: 'imported media', media_download_failures: 'media download failures',
+    };
+    $('start-data-sync').disabled = state.consent_required
+      || state.connector.state !== 'connected'
+      || state.policy_pending
+      || state.data_sync?.status === 'running';
+    $('data-sync-status').textContent = sync ? statuses[sync.status] || '' : '';
+    $('data-sync-counters').textContent = sync
+      ? Object.entries(counterLabels).map(([key, text]) => `${text}: ${counters[key] ?? 0}`).join(' · ')
+      : '';
+    $('data-sync-window').textContent = sync
+      ? `Cutoff: ${new Date(sync.cutoff_at).toLocaleString('vi-VN')} · Deadline: ${new Date(sync.deadline_at).toLocaleString('vi-VN')}`
+      : '';
+    $('data-sync-error').textContent = sync?.status === 'error' && sync.error_code ? `Mã lỗi: ${esc(sync.error_code)}` : '';
+    const gap = $('gap-warning');
+    gap.classList.toggle('d-none', !state.gap_started_at);
+    gap.textContent = state.gap_started_at
+      ? `Có thể thiếu event từ ${new Date(state.gap_started_at).toLocaleString('vi-VN')}. Data Sync không chứng minh dữ liệu đầy đủ.`
+      : '';
   }
 
   function renderMedia() {
@@ -143,6 +188,7 @@
     state = await api('/zalo-inbox/api/state');
     renderConnector();
     renderSources();
+    renderDataSync();
     if (!batchId) renderMedia();
   }
 
@@ -270,6 +316,36 @@
   }
 
   $('open-settings').addEventListener('click', () => bootstrap.Modal.getOrCreateInstance($('settings-modal')).show());
+  $('source-search').addEventListener('input', renderSources);
+  $('confirm-intake-consent').addEventListener('click', async () => {
+    const button = $('confirm-intake-consent');
+    button.disabled = true;
+    try {
+      await api(`/zalo-inbox/api/connectors/${encodeURIComponent(state.connector.id)}/consent`, {method: 'POST'});
+      await refreshState();
+    } catch (error) { notice(error.message); }
+  });
+  $('refresh-sources').addEventListener('click', async () => {
+    sourceRefreshPending = true;
+    sourceRefreshError = '';
+    renderSources();
+    try {
+      await api(`/zalo-inbox/api/connectors/${encodeURIComponent(state.connector.id)}/sources/refresh`, {method: 'POST'});
+    } catch (error) { sourceRefreshError = error.message; }
+    finally {
+      sourceRefreshPending = false;
+      await refreshState();
+    }
+  });
+  $('start-data-sync').addEventListener('click', async () => {
+    const button = $('start-data-sync');
+    button.disabled = true;
+    try {
+      await api(`/zalo-inbox/api/connectors/${encodeURIComponent(state.connector.id)}/data-sync`, {method: 'POST'});
+      await refreshState();
+    } catch (error) { notice(error.message); }
+    finally { button.disabled = false; renderDataSync(); }
+  });
   $('start-zalo-login').addEventListener('click', async () => {
     const button = $('start-zalo-login');
     const loginNotice = $('connector-login-notice');

@@ -221,6 +221,10 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
         refresh = client.post(f"/zalo-inbox/api/connectors/{account_id}/sources/refresh")
         assert refresh.status_code == 200
         assert refresh.json() == {"source_sync_request_version": 1}
+        assert client.get("/zalo-inbox/api/state").json()["source_sync"] == {
+            "status": "pending",
+            "error": None,
+        }
         sync_ack = {
             "schema_version": 1,
             "event_type": "source_sync_ack",
@@ -229,6 +233,10 @@ def test_source_policy_ack_source_refresh_and_safe_source_state(tmp_path, monkey
         }
         assert _signed_post(client, sync_ack).status_code == 200
         assert _signed_post(client, sync_ack).json() == {"ack": True, "source_sync_request_version": 1}
+        assert client.get("/zalo-inbox/api/state").json()["source_sync"] == {
+            "status": "ready",
+            "error": None,
+        }
 
         db = factory()
         account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
@@ -377,7 +385,12 @@ def test_state_is_scoped_to_the_selected_connector_account(tmp_path, monkeypatch
             "/zalo-inbox/api/connectors/onboard", headers={"x-zalo-bootstrap": "bootstrap-test"}
         ).json()["connector_account_id"]
         db = factory()
-        other_account = ZaloConnectorAccount(id="other-account", session_state="usable", listener_generation=1)
+        selected_account = db.query(ZaloConnectorAccount).filter_by(id=account_id).one()
+        selected_account.gap_started_at = datetime(2026, 8, 4, 2, tzinfo=timezone.utc)
+        other_account = ZaloConnectorAccount(
+            id="other-account", session_state="usable", listener_generation=1,
+            gap_started_at=datetime(2026, 8, 4, 1, tzinfo=timezone.utc),
+        )
         db.add(other_account)
         db.add_all(
             [
@@ -411,6 +424,7 @@ def test_state_is_scoped_to_the_selected_connector_account(tmp_path, monkeypatch
 
         state = client.get("/zalo-inbox/api/state").json()
         assert state["policy_pending"] is False
+        assert state["gap_started_at"] == "2026-08-04T02:00:00Z"
         assert [source["id"] for source in state["sources"]] == ["selected-source"]
         assert state["stranger_sources"] == []
         assert state["media"] == []
