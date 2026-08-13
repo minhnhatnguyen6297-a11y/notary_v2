@@ -3,7 +3,7 @@
 Status: active
 Owner: platform/document-intake
 Source of truth: Cloud AI OCR flow, endpoints, response contracts, and QR exclusion
-**Cap nhat:** 2026-07-10
+**Cap nhat:** 2026-08-04
 **Files lien quan:** `routers/ocr_ai.py`, `frontend/templates/cases/form.html`
 **API endpoint:** `POST /api/ocr/analyze`, `GET /api/ocr/config`
 
@@ -11,7 +11,7 @@ Source of truth: Cloud AI OCR flow, endpoints, response contracts, and QR exclus
 
 ## Muc tieu
 
-OCR AI la pipeline cloud active cho person CCCD OCR.
+OCR AI la pipeline cloud active cho CCCD, so do va giay khai tu.
 
 Huong hien tai da chot:
 - OCR AI khong con dung QR path.
@@ -23,8 +23,8 @@ Huong hien tai da chot:
 Batch input co the gom:
 - nhieu anh cung luc
 - thu tu lon xon
-- nhieu CCCD khac nhau
-- anh khong phai CCCD
+- nhieu CCCD, so do va giay khai tu khac nhau
+- anh khong thuoc ba nhom giay to duoc ho tro
 
 Ket qua tra ve phai dung contract JSON hien tai.
 
@@ -52,6 +52,7 @@ Ket qua tra ve phai dung contract JSON hien tai.
   -> goi Qwen OCR theo tung anh
   -> backend nhan raw text / raw OCR payload
   -> backend parse text lines
+  -> backend nhan dien CCCD / so do / giay khai tu
   -> backend detect side
   -> backend pair front/back theo quy tac da chot
   -> backend normalize field text neu co rule an toan
@@ -115,6 +116,8 @@ Response shape giu nguyen:
 
 Luu y:
 - `paired_persons` duoc tinh sau khi backend pair front/back.
+- Giay khai tu dung contract `persons` va field `ngay_chet`; so do dung `properties`.
+- Anh khong thuoc ba nhom duoc giu trong `raw_results` va canh bao, khong bia normalized data.
 - `summary` co telemetry cho native OCR path: `ocr_native_ms`, `backend_parse_ms`, `pair_ms`.
 - Neu them normalize layer, `summary` co the them `normalize_ms` va `normalized_fields`.
 
