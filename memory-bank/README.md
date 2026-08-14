@@ -1,29 +1,52 @@
 # Memory Bank
 
-Git-tracked handoff for continuing `notary_v2` on another machine or after an
-interrupted task. It is operational context, not a source of business truth.
+Git-tracked recovery context for continuing `notary_v2` after compaction,
+interruption, or a machine change. It is operational state, not business or
+architecture authority.
+
+## Layers
+
+1. Stable rules stay in `AGENTS.md`, accepted ADRs, and routed documentation.
+2. `CURRENT.md` stays a short dashboard of verified Git state, task links,
+   blockers, and the next action.
+3. `tasks/<task-id>.md` holds recovery-critical state for a substantial active
+   task.
+
+`PROGRESS.md` remains an optional milestone summary, not another active task
+tracker. Read it only when `CURRENT.md` links to it.
 
 ## Resume
 
-1. Pull/rebase the intended branch.
-2. Read `CURRENT.md` first.
-3. Verify its branch, commit, worktree, and test claims against current Git.
-4. Read only the normative documents and optional Memory Bank files linked by
-   `CURRENT.md`.
-5. Continue from `Next exact action` only after the evidence still matches.
+1. Sync the intended branch, then read `CURRENT.md` first.
+2. Verify branch, HEAD, worktree, dirty state, and every verification claim
+   against current Git and source.
+3. Verify live-agent state with the active agent-control mechanism; recorded
+   lifecycle is only a last observation.
+4. Open only the linked task records and their routed normative authority.
+5. Reconcile or report stale/conflicting state before continuing the recorded
+   next action.
 
 ## Update
 
-Update `CURRENT.md` before switching machines, stopping mid-task, or pushing a
-handoff checkpoint. Update `PROGRESS.md` only when a milestone changes.
+Use a task record when a later parent could not safely recover the approved
+scope and evidence from the dashboard alone. Keep tiny or completed work out of
+`tasks/` unless a handoff still depends on it.
 
 - Keep `CURRENT.md` short and replace stale state instead of appending history.
-- Link to specs, commits, diffs, tests, decisions, or research; do not copy them.
-- Distinguish committed/pushed work from uncommitted work.
-- Distinguish focused verification from full-suite status.
-- Record uncertainty and unapproved changes explicitly.
-- Never store secrets, credentials, customer data, or raw customer documents.
+- Record each substantial task's goal, approved scope, user decisions, task
+  state, branch/worktree, agents, evidence, blockers, next action, and last
+  verified time.
+- Keep task state (`TODO`, `DOING`, `BLOCKED`, `DONE`, `CANCELLED`) separate from
+  agent lifecycle; only the parent changes task state after checking evidence.
+- Link to specs, plans, commits, diffs, tests, decisions, or research instead of
+  copying them.
+- Distinguish committed/pushed work, uncommitted work, focused checks, and
+  full-suite status.
+- Update recovery state before switching machines, stopping mid-task, or
+  publishing a handoff checkpoint.
+- Never store secrets, credentials, customer data, raw customer documents, or
+  ephemeral session values.
 
 Precedence remains: `AGENTS.md`, accepted ADRs, approved specs, platform
-contracts, current Git/source, and fresh verification. If Memory Bank conflicts
-with any of them, report the conflict and trust the stronger current evidence.
+contracts, current Git/source, and fresh verification. Report any conflict and
+trust the stronger current evidence.

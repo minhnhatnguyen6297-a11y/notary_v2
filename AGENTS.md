@@ -13,6 +13,10 @@ describes code structure; routed specs define behavior.
 - A task/spec/contract/runtime conflict is evidence to report, not permission
   to change any side. Stop and ask which source wins.
 - Completion claims require fresh verification evidence.
+- Parent agents coordinate by default and personally read required authority and
+  verify acceptance evidence. Direct implementation is limited to repository
+  workflow docs, genuinely tiny changes, or failed-worker recovery when
+  reassignment cannot progress; route details through architecture.
 
 ## Task boundary
 
@@ -47,6 +51,7 @@ Use `docs/README.md` only when the task area is unclear. Otherwise route here:
 | Shared Stage/Pool capability | `docs/platform/case-workspace/README.md` |
 | Word generation | `docs/platform/document-generation/README.md` |
 | Fast text audit | `docs/platform/fast-text-audit/README.md` |
+| Parent-agent delegation and task orchestration | `docs/architecture/README.md` |
 | Architecture decisions | `docs/architecture/README.md` |
 
 New or changed business behavior requires an approved spec. Missing, draft,
