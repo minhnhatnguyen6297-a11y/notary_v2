@@ -33,6 +33,25 @@ def normalize_excel_header(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", without_marks.lower()).strip()
 
 
+def consonant_skeleton(value: Any) -> str:
+    normalized = normalize_excel_header(value)
+    if not normalized:
+        return ""
+    compact = normalized.replace(" ", "")
+    return re.sub(r"[aeiouy]", "", compact)
+
+
+def header_matches_keyword(header: Any, keyword: Any) -> bool:
+    norm_header = normalize_excel_header(header)
+    norm_keyword = normalize_excel_header(keyword)
+    if not norm_header or not norm_keyword:
+        return False
+    if norm_keyword in norm_header:
+        return True
+    header_skeleton = consonant_skeleton(norm_header)
+    return len(header_skeleton) >= 3 and header_skeleton == consonant_skeleton(norm_keyword)
+
+
 def parse_date(value: Any, allow_year_only: bool = True) -> Optional[date]:
     if value is None:
         return None
@@ -266,11 +285,10 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
 
     def find_col(keywords):
         for kw in keywords:
-            norm_kw = normalize_excel_header(kw)
-            if not norm_kw:
+            if not normalize_excel_header(kw):
                 continue
             for i, h in enumerate(normalized_headers):
-                if norm_kw in h:
+                if header_matches_keyword(h, kw):
                     return i
         return None
 
@@ -281,7 +299,7 @@ async def upload_excel(request: Request, file: UploadFile = File(...), db: Sessi
         "ngay_chet": find_col(["ngay_chet", "ngay mat", "death", "chet"]),
         "so_giay_to": find_col(["so_giay_to", "cccd", "giay to", "id_number", "khai tu"]),
         "ngay_cap": find_col(["ngay_cap", "ngay cap", "issue"]),
-        "dia_chi": find_col(["dia_chi", "dia chi", "address"]),
+        "dia_chi": find_col(["dia_chi", "dia chi", "a ch", "a chi", "address"]),
     }
 
     missing = [f for f in ["ho_ten"] if col[f] is None]
@@ -422,16 +440,37 @@ def inline_create(
     if so_giay_to_val:
         existing = db.query(Customer).filter(Customer.so_giay_to == so_giay_to_val).first()
         if existing:
-            if name: existing.ho_ten = name
-            gt = normalize_gender(gioi_tinh or "")
-            if gt: existing.gioi_tinh = gt
-            ns = parse_date(ngay_sinh or "", allow_year_only=True)
-            if ns: existing.ngay_sinh = ns
-            nc = parse_date(ngay_cap or "", allow_year_only=True)
-            if nc: existing.ngay_cap = nc
+            if name:
+                existing.ho_ten = name
+            if gioi_tinh is not None:
+                gt = normalize_gender(gioi_tinh)
+                if gt:
+                    existing.gioi_tinh = gt
+                elif not gioi_tinh.strip():
+                    existing.gioi_tinh = None
+            if ngay_sinh is not None:
+                ns = parse_date(ngay_sinh, allow_year_only=True)
+                if ns:
+                    existing.ngay_sinh = ns
+                elif not ngay_sinh.strip():
+                    existing.ngay_sinh = None
+            if ngay_chet is not None:
+                nd = parse_date(ngay_chet, allow_year_only=True)
+                if nd:
+                    existing.ngay_chet = nd
+                elif not ngay_chet.strip():
+                    existing.ngay_chet = None
+            if ngay_cap is not None:
+                nc = parse_date(ngay_cap, allow_year_only=True)
+                if nc:
+                    existing.ngay_cap = nc
+                elif not ngay_cap.strip():
+                    existing.ngay_cap = None
             dc = (dia_chi or "").strip()
-            if dc: existing.dia_chi = dc
-            db.commit(); db.refresh(existing)
+            if dc or dia_chi is not None:
+                existing.dia_chi = dc or None
+            db.commit()
+            db.refresh(existing)
             return JSONResponse({"ok": True, "customer": to_customer_json(existing), "updated": True})
 
     c = Customer(
@@ -467,19 +506,38 @@ def quick_update(
     c = db.get(Customer, cid)
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
-    if ho_ten and ho_ten.strip():    c.ho_ten    = ho_ten.strip()
-    gt = normalize_gender(gioi_tinh or "")
-    if gt:                           c.gioi_tinh = gt
-    ns = parse_date(ngay_sinh or "", allow_year_only=True)
-    if ns:                           c.ngay_sinh = ns
-    nd = parse_date(ngay_chet or "", allow_year_only=True)
-    if nd:                           c.ngay_chet = nd
-    so = (so_giay_to or "").strip()
-    if so:                           c.so_giay_to = so
-    nc = parse_date(ngay_cap or "", allow_year_only=True)
-    if nc:                           c.ngay_cap  = nc
+    if ho_ten and ho_ten.strip():
+        c.ho_ten = ho_ten.strip()
+    if gioi_tinh is not None:
+        gt = normalize_gender(gioi_tinh)
+        if gt:
+            c.gioi_tinh = gt
+        elif not gioi_tinh.strip():
+            c.gioi_tinh = None
+    if ngay_sinh is not None:
+        ns = parse_date(ngay_sinh, allow_year_only=True)
+        if ns:
+            c.ngay_sinh = ns
+        elif not ngay_sinh.strip():
+            c.ngay_sinh = None
+    if ngay_chet is not None:
+        nd = parse_date(ngay_chet, allow_year_only=True)
+        if nd:
+            c.ngay_chet = nd
+        elif not ngay_chet.strip():
+            c.ngay_chet = None
+    if so_giay_to is not None:
+        so = (so_giay_to or "").strip()
+        c.so_giay_to = so or None
+    if ngay_cap is not None:
+        nc = parse_date(ngay_cap, allow_year_only=True)
+        if nc:
+            c.ngay_cap = nc
+        elif not ngay_cap.strip():
+            c.ngay_cap = None
     dc = (dia_chi or "").strip()
-    if dc:                           c.dia_chi   = dc
+    if dc or dia_chi is not None:
+        c.dia_chi = dc or None
     try:
         db.commit()
     except IntegrityError:
