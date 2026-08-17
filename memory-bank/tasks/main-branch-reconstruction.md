@@ -1,7 +1,7 @@
 # Main branch reconstruction
 
 Task ID: `main-branch-reconstruction`
-State: `DOING`
+State: `DONE`
 Updated: 2026-08-17
 Last verified: 2026-08-17 against the integration checkout and named refs.
 
@@ -18,7 +18,8 @@ excluded. This record documents the approved scope; it does not expand it.
 
 - Integration baseline is `e849188`, containing Qwen-only OCR `42c88b3` and
   Customer hardening from `e849188`.
-- Local `main` is `ff9e50a`; `origin/main` is `1192154`; promotion is pending.
+- Local `main` and `origin/main` were verified at
+  `8e0b5ab8c502b22dc041aa2e634e331059fc8752` after fast-forward promotion.
 - Fast Audit is committed at `7d2a16d` with all six contracted outputs:
   `run_meta.json`, `ocr_pages.json`, `documents.json`, `word_extract.json`,
   `report.json`, and `report.md`.
@@ -31,7 +32,7 @@ excluded. This record documents the approved scope; it does not expand it.
 
 - Branch: `codex/main-integration-20260813`
 - Worktree: `D:\notary_v2-worktrees\main-integration-20260813`
-- Product-code baseline: `7d2a16d`.
+- Product-code baseline: `8e0b5ab`.
 - Checkpoint: the commit containing this task record; after resume, verify
   `git status --short --branch` and the task checkpoint instead of assuming
   current documentation dirt.
@@ -40,7 +41,7 @@ excluded. This record documents the approved scope; it does not expand it.
 
 | Agent label | Role | Last observed lifecycle | Assignment |
 | --- | --- | --- | --- |
-| parent | coordinator and acceptor | not recorded | Decide promotion and acceptance; track containment for cleanup. |
+| parent | coordinator and acceptor | active | Verified promotion and acceptance; track containment for cleanup. |
 
 ## Evidence
 
@@ -56,20 +57,19 @@ excluded. This record documents the approved scope; it does not expand it.
   Ruff, compile, and diff checks. Graphify refreshed to 1175 nodes and 2660
   edges. Repository-root pytest separately collected the parked root Local OCR
   diagnostic: 120 passed and that one out-of-scope test failed.
-- `main` and `origin/main` remain separate refs and are not promoted by this
-  record.
+- `main` and `origin/main` were both verified at
+  `8e0b5ab8c502b22dc041aa2e634e331059fc8752` after promotion.
 
 ## Blockers
 
-- Complete base-to-head independent review and rebuilt-main promotion are
-  pending.
+- None for main reconstruction. Diagram, Zalo, Local OCR, and old-worktree
+  cleanup remain separate tasks/scopes.
 
 ## Next exact action
 
-Review the complete rebuilt-main diff, commit the verified task state, promote
-and push rebuilt main, then create clean Diagram and Zalo branches from pushed
-main. Keep old worktrees untouched until remote containment and explicit cleanup
-approval.
+Create the clean Diagram branch from pushed main and selectively reconcile its
+protected sources; then reconstruct and verify the clean Zalo branch. Keep old
+worktrees untouched until remote containment and explicit cleanup approval.
 
 ## References
 
