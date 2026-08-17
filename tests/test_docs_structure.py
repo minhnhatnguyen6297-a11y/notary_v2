@@ -62,11 +62,11 @@ def test_module_readme_markdown_targets_exist():
 def test_agents_routed_markdown_exists():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     section = re.search(
-        r"^## 5\. Read routing[ \t]*\n(?P<body>.*?)(?=^## 6\.)",
+        r"^## Sources of truth[ \t]*\n(?P<body>.*?)(?=^## Impact discovery\b)",
         agents,
         re.MULTILINE | re.DOTALL,
     )
-    assert section is not None, "AGENTS.md must contain Section 5 followed by Section 6"
+    assert section is not None, "AGENTS.md must contain Sources of truth before Impact discovery"
     routed = set(re.findall(r"`(docs/[^ `]+\.md)`", section.group("body")))
     missing = sorted(path for path in routed if not (ROOT / path).is_file())
     assert missing == []
