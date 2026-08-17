@@ -60,23 +60,19 @@ def _get_model() -> str:
     configured = (os.getenv("OCR_MODEL", "") or _read_env().get("OCR_MODEL", "")).strip()
     if configured.lower().startswith("models/"):
         configured = configured.split("/", 1)[1]
-    model = configured or DEFAULT_MODEL
-    if "qwen" in model.lower():
-        model = model.lower()
-    return model
+    if configured and "qwen" not in configured.lower():
+        return DEFAULT_MODEL
+    return (configured or DEFAULT_MODEL).lower()
 
 
-def _get_api_key(model: str) -> str:
-    model_lower = model.lower()
+def _get_api_key() -> str:
     env = _read_env()
-    if "qwen" in model_lower:
-        return (
-            os.getenv("QWEN_API_KEY", "")
-            or env.get("QWEN_API_KEY", "")
-            or os.getenv("DASHSCOPE_API_KEY", "")
-            or env.get("DASHSCOPE_API_KEY", "")
-        )
-    return os.getenv("OPENAI_API_KEY", "") or env.get("OPENAI_API_KEY", "")
+    return (
+        os.getenv("QWEN_API_KEY", "")
+        or env.get("QWEN_API_KEY", "")
+        or os.getenv("DASHSCOPE_API_KEY", "")
+        or env.get("DASHSCOPE_API_KEY", "")
+    )
 
 
 def _log_ocr_ai(event: str, level: str = "info", **fields: Any) -> None:
@@ -2179,7 +2175,6 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
                 merged[key] = incoming
                 merged["field_sources"][key] = src.lower()
                 continue
-            cur_src = merged["field_sources"].get(key, "ai")
             if len(incoming) > len(current):
                 merged[key] = incoming
 
@@ -2488,7 +2483,7 @@ async def analyze_images(files: list[UploadFile] = File(...)):
     errors: list[dict[str, Any]] = []
 
     model = _get_model()
-    api_key = _get_api_key(model)
+    api_key = _get_api_key()
     ai_semaphore = asyncio.Semaphore(OCR_AI_CONCURRENCY)
 
     results: list[dict[str, Any]] = []
@@ -2593,7 +2588,7 @@ async def analyze_property_images(files: list[UploadFile] = File(...)):
     errors: list[dict[str, Any]] = []
 
     model = _get_model()
-    api_key = _get_api_key(model)
+    api_key = _get_api_key()
     ai_semaphore = asyncio.Semaphore(OCR_AI_CONCURRENCY)
 
     results: list[dict[str, Any]] = []
@@ -2698,7 +2693,7 @@ async def analyze_property_pair(
 ):
     t_total = perf_counter()
     model = _get_model()
-    api_key = _get_api_key(model)
+    api_key = _get_api_key()
     ai_semaphore = asyncio.Semaphore(OCR_AI_CONCURRENCY)
 
     errors: list[dict[str, Any]] = []
@@ -2819,11 +2814,11 @@ async def analyze_property_pair(
 @router.get("/config")
 async def ocr_config():
     model = _get_model()
-    configured = bool(_get_api_key(model))
+    configured = bool(_get_api_key())
     return {
         "configured": configured,
         "model": model,
-        "provider": "qwen_native_ocr" if "qwen" in model.lower() else "other",
+        "provider": "qwen_native_ocr",
         "max_image_px": AI_MAX_IMAGE_PX,
         "ocr_ai_concurrency": OCR_AI_CONCURRENCY,
         "qwen_ocr": {

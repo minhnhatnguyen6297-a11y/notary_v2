@@ -19,9 +19,9 @@ excluded. This record documents the approved scope; it does not expand it.
 - Integration baseline is `e849188`, containing Qwen-only OCR `42c88b3` and
   Customer hardening from `e849188`.
 - Local `main` is `ff9e50a`; `origin/main` is `1192154`; promotion is pending.
-- Fast Audit implementation/review is pending against the active contract's
-  six outputs: `run_meta.json`, `ocr_pages.json`, `documents.json`,
-  `word_extract.json`, `report.json`, and `report.md`.
+- Fast Audit is committed at `7d2a16d` with all six contracted outputs:
+  `run_meta.json`, `ocr_pages.json`, `documents.json`, `word_extract.json`,
+  `report.json`, and `report.md`.
 - Keep old worktrees untouched until remote containment and explicit cleanup
   approval; containment gates cleanup, not clean-branch reconstruction or
   promotion.
@@ -31,7 +31,7 @@ excluded. This record documents the approved scope; it does not expand it.
 
 - Branch: `codex/main-integration-20260813`
 - Worktree: `D:\notary_v2-worktrees\main-integration-20260813`
-- Product-code baseline: `e849188`.
+- Product-code baseline: `7d2a16d`.
 - Checkpoint: the commit containing this task record; after resume, verify
   `git status --short --branch` and the task checkpoint instead of assuming
   current documentation dirt.
@@ -49,22 +49,27 @@ excluded. This record documents the approved scope; it does not expand it.
   files. Recheck Git after every checkpoint.
 - `42c88b3` is in the integration history and is the Qwen-only Cloud OCR
   baseline.
+- Fast Audit independent review ended with `SCOPE`, `SPEC`, and `SHARED IMPACT`
+  passing, sufficient test evidence, and `VERDICT: APPROVE`.
+- Fresh `python -m pytest tests -q` passed 120/120, all Node `.test.mjs`
+  suites passed, and `FULL_VERIFY=1` passed 44 OCR and 36 Fast Audit tests,
+  Ruff, compile, and diff checks. Graphify refreshed to 1175 nodes and 2660
+  edges. Repository-root pytest separately collected the parked root Local OCR
+  diagnostic: 120 passed and that one out-of-scope test failed.
 - `main` and `origin/main` remain separate refs and are not promoted by this
   record.
 
 ## Blockers
 
-- Fast Audit implementation/review against the active six-output contract is
+- Complete base-to-head independent review and rebuilt-main promotion are
   pending.
-- Fast Audit implementation/review and governance review must finish before
-  full verify/review/push of rebuilt main.
 
 ## Next exact action
 
-Implement/review Fast Audit against its six-output contract and finish/review
-governance; run full verify/review/push rebuilt main, then create clean Diagram
-and Zalo branches from pushed main. Keep old worktrees untouched until remote
-containment and explicit cleanup approval.
+Review the complete rebuilt-main diff, commit the verified task state, promote
+and push rebuilt main, then create clean Diagram and Zalo branches from pushed
+main. Keep old worktrees untouched until remote containment and explicit cleanup
+approval.
 
 ## References
 

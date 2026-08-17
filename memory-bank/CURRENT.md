@@ -5,7 +5,7 @@ Last verified: 2026-08-17 against Git and the named source worktrees.
 
 Active integration checkout: `D:\notary_v2-worktrees\main-integration-20260813`
 Branch: `codex/main-integration-20260813`
-Product-code baseline: `e849188`, clean before this authorized docs slice.
+Product-code baseline: `7d2a16d`; this dashboard update may be uncommitted.
 Checkpoint: the commit containing this `CURRENT.md`; resolve with
 `git log -1 --format=%H -- memory-bank/CURRENT.md`.
 Before acting, run fresh `git status --short --branch`; this docs slice may be
@@ -26,13 +26,17 @@ untouched until containment and explicit cleanup approval.
 
 ## Verified main state
 
-- Integration baseline `e849188` contains Qwen-only Cloud OCR from `42c88b3`
-  and the Customer hardening in `e849188`.
+- Integration head `7d2a16d` contains Qwen-only Cloud OCR from `42c88b3`,
+  Customer hardening from `e849188`, and standalone Fast Audit.
 - Local `main` is `ff9e50a`; `origin/main` is `1192154`. Neither has been
   promoted to the integration baseline.
-- Fast Audit implementation/review is pending against the active technical
-  contract's six outputs: `run_meta.json`, `ocr_pages.json`, `documents.json`,
-  `word_extract.json`, `report.json`, and `report.md`.
+- Fast Audit is committed at `7d2a16d` with all six contracted outputs. Its
+  independent review verdict is `APPROVE`; focused tests passed 36/36.
+- `python -m pytest tests -q` passed 120/120, all Node `.test.mjs` suites
+  exited 0, `FULL_VERIFY=1` passed 44 OCR and 36 Fast Audit tests, and
+  Graphify was refreshed to 1175 nodes and 2660 edges. Repository-root pytest
+  separately collected the parked root Local OCR diagnostic: 120 passed and
+  that one out-of-scope test failed.
 - Local OCR/QR behavior remains a separate parked/research boundary; this
   dashboard makes no product-code change claim beyond the committed baseline.
 
@@ -40,7 +44,7 @@ untouched until containment and explicit cleanup approval.
 
 | Task | State | Branch/worktree | Evidence or blocker |
 | --- | --- | --- | --- |
-| [Main branch reconstruction](tasks/main-branch-reconstruction.md) | `DOING` | `codex/main-integration-20260813` | Product-code baseline `e849188`; promotion and Fast Audit implementation/review pending. |
+| [Main branch reconstruction](tasks/main-branch-reconstruction.md) | `DOING` | `codex/main-integration-20260813` | Product-code baseline `7d2a16d`; final branch review and promotion pending. |
 | [Diagram flow](tasks/diagram-flow.md) | `TODO` | Future clean Diagram branch | Rebuilt/pushed main and acceptance/spec questions are pending; old source remains untouched. |
 | [Zalo document inbox](tasks/zalo-document-inbox.md) | `TODO` | Future clean Zalo branch | Source is `12b8695`; OCR router/tests are freshly dirty and remain separate. |
 
@@ -68,7 +72,7 @@ untouched until containment and explicit cleanup approval.
 
 ## Next exact action
 
-Implement/review Fast Audit against its six-output contract and finish/review
-governance; run full verify/review/push rebuilt main, then create clean Diagram
-and Zalo branches from pushed main. Keep old worktrees untouched until remote
-containment and explicit cleanup approval.
+Review the complete rebuilt-main diff, commit this verified task state, promote
+and push rebuilt main, then create clean Diagram and Zalo branches from pushed
+main. Keep old worktrees untouched until remote containment and explicit cleanup
+approval.

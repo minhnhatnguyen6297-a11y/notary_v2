@@ -249,6 +249,21 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(ocr_ai._get_model(), "qwen-vl-ocr-2025-11-20")
 
+    async def test_stale_legacy_openai_env_does_not_configure_cloud_ocr(self):
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {"OCR_MODEL": "gpt-4o", "OPENAI_API_KEY": "legacy-key"},
+                clear=True,
+            ),
+            mock.patch.object(ocr_ai, "_read_env", return_value={}),
+        ):
+            config = await ocr_ai.ocr_config()
+
+        self.assertFalse(config["configured"])
+        self.assertEqual(config["model"], ocr_ai.DEFAULT_MODEL)
+        self.assertEqual(config["provider"], "qwen_native_ocr")
+
     def test_normalize_native_doc_prefers_mrz_on_back(self):
         lines = [
             "Pham Cong Nguyen",
@@ -277,15 +292,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_images_always_uses_qwen(self):
         upload = make_upload("qr-card.jpg")
-        qr_data = {
-            "so_giay_to": "012345678901",
-            "ho_ten": "NGUYEN VAN AN",
-            "ngay_sinh": "01/02/1990",
-            "gioi_tinh": "Nam",
-            "dia_chi": "123 LE LOI",
-            "ngay_cap": "03/04/2021",
-            "ngay_het_han": "",
-        }
         with (
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(
@@ -324,15 +330,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
     async def test_analyze_images_pairs_qwen_front_and_back(self):
         front = make_upload("qr-front.jpg")
         back = make_upload("back.jpg")
-        qr_data = {
-            "so_giay_to": "036179009696",
-            "ho_ten": "DUONG THI XUAN",
-            "ngay_sinh": "20/01/1979",
-            "gioi_tinh": "Nữ",
-            "dia_chi": "Quyet Phong, Yen Ninh, Y Yen, Nam Dinh",
-            "ngay_cap": "",
-            "ngay_het_han": "",
-        }
         outputs = [
             [
                 "CAN CUOC CONG DAN",
