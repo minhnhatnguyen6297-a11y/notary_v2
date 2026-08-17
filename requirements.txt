@@ -11,3 +11,5 @@ Pillow
 httpx
 python-dotenv
 celery[sqlalchemy]==5.3.6
+PyMuPDF==1.24.5
+rapidfuzz==3.9.0
