@@ -3,7 +3,7 @@ AI OCR router (cloud path) with native Qwen OCR task.
 
 Design goals:
 1) Keep API contract stable: POST /api/ocr/analyze, GET /api/ocr/config.
-2) Latency-first: run QR and AI in parallel per image, then prefer QR result.
+2) Qwen-only: every accepted image is sent through native Qwen OCR.
 3) AI is text-only OCR. Field parsing, MRZ parsing, side detection, and pairing
    are deterministic in backend.
 4) No fallback waves (no MRZ rescue AI, no chat prompt reasoning loop).
@@ -25,7 +25,6 @@ from time import perf_counter
 from typing import Any
 
 import httpx
-import zxingcpp
 from dotenv import dotenv_values
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from PIL import Image, ImageOps
@@ -169,44 +168,12 @@ def _normalize_person_data(data: dict[str, Any]) -> dict[str, str]:
         "dia_chi": _clean_text(data.get("dia_chi")),
         "ngay_cap": _normalize_date(data.get("ngay_cap")),
         "ngay_het_han": _normalize_date(data.get("ngay_het_han")),
+        "ngay_chet": _normalize_date(data.get("ngay_chet")),
     }
 
 
 def _field_sources(data: dict[str, str], source: str) -> dict[str, str]:
     return {k: source for k, v in data.items() if _clean_text(v)}
-
-
-def _zxing_decode_qr(image_obj: Image.Image) -> str | None:
-    try:
-        results = zxingcpp.read_barcodes(image_obj)
-    except Exception:
-        return None
-    for result in results:
-        if result.format in (zxingcpp.BarcodeFormat.QRCode, zxingcpp.BarcodeFormat.MicroQRCode):
-            text = (result.text or "").strip()
-            if text:
-                return text
-    return None
-
-
-def _qr_variants(file_bytes: bytes) -> list[Image.Image]:
-    # Raw-only policy: one direct decode candidate after exif transpose.
-    try:
-        img = Image.open(io.BytesIO(file_bytes))
-        img = ImageOps.exif_transpose(img)
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        return [img]
-    except Exception:
-        return []
-
-
-def try_decode_qr(file_bytes: bytes) -> str | None:
-    for candidate in _qr_variants(file_bytes):
-        decoded = _zxing_decode_qr(candidate)
-        if decoded:
-            return decoded
-    return None
 
 
 def parse_cccd_qr(text: str) -> dict[str, str] | None:
@@ -2096,10 +2063,67 @@ def _merge_property_pair(front_doc: dict[str, Any], back_doc: dict[str, Any]) ->
     }
 
 
+def _labeled_value(lines: list[str], labels: list[str]) -> str:
+    folded_labels = [_ascii_text(label) for label in labels]
+    for index, line in enumerate(lines):
+        folded = _ascii_text(line)
+        if not any(label in folded for label in folded_labels):
+            continue
+        if ":" in line:
+            value = _clean_text(line.split(":", 1)[1])
+            if value:
+                return value
+        if index + 1 < len(lines):
+            return _clean_text(lines[index + 1])
+    return ""
+
+
+def _looks_like_death_certificate(lines: list[str]) -> bool:
+    folded = " ".join(_ascii_text(line) for line in lines)
+    return "khai tu" in folded and ("nguoi chet" in folded or "da chet" in folded)
+
+
+def _normalize_death_certificate_doc(lines: list[str], filename: str) -> dict[str, Any]:
+    name = _labeled_value(lines, ["ho, chu dem, ten nguoi chet", "ho va ten nguoi chet"])
+    birth = _labeled_value(lines, ["ngay sinh", "ngay, thang, nam sinh"])
+    identity = _labeled_value(lines, ["giay to tuy than", "so dinh danh ca nhan"])
+    address = _labeled_value(lines, ["noi cu tru cuoi cung", "noi cu tru"])
+    death = _labeled_value(lines, ["da chet vao ngay", "ngay, thang, nam chet", "ngay chet"])
+    identity_match = re.search(r"(?<!\d)(\d{9,12})(?!\d)", identity)
+    data = _normalize_person_data(
+        {
+            "ho_ten": name,
+            "so_giay_to": identity_match.group(1) if identity_match else "",
+            "ngay_sinh": birth,
+            "dia_chi": address,
+            "ngay_chet": death,
+        }
+    )
+    warnings = []
+    if not data["ho_ten"]:
+        warnings.append("missing_name")
+    if not data["ngay_chet"]:
+        warnings.append("missing_death_date")
+    return {
+        "doc_type": "person",
+        "document_kind": "death_certificate",
+        "side": "single",
+        "data": data,
+        "filename": filename,
+        "text_lines": lines,
+        "warnings": warnings,
+    }
+
+
 def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]:
     cleaned_lines = [_clean_text(ln) for ln in lines if _clean_text(ln)]
     if not cleaned_lines:
         return {"doc_type": "unknown", "side": "unknown", "data": {}, "filename": filename, "text_lines": []}
+
+    if _looks_like_property_doc(cleaned_lines):
+        return _normalize_property_ocr_doc(cleaned_lines, filename)
+    if _looks_like_death_certificate(cleaned_lines):
+        return _normalize_death_certificate_doc(cleaned_lines, filename)
 
     side = _detect_side(cleaned_lines)
     mrz_lines = _extract_mrz_lines(cleaned_lines)
@@ -2144,42 +2168,27 @@ def _normalize_native_ocr_doc(lines: list[str], filename: str) -> dict[str, Any]
     }
 
 
-def _append_qr_person(
-    *,
-    persons: list[dict[str, Any]],
-    raw_results: list[dict[str, Any]],
-    filename: str,
-    qr_text: str,
-    qr_data: dict[str, Any],
-    side_hint: str = "front",
-) -> None:
-    normalized = _normalize_person_data(qr_data)
-    side = _clean_text(side_hint).lower()
-    if side not in {"front", "back"}:
-        side = "front"
-    warnings = ["missing_front"] if side == "back" else ["missing_back"]
-    person = {
-        **normalized,
-        "_source": "QR",
-        "source_type": "QR",
-        "side": side,
-        "_files": [filename],
-        "_qr": True,
-        "field_sources": _field_sources(normalized, "qr"),
-        "warnings": warnings,
-        "_qr_text": qr_text,
-    }
-    persons.append(person)
-    raw_results.append({"doc_type": "person", "side": side, "data": normalized, "filename": filename, "source_type": "QR"})
-
-
 def _append_ai_doc(
     *,
     doc: dict[str, Any],
     persons: list[dict[str, Any]],
+    properties: list[dict[str, Any]],
     raw_results: list[dict[str, Any]],
 ) -> None:
     raw_results.append({**doc, "source_type": "AI"})
+    if doc.get("doc_type") == "property":
+        data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+        properties.append(
+            {
+                **data,
+                "_file": doc.get("filename") or "unknown",
+                "_source": "AI",
+                "source_type": "AI",
+                "warnings": list(doc.get("warnings") or []),
+                "missing_fields": list(doc.get("missing_fields") or []),
+            }
+        )
+        return
     if doc.get("doc_type") != "person":
         return
     data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
@@ -2289,6 +2298,7 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         "dia_chi": "",
         "ngay_cap": "",
         "ngay_het_han": "",
+        "ngay_chet": "",
         "_source": "AI",
         "source_type": "AI",
         "side": "unknown",
@@ -2298,15 +2308,11 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         "warnings": [],
         "paired": False,
     }
-    source_priority = {"QR": 2, "AI": 1}
     side_seen = set()
     seen_files = set()
-    qr_found = False
 
     for item in group:
         src = str(item.get("source_type") or "AI").upper()
-        if src == "QR":
-            qr_found = True
         side = str(item.get("side") or "unknown").lower()
         if side in {"front", "back"}:
             side_seen.add(side)
@@ -2320,7 +2326,7 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
             if clean_warning and clean_warning not in merged["warnings"]:
                 merged["warnings"].append(clean_warning)
 
-        for key in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap", "ngay_het_han"):
+        for key in ("ho_ten", "so_giay_to", "ngay_sinh", "gioi_tinh", "dia_chi", "ngay_cap", "ngay_het_han", "ngay_chet"):
             current = _clean_text(merged.get(key))
             incoming = _clean_text(item.get(key))
             if not incoming:
@@ -2329,17 +2335,14 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
                 merged[key] = incoming
                 merged["field_sources"][key] = src.lower()
                 continue
-            cur_src = merged["field_sources"].get(key, "ai")
-            if source_priority.get(src, 1) > source_priority.get(cur_src.upper(), 1):
+            if len(incoming) > len(current):
                 merged[key] = incoming
                 merged["field_sources"][key] = src.lower()
-            elif len(incoming) > len(current):
-                merged[key] = incoming
 
-    # Name priority: QR > front > unknown > back; prefer Vietnamese diacritics over MRZ-style ASCII.
+    # Prefer front over unknown/back, then Vietnamese diacritics over MRZ-style ASCII.
     best_name = ""
     best_name_source = ""
-    best_name_score = (-1, -1, -1, -1)
+    best_name_score = (-1, -1, -1)
     for item in group:
         name = _clean_text(item.get("ho_ten"))
         if not name:
@@ -2347,7 +2350,6 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         src = str(item.get("source_type") or "AI").upper()
         side = str(item.get("side") or "unknown").lower()
         score = (
-            source_priority.get(src, 1),
             2 if side == "front" else 1 if side == "unknown" else 0,
             1 if _has_diacritics(name) else 0,
             len(name),
@@ -2360,10 +2362,6 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         merged["ho_ten"] = best_name
         merged["field_sources"]["ho_ten"] = best_name_source
 
-    merged["_qr"] = qr_found
-    if qr_found:
-        merged["_source"] = "QR"
-        merged["source_type"] = "QR"
     merged["paired"] = len(group) > 1 or ("front" in side_seen and "back" in side_seen)
     if "front" in side_seen and "back" in side_seen:
         merged["side"] = "front_back"
@@ -2371,17 +2369,18 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         merged["side"] = "front"
     elif "back" in side_seen:
         merged["side"] = "back"
+    elif any(str(item.get("side") or "").lower() == "single" for item in group):
+        merged["side"] = "single"
     if merged["warnings"]:
         merged["warnings"] = [
             warning
             for warning in merged["warnings"]
             if not ((warning == "missing_front" and "front" in side_seen) or (warning == "missing_back" and "back" in side_seen))
         ]
-    if not qr_found:
-        if merged["side"] == "back" and "missing_front" not in merged["warnings"]:
-            merged["warnings"].append("missing_front")
-        elif merged["side"] == "front" and not _clean_text(merged.get("ngay_cap")) and "missing_back" not in merged["warnings"]:
-            merged["warnings"].append("missing_back")
+    if merged["side"] == "back" and "missing_front" not in merged["warnings"]:
+        merged["warnings"].append("missing_front")
+    elif merged["side"] == "front" and not _clean_text(merged.get("ngay_cap")) and "missing_back" not in merged["warnings"]:
+        merged["warnings"].append("missing_back")
     return merged
 
 
@@ -2450,15 +2449,8 @@ async def _process_single_image(
 ) -> dict[str, Any]:
     filename = upload.filename or "unknown"
     file_bytes = await upload.read()
-
-    async def run_qr() -> tuple[str, dict[str, Any] | None]:
-        qr_text = try_decode_qr(file_bytes) or ""
-        qr_data = parse_cccd_qr(qr_text) if qr_text else None
-        if not (qr_data and qr_data.get("so_giay_to")):
-            return "", None
-        return qr_text, qr_data
-
-    async def run_ai() -> dict[str, Any]:
+    lines: list[str] = []
+    try:
         if not api_key:
             raise HTTPException(status_code=500, detail="Missing API key for OCR AI model")
         image_jpeg = _prepare_ai_image_bytes(file_bytes)
@@ -2471,42 +2463,19 @@ async def _process_single_image(
                 image_b64=image_b64,
                 filename=filename,
             )
-        return _normalize_native_ocr_doc(lines, filename)
-
-    qr_task = asyncio.create_task(run_qr())
-    ai_task = asyncio.create_task(run_ai())
-    qr_result, ai_result = await asyncio.gather(qr_task, ai_task, return_exceptions=True)
-
-    out: dict[str, Any] = {
-        "filename": filename,
-        "qr_text": "",
-        "qr_data": None,
-        "ai_doc": None,
-        "error": None,
-        "ai_started": True,
-        "ai_discarded_by_qr": False,
-        "ai_selected": False,
-    }
-
-    if isinstance(qr_result, Exception):
-        _log_ocr_ai("qr_decode_error", level="warning", filename=filename, error=str(qr_result)[:300])
-    elif isinstance(qr_result, tuple):
-        out["qr_text"], out["qr_data"] = qr_result
-
-    if isinstance(ai_result, Exception):
-        if out["qr_data"] is None:
-            detail = ai_result.detail if isinstance(ai_result, HTTPException) else str(ai_result)
-            out["error"] = str(detail)
-    else:
-        out["ai_doc"] = ai_result
-
-    if out["qr_data"] is not None:
-        out["ai_discarded_by_qr"] = out["ai_doc"] is not None
-        return out
-
-    if out["ai_doc"] is not None:
-        out["ai_selected"] = True
-    return out
+    except Exception as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        return {"filename": filename, "raw_lines": [], "ai_doc": None, "error": str(detail), "error_stage": "model"}
+    try:
+        return {
+            "filename": filename,
+            "raw_lines": lines,
+            "ai_doc": _normalize_native_ocr_doc(lines, filename),
+            "error": None,
+            "error_stage": None,
+        }
+    except Exception as exc:
+        return {"filename": filename, "raw_lines": lines, "ai_doc": None, "error": str(exc), "error_stage": "parse"}
 
 
 async def _process_single_property_image(
@@ -2616,13 +2585,49 @@ async def _process_single_property_image(
     }
 
 
+def shape_cached_ocr(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
+    persons: list[dict[str, Any]] = []
+    properties: list[dict[str, Any]] = []
+    shaped_raw: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for cached in raw_results:
+        filename = str(cached.get("input_item_id") or cached.get("filename") or "unknown")
+        lines = cached.get("text_lines") if isinstance(cached.get("text_lines"), list) else []
+        try:
+            doc = _normalize_native_ocr_doc(lines, filename)
+            _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=shaped_raw)
+        except Exception as exc:
+            shaped_raw.append(
+                {"filename": filename, "doc_type": "unknown", "text_lines": lines, "status": "error", "source_type": "AI"}
+            )
+            errors.append({"filename": filename, "error": str(exc), "stage": "parse"})
+    try:
+        persons = _pair_persons(persons)
+    except Exception as exc:
+        errors.append({"filename": "batch", "error": str(exc), "stage": "pair"})
+    return {
+        "persons": persons,
+        "properties": properties,
+        "marriages": [],
+        "raw_results": shaped_raw,
+        "errors": errors,
+        "summary": {
+            "total_images": len(raw_results),
+            "persons": len(persons),
+            "properties": len(properties),
+            "paired_persons": sum(1 for person in persons if person.get("paired")),
+            "cache_reparse": True,
+        },
+    }
+
+
 @router.post("/analyze")
 async def analyze_images(files: list[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No images uploaded")
 
     t_total = perf_counter()
-    t_qr_ai_start = perf_counter()
+    t_ocr_start = perf_counter()
 
     persons: list[dict[str, Any]] = []
     properties: list[dict[str, Any]] = []
@@ -2652,54 +2657,41 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             else:
                 results.append(item)
 
-    qr_ai_ms = perf_counter() - t_qr_ai_start
-
-    qr_hits = 0
-    ai_started = 0
-    ai_selected = 0
-    ai_discarded = 0
+    ocr_native_ms = perf_counter() - t_ocr_start
+    ai_runs = 0
 
     t_parse_start = perf_counter()
     for item in results:
         filename = item["filename"]
-        ai_started += 1 if item.get("ai_started") else 0
         if item.get("error"):
-            errors.append({"filename": filename, "error": str(item["error"])})
-            continue
-
-        qr_data = item.get("qr_data")
-        if qr_data:
-            qr_hits += 1
-            if item.get("ai_discarded_by_qr"):
-                ai_discarded += 1
-            qr_side_hint = "front"
-            ai_doc = item.get("ai_doc")
-            if isinstance(ai_doc, dict) and ai_doc.get("doc_type") == "person":
-                ai_side = _clean_text(ai_doc.get("side")).lower()
-                if ai_side in {"front", "back"}:
-                    qr_side_hint = ai_side
-            _append_qr_person(
-                persons=persons,
-                raw_results=raw_results,
-                filename=filename,
-                qr_text=item.get("qr_text") or "",
-                qr_data=qr_data,
-                side_hint=qr_side_hint,
-            )
+            stage = str(item.get("error_stage") or "model")
+            errors.append({"filename": filename, "error": str(item["error"]), "stage": stage})
+            if item.get("raw_lines"):
+                raw_results.append(
+                    {
+                        "filename": filename,
+                        "doc_type": "unknown",
+                        "text_lines": list(item["raw_lines"]),
+                        "source_type": "AI",
+                        "status": "error",
+                    }
+                )
             continue
 
         doc = item.get("ai_doc")
         if isinstance(doc, dict):
-            if item.get("ai_selected"):
-                ai_selected += 1
-            _append_ai_doc(doc=doc, persons=persons, raw_results=raw_results)
+            ai_runs += 1
+            _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=raw_results)
         else:
             errors.append({"filename": filename, "error": "No OCR result"})
 
     backend_parse_ms = perf_counter() - t_parse_start
 
     t_pair_start = perf_counter()
-    persons = _pair_persons(persons)
+    try:
+        persons = _pair_persons(persons)
+    except Exception as exc:
+        errors.append({"filename": "batch", "error": str(exc), "stage": "pair"})
     pair_ms = perf_counter() - t_pair_start
 
     unknowns = sum(1 for item in raw_results if item.get("doc_type") == "unknown")
@@ -2711,14 +2703,10 @@ async def analyze_images(files: list[UploadFile] = File(...)):
         model=model,
         images=len(files),
         total_ms=_ms(total_ms),
-        qr_ms=_ms(qr_ai_ms),
-        ocr_native_ms=_ms(qr_ai_ms),
+        ocr_native_ms=_ms(ocr_native_ms),
         backend_parse_ms=_ms(backend_parse_ms),
         pair_ms=_ms(pair_ms),
-        qr_hits=qr_hits,
-        ai_started=ai_started,
-        ai_selected=ai_selected,
-        ai_discarded_by_qr=ai_discarded,
+        ai_runs=ai_runs,
         errors=len(errors),
     )
 
@@ -2731,18 +2719,15 @@ async def analyze_images(files: list[UploadFile] = File(...)):
         "summary": {
             "total_images": len(files),
             "model": model,
-            "qr_hits": qr_hits,
-            "ai_runs": ai_selected,
-            "ocr_runs": ai_selected,
-            "ai_started": ai_started,
-            "ai_selected": ai_selected,
-            "ai_discarded_by_qr": ai_discarded,
+            "qr_hits": 0,
+            "ai_runs": ai_runs,
+            "ocr_runs": ai_runs,
             "persons": len(persons),
             "paired_persons": paired_count,
             "properties": len(properties),
             "marriages": len(marriages),
             "unknowns": unknowns,
-            "ocr_native_ms": _ms(qr_ai_ms),
+            "ocr_native_ms": _ms(ocr_native_ms),
             "backend_parse_ms": _ms(backend_parse_ms),
             "pair_ms": _ms(pair_ms),
             "total_ms": _ms(total_ms),

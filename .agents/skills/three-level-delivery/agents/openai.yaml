@@ -1,0 +1,7 @@
+interface:
+  display_name: "Three-Level Delivery"
+  short_description: "Deliver one approved slice through three roles"
+  default_prompt: "Use $three-level-delivery for this large project: classify its foundation, then check HEAD to select local/no-worktree only for approved no-HEAD S000 or one worktree for valid HEAD. Create no delivery roles until I explicitly approve both the slice and a separate user-visible Lead task; one creation attempt is ready only with a real threadId and the visible left-sidebar Lead task, never clientThreadId alone."
+
+policy:
+  allow_implicit_invocation: false
