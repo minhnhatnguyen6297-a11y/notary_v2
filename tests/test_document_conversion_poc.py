@@ -13,7 +13,7 @@ from tools.document_conversion_poc import harness as harness_module
 from tools.document_conversion_poc.converter import convert_path
 from tools.document_conversion_poc.harness import run_manifest
 from tools.document_conversion_poc.golden_fixtures import materialize_golden_fixtures
-from tools.document_conversion_poc.models import Content, ConversionEnvelope
+from tools.document_conversion_poc.models import Content, ConversionEnvelope, Segment
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
 from tools.document_conversion_poc.qwen_compatible import OcrRequestError, QwenCompatibleOcr
 
@@ -398,7 +398,7 @@ def test_golden_manifest_declares_gd_01_to_gd_07_without_customer_data() -> None
     assert [entry["sample_id"] for entry in entries] == [f"GD-{index:02d}" for index in range(1, 8)]
     required = {
         "sample_id", "path", "mime", "sensitivity", "expected_route", "expected_status",
-        "expected_text", "expected_facts", "expected_provenance", "not_asserted",
+        "expected_sha256", "expected_text", "expected_facts", "expected_provenance", "not_asserted",
     }
     assert all(required.issubset(entry) and entry["sensitivity"] == "synthetic" for entry in entries)
 
@@ -412,6 +412,39 @@ def test_golden_fixture_materialization_is_byte_repeatable(tmp_path: Path) -> No
     assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in first] == [
         hashlib.sha256(path.read_bytes()).hexdigest() for path in second
     ]
+
+
+def test_canonical_golden_manifest_hashes_and_routes(tmp_path: Path, monkeypatch) -> None:
+    manifest_path = Path(__file__).parents[1] / "tools/document_conversion_poc/golden_manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    fixture_dir = tmp_path / "document_conversion_poc"
+    materialized = materialize_golden_fixtures(fixture_dir)
+    entries = payload["sources"]
+
+    assert [entry["sample_id"] for entry in entries] == [f"GD-{index:02d}" for index in range(1, 8)]
+    assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in materialized] == [
+        entry["expected_sha256"] for entry in entries
+    ]
+
+    def fake_convert(path: Path, *, allow_cloud: bool):
+        source_bytes = path.read_bytes()
+        envelope = ConversionEnvelope.for_source(path, source_bytes)
+        if classify_source(path, source_bytes) == "local":
+            envelope.content = Content(value="synthetic local conversion")
+            envelope.segments.append(Segment(segment_id="segment-1", text="synthetic local conversion", source_ref=None))
+        return envelope
+
+    monkeypatch.setattr(harness_module, "convert_path", fake_convert)
+    for entry in entries:
+        entry["path"] = str(fixture_dir / Path(entry["path"]).name)
+    isolated_manifest = tmp_path / "golden.json"
+    isolated_manifest.write_text(json.dumps(payload), encoding="utf-8")
+    report = run_manifest(isolated_manifest, tmp_path / "report.json", allow_cloud=False)
+
+    assert report["manifest_complete"] is True
+    assert report["summary"] == {"total": 7, "completed": 3, "failed": 0, "non_completed": 4}
+    assert report["cloud_call_count"] == 0
+    assert all(not result["expected_mismatches"] for result in report["results"])
 
 
 def test_manifest_expectations_are_checked_and_sample_id_is_reported(
