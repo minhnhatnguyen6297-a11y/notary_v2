@@ -10,6 +10,7 @@ from PIL import Image
 
 from tools.document_conversion_poc import converter as converter_module
 from tools.document_conversion_poc.converter import convert_path
+from tools.document_conversion_poc.harness import run_manifest
 from tools.document_conversion_poc.models import ConversionEnvelope
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
 from tools.document_conversion_poc.qwen_compatible import QwenCompatibleOcr
@@ -108,6 +109,21 @@ def _write_synthetic_docx(path: Path, text: str) -> Path:
     document.add_paragraph(text)
     document.save(path)
     return path
+
+
+def _write_manifest(directory: Path, filenames: list[str]) -> Path:
+    paths = []
+    for filename in filenames:
+        path = directory / filename
+        if path.suffix == ".docx":
+            _write_synthetic_docx(path, "Synthetic manifest document")
+        else:
+            path.write_bytes(b"not a supported document")
+        paths.append({"path": str(path)})
+
+    manifest_path = directory / "manifest.json"
+    manifest_path.write_text(json.dumps({"sources": paths}), encoding="utf-8")
+    return manifest_path
 
 
 def test_docx_local_route_never_calls_ocr(tmp_path: Path) -> None:
@@ -237,3 +253,17 @@ def test_compatible_ocr_classifies_retryability(tmp_path: Path) -> None:
     assert run_with(RequestFailure(401)).errors[0].retryable is False
     assert run_with(RequestFailure(503)).errors[0].retryable is True
     assert run_with(TimeoutError("network timeout")).errors[0].retryable is True
+
+
+def test_harness_reports_partial_failure_without_aborting_batch(tmp_path: Path) -> None:
+    output_path = tmp_path / "report.json"
+
+    report = run_manifest(
+        _write_manifest(tmp_path, ["ok.docx", "bad.bin"]),
+        output_path,
+        allow_cloud=False,
+    )
+
+    assert report["summary"] == {"total": 2, "completed": 1, "failed": 1}
+    assert output_path.exists()
+    assert json.loads(output_path.read_text(encoding="utf-8"))["summary"] == report["summary"]
