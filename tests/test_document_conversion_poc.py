@@ -1,3 +1,4 @@
+import base64
 import json
 import hashlib
 from pathlib import Path
@@ -203,9 +204,12 @@ def test_allowed_image_sends_one_data_url_to_fake_client(tmp_path: Path) -> None
     assert envelope.content.value == "CCCD 012345678901"
     assert envelope.ocr_calls[0].status == "completed"
     assert envelope.ocr_calls[0].input_hash
-    assert requests[0]["messages"][0]["content"][1]["image_url"]["url"].startswith(
-        "data:image/png;base64,"
-    )
+    request = requests[0]
+    assert request["model"] == "test-qwen"
+    data_url = request["messages"][0]["content"][1]["image_url"]["url"]
+    prefix, encoded = data_url.split(",", maxsplit=1)
+    assert prefix == "data:image/png;base64"
+    assert base64.b64decode(encoded) == (tmp_path / "id.png").read_bytes()
 
 
 def test_scanned_pdf_renders_each_page_and_records_provenance(tmp_path: Path) -> None:
