@@ -47,6 +47,22 @@ def _markitdown_convert(path: Path) -> str:
     return result.markdown
 
 
+def _local_pdf_page_segments(source_bytes: bytes) -> list[Segment]:
+    """Return page-addressable plain-text segments without changing Markdown content."""
+    document = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        return [
+            Segment(
+                segment_id=f"page-{page_number}",
+                text=page.get_text("text"),
+                source_ref={"page": page_number},
+            )
+            for page_number, page in enumerate(document, start=1)
+        ]
+    finally:
+        document.close()
+
+
 def convert_path(
     path: Path,
     *,
@@ -73,6 +89,14 @@ def convert_path(
             )
             return envelope
         envelope.content = Content(format="markdown", value=text)
+        if path.suffix.lower() == ".pdf":
+            try:
+                segments = _local_pdf_page_segments(source_bytes)
+            except Exception:
+                segments = []
+            if segments:
+                envelope.segments.extend(segments)
+                return envelope
         envelope.segments.append(Segment(segment_id="segment-1", text=text, source_ref=None))
         envelope.warnings.append("provenance_unavailable")
         return envelope

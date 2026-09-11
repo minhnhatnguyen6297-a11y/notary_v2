@@ -53,6 +53,16 @@ def _pdf_bytes(*, with_text: bool) -> bytes:
     return data
 
 
+def _text_pdf_bytes(*texts: str) -> bytes:
+    document = fitz.open()
+    for text in texts:
+        page = document.new_page()
+        page.insert_text((72, 72), text)
+    data = document.tobytes()
+    document.close()
+    return data
+
+
 def _scanned_pdf_bytes(page_count: int = 2) -> bytes:
     document = fitz.open()
     for _ in range(page_count):
@@ -153,6 +163,27 @@ def test_docx_local_route_never_calls_ocr(tmp_path: Path) -> None:
     ocr.extract.assert_not_called()
     assert envelope.segments[0].source_ref is None
     assert "provenance_unavailable" in envelope.warnings
+
+
+def test_text_pdf_local_route_records_page_provenance(tmp_path: Path) -> None:
+    path = tmp_path / "contract.pdf"
+    path.write_bytes(_text_pdf_bytes("Trang mot", "Trang hai"))
+    ocr = Mock()
+
+    envelope = convert_path(
+        path,
+        allow_cloud=True,
+        converter=lambda _: "# Markdown from local converter",
+        ocr=ocr,
+    )
+
+    assert envelope.content == Content(format="markdown", value="# Markdown from local converter")
+    assert [(segment.text, segment.source_ref) for segment in envelope.segments] == [
+        ("Trang mot\n", {"page": 1}),
+        ("Trang hai\n", {"page": 2}),
+    ]
+    assert envelope.warnings == []
+    ocr.extract.assert_not_called()
 
 
 def test_concrete_markitdown_adapter_disables_plugins(
@@ -426,17 +457,18 @@ def test_canonical_golden_manifest_hashes_and_routes(tmp_path: Path, monkeypatch
     entries = payload["sources"]
 
     assert [entry["sample_id"] for entry in entries] == [f"GD-{index:02d}" for index in range(1, 8)]
+    assert entries[0]["not_asserted"] == ["text"]
+    assert entries[0]["expected_provenance"] == [{"page": 1}]
     assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in materialized] == [
         entry["expected_sha256"] for entry in entries
     ]
 
     def fake_convert(path: Path, *, allow_cloud: bool):
-        source_bytes = path.read_bytes()
-        envelope = ConversionEnvelope.for_source(path, source_bytes)
-        if classify_source(path, source_bytes) == "local":
-            envelope.content = Content(value="synthetic local conversion")
-            envelope.segments.append(Segment(segment_id="segment-1", text="synthetic local conversion", source_ref=None))
-        return envelope
+        return convert_path(
+            path,
+            allow_cloud=allow_cloud,
+            converter=lambda _: "synthetic local conversion",
+        )
 
     monkeypatch.setattr(harness_module, "convert_path", fake_convert)
     for entry in entries:

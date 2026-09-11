@@ -1,5 +1,5 @@
 {
-  "manifest_version": "gd-2",
+  "manifest_version": "gd-3",
   "description": "Canonical synthetic GD-01..07 cases aligned with systemdocs §6.8; no customer data.",
   "sources": [
     {
@@ -11,9 +11,9 @@
       "expected_route": "local",
       "expected_status": "completed",
       "expected_text": null,
-      "not_asserted": ["text", "provenance"],
+      "not_asserted": ["text"],
       "expected_facts": [],
-      "expected_provenance": [null]
+      "expected_provenance": [{"page": 1}]
     },
     {
       "sample_id": "GD-02",

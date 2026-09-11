@@ -44,7 +44,7 @@ the model/configuration without recording secrets.
 | Deterministic routing | DOCX/XLSX/text PDF local; scanned PDF/raster OCR candidate; unsupported and legacy DOC never cloud | `policy.py` + report routes |
 | OCR gate | No provider call without explicit allow decision | `converter.py` + cloud-call count |
 | Local conversion | MarkItDown plugins disabled | `converter.py` |
-| Provenance boundary | Envelope retains source hash; unavailable segment provenance is explicit | `models.py` + warnings |
+| Provenance boundary | Text PDF emits page-addressable local segments; formats without a stable locator retain explicit unavailable provenance | `converter.py` + `models.py` + warnings |
 | Batch resilience | One fixture failure does not abort later fixtures | `summary` and `partial_failure` |
 | Compatible transport | Payload/MIME/base64/error and timeout behavior measured with fakes before any cloud smoke | `qwen_compatible.py` tests |
 
