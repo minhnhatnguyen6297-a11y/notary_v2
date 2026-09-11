@@ -9,9 +9,10 @@ from docx import Document
 from PIL import Image
 
 from tools.document_conversion_poc import converter as converter_module
+from tools.document_conversion_poc import harness as harness_module
 from tools.document_conversion_poc.converter import convert_path
 from tools.document_conversion_poc.harness import run_manifest
-from tools.document_conversion_poc.models import ConversionEnvelope
+from tools.document_conversion_poc.models import Content, ConversionEnvelope
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
 from tools.document_conversion_poc.qwen_compatible import QwenCompatibleOcr
 
@@ -255,8 +256,19 @@ def test_compatible_ocr_classifies_retryability(tmp_path: Path) -> None:
     assert run_with(TimeoutError("network timeout")).errors[0].retryable is True
 
 
-def test_harness_reports_partial_failure_without_aborting_batch(tmp_path: Path) -> None:
+def test_harness_reports_partial_failure_without_aborting_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
     output_path = tmp_path / "report.json"
+
+    def fake_convert(path: Path, *, allow_cloud: bool):
+        source_bytes = path.read_bytes()
+        envelope = ConversionEnvelope.for_source(path, source_bytes)
+        if path.suffix == ".docx":
+            envelope.content = Content(value="synthetic markdown")
+        return envelope
+
+    monkeypatch.setattr(harness_module, "convert_path", fake_convert)
 
     report = run_manifest(
         _write_manifest(tmp_path, ["ok.docx", "bad.bin"]),

@@ -6,7 +6,10 @@ from pathlib import Path
 from time import perf_counter
 from typing import Protocol
 
-from markitdown import MarkItDown
+try:
+    from markitdown import MarkItDown
+except ImportError:  # Optional POC dependency; production imports stay usable.
+    MarkItDown = None  # type: ignore[assignment,misc]
 
 from .models import Content, Converter, ConversionEnvelope, OcrCall, PocError, Segment
 from .policy import classify_source, decide_ocr
@@ -19,6 +22,10 @@ class OcrClient(Protocol):
 
 
 def _markitdown_convert(path: Path) -> str:
+    if MarkItDown is None:
+        raise RuntimeError(
+            "markitdown is not installed; install requirements-poc-markitdown.txt"
+        )
     result = MarkItDown(enable_plugins=False).convert(str(path))
     return result.markdown
 

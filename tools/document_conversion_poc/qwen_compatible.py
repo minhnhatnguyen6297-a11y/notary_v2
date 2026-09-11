@@ -4,7 +4,19 @@ import base64
 import os
 from typing import Any
 
-from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
+try:
+    from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
+except ImportError:  # Optional POC dependency; only environment construction needs it.
+    class APIConnectionError(Exception):
+        pass
+
+    class APITimeoutError(Exception):
+        pass
+
+    class RateLimitError(Exception):
+        pass
+
+    OpenAI = None  # type: ignore[assignment,misc]
 
 
 class OcrRequestError(RuntimeError):
@@ -29,6 +41,10 @@ class QwenCompatibleOcr:
             raise ValueError(
                 "QWEN_COMPATIBLE_BASE_URL, QWEN_COMPATIBLE_API_KEY, and "
                 "QWEN_COMPATIBLE_MODEL are required"
+            )
+        if OpenAI is None:
+            raise RuntimeError(
+                "openai is not installed; install requirements-poc-markitdown.txt"
             )
         return cls(
             client=OpenAI(
