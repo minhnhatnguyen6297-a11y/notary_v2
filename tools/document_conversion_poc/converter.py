@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import hashlib
 from pathlib import Path
+from time import perf_counter
 from typing import Protocol
 
 from markitdown import MarkItDown
 
-from .models import Content, Converter, ConversionEnvelope, PocError, Segment
+from .models import Content, Converter, ConversionEnvelope, OcrCall, PocError, Segment
 from .policy import classify_source, decide_ocr
+from .qwen_compatible import OcrRequestError
 
 
 class OcrClient(Protocol):
@@ -62,7 +65,38 @@ def convert_path(
         envelope.warnings.append("approved_ocr_client_not_configured")
         return envelope
 
-    envelope.errors.append(
-        PocError(code="ocr_not_implemented", message="OCR adapter is Task 4", retryable=False)
+    started_at = perf_counter()
+    input_hash = hashlib.sha256(source_bytes).hexdigest()
+    try:
+        text = ocr.extract(source_bytes, envelope.source.media_type or "application/octet-stream")
+    except OcrRequestError as exc:
+        duration_ms = round((perf_counter() - started_at) * 1000)
+        envelope.ocr_calls.append(
+            OcrCall(
+                provider=getattr(ocr, "provider", "injected-ocr"),
+                model=getattr(ocr, "model", "unknown"),
+                input_hash=input_hash,
+                status="failed",
+                duration_ms=duration_ms,
+                error=str(exc),
+            )
+        )
+        envelope.errors.append(
+            PocError(code="ocr_request_failed", message=str(exc), retryable=exc.retryable)
+        )
+        return envelope
+
+    duration_ms = round((perf_counter() - started_at) * 1000)
+    envelope.content = Content(format="text", value=text)
+    envelope.segments.append(Segment(segment_id="ocr-1", text=text, source_ref=None))
+    envelope.ocr_calls.append(
+        OcrCall(
+            provider=getattr(ocr, "provider", "injected-ocr"),
+            model=getattr(ocr, "model", "unknown"),
+            input_hash=input_hash,
+            status="completed",
+            duration_ms=duration_ms,
+        )
     )
+    envelope.warnings.append("provenance_unavailable")
     return envelope
