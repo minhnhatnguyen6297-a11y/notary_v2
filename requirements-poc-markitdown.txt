@@ -1,0 +1,5 @@
+# Optional dependencies for the isolated MIN-50 conversion POC.
+# Do not merge these into requirements.txt until an ADOPT decision exists.
+markitdown>=0.1.0
+markitdown-ocr>=0.1.0
+openai>=1.0.0
