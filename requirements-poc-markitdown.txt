@@ -1,5 +1,8 @@
 # Optional dependencies for the isolated MIN-50 conversion POC.
 # Do not merge these into requirements.txt until an ADOPT decision exists.
-markitdown>=0.1.0
-markitdown-ocr>=0.1.0
+# Keep the POC Windows wheel ABI aligned with the verified production runtime.
+PyMuPDF==1.24.5
+Pillow==10.2.0
+markitdown==0.1.7
+markitdown-ocr==0.1.0
 openai>=1.0.0

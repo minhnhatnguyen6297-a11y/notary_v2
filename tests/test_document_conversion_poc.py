@@ -1,9 +1,14 @@
 import json
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import fitz
+from docx import Document
 
+from tools.document_conversion_poc import converter as converter_module
+from tools.document_conversion_poc.converter import convert_path
 from tools.document_conversion_poc.models import ConversionEnvelope
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
 
@@ -94,3 +99,48 @@ def test_ocr_gate_allows_only_explicit_ocr_candidates() -> None:
     assert local.allow is False
     assert unsupported.allow is False
     assert legacy_doc.allow is False
+
+
+def _write_synthetic_docx(path: Path, text: str) -> Path:
+    document = Document()
+    document.add_paragraph(text)
+    document.save(path)
+    return path
+
+
+def test_docx_local_route_never_calls_ocr(tmp_path: Path) -> None:
+    path = _write_synthetic_docx(tmp_path / "contract.docx", "Nguyễn Văn A")
+    ocr = Mock()
+
+    envelope = convert_path(
+        path,
+        allow_cloud=True,
+        converter=lambda _: "Nguyễn Văn A",
+        ocr=ocr,
+    )
+
+    assert envelope.content.value == "Nguyễn Văn A"
+    ocr.extract.assert_not_called()
+    assert envelope.segments[0].source_ref is None
+    assert "provenance_unavailable" in envelope.warnings
+
+
+def test_concrete_markitdown_adapter_disables_plugins(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = _write_synthetic_docx(tmp_path / "contract.docx", "Nguyễn Văn A")
+    calls: list[bool] = []
+
+    class FakeMarkItDown:
+        def __init__(self, *, enable_plugins: bool) -> None:
+            calls.append(enable_plugins)
+
+        def convert(self, source_path: str) -> SimpleNamespace:
+            assert source_path == str(path)
+            return SimpleNamespace(markdown="local markdown")
+
+    monkeypatch.setattr(converter_module, "MarkItDown", FakeMarkItDown)
+
+    assert converter_module._markitdown_convert(path) == "local markdown"
+    assert calls == [False]
