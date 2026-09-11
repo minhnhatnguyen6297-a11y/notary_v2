@@ -49,6 +49,10 @@ class OcrCall:
     status: str
     duration_ms: int | None = None
     error: str | None = None
+    policy_version: str = "unknown"
+    allow_reason: str = "unknown"
+    attempt: int = 1
+    source_ref: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +62,10 @@ class OcrCall:
             "status": self.status,
             "duration_ms": self.duration_ms,
             "error": self.error,
+            "policy_version": self.policy_version,
+            "allow_reason": self.allow_reason,
+            "attempt": self.attempt,
+            "source_ref": None if self.source_ref is None else dict(self.source_ref),
         }
 
 

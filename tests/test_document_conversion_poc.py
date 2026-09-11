@@ -12,9 +12,10 @@ from tools.document_conversion_poc import converter as converter_module
 from tools.document_conversion_poc import harness as harness_module
 from tools.document_conversion_poc.converter import convert_path
 from tools.document_conversion_poc.harness import run_manifest
+from tools.document_conversion_poc.golden_fixtures import materialize_golden_fixtures
 from tools.document_conversion_poc.models import Content, ConversionEnvelope
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
-from tools.document_conversion_poc.qwen_compatible import QwenCompatibleOcr
+from tools.document_conversion_poc.qwen_compatible import OcrRequestError, QwenCompatibleOcr
 
 
 def test_envelope_is_json_safe_and_has_experimental_version() -> None:
@@ -46,6 +47,15 @@ def _pdf_bytes(*, with_text: bool) -> bytes:
     page = document.new_page()
     if with_text:
         page.insert_text((72, 72), "Synthetic PDF text")
+    data = document.tobytes()
+    document.close()
+    return data
+
+
+def _scanned_pdf_bytes(page_count: int = 2) -> bytes:
+    document = fitz.open()
+    for _ in range(page_count):
+        document.new_page()
     data = document.tobytes()
     document.close()
     return data
@@ -198,6 +208,87 @@ def test_allowed_image_sends_one_data_url_to_fake_client(tmp_path: Path) -> None
     )
 
 
+def test_scanned_pdf_renders_each_page_and_records_provenance(tmp_path: Path) -> None:
+    calls: list[tuple[bytes, str]] = []
+
+    class FakeOcr:
+        provider = "fake"
+        model = "synthetic"
+
+        def extract(self, image_bytes: bytes, mime_type: str) -> str:
+            calls.append((image_bytes, mime_type))
+            return f"page-{len(calls)}"
+
+    path = tmp_path / "scan.pdf"
+    path.write_bytes(_scanned_pdf_bytes())
+    envelope = convert_path(
+        path, allow_cloud=True, converter=lambda _: "unused", ocr=FakeOcr(), max_retries=0,
+    )
+
+    assert len(calls) == 2
+    assert all(mime == "image/png" and data.startswith(b"\x89PNG") for data, mime in calls)
+    assert [segment.source_ref for segment in envelope.segments] == [{"page": 1}, {"page": 2}]
+    assert all(call.policy_version == "poc-1" and call.allow_reason == "explicit_cloud_authorization" for call in envelope.ocr_calls)
+
+
+def test_retry_is_bounded_and_reuses_same_page_hash(tmp_path: Path) -> None:
+    attempts = 0
+    hashes: list[str] = []
+
+    class RetryOnce:
+        provider = "fake"
+        model = "synthetic"
+
+        def extract(self, image_bytes: bytes, mime_type: str) -> str:
+            nonlocal attempts
+            attempts += 1
+            hashes.append(hashlib.sha256(image_bytes).hexdigest())
+            if attempts == 1:
+                error = OcrRequestError("temporary", retryable=True)
+                raise error
+            return "ok"
+
+    path = tmp_path / "scan.png"
+    _write_png(path)
+    envelope = convert_path(path, allow_cloud=True, converter=lambda _: "unused", ocr=RetryOnce(), max_retries=1)
+
+    assert attempts == 2
+    assert hashes[0] == hashes[1]
+    assert envelope.content.value == "ok"
+    assert [call.attempt for call in envelope.ocr_calls] == [1, 2]
+
+
+def test_scanned_pdf_partial_failure_keeps_successful_page(tmp_path: Path, monkeypatch) -> None:
+    calls = 0
+
+    class FailSecondPage:
+        provider = "fake"
+        model = "synthetic"
+
+        def extract(self, image_bytes: bytes, mime_type: str) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OcrRequestError("second page unavailable", retryable=False)
+            return "page-1 text"
+
+    path = tmp_path / "partial.pdf"
+    path.write_bytes(_scanned_pdf_bytes(page_count=2))
+    envelope = convert_path(path, allow_cloud=True, converter=lambda _: "unused", ocr=FailSecondPage(), max_retries=0)
+
+    assert envelope.content.value == "page-1 text"
+    assert [segment.source_ref for segment in envelope.segments] == [{"page": 1}]
+    assert envelope.errors[0].code == "ocr_request_failed"
+    assert envelope.ocr_calls[-1].source_ref == {"page": 2}
+
+    manifest = tmp_path / "partial-manifest.json"
+    manifest.write_text(json.dumps({"sources": [{"sample_id": "GD-partial", "path": str(path)}]}), encoding="utf-8")
+    monkeypatch.setattr(harness_module, "convert_path", lambda path, *, allow_cloud: envelope)
+    report = run_manifest(manifest, tmp_path / "partial-report.json", allow_cloud=True)
+    assert report["results"][0]["status"] == "partial"
+    assert report["partial_failure"] is True
+
+
 def test_denied_image_never_calls_client(tmp_path: Path) -> None:
     ocr = Mock()
 
@@ -276,6 +367,101 @@ def test_harness_reports_partial_failure_without_aborting_batch(
         allow_cloud=False,
     )
 
-    assert report["summary"] == {"total": 2, "completed": 1, "failed": 1}
+    assert report["summary"] == {
+        "total": 2,
+        "completed": 1,
+        "failed": 0,
+        "non_completed": 1,
+    }
     assert output_path.exists()
     assert json.loads(output_path.read_text(encoding="utf-8"))["summary"] == report["summary"]
+
+
+def test_empty_manifest_cannot_be_adopted(tmp_path: Path) -> None:
+    manifest = tmp_path / "empty.json"
+    manifest.write_text(json.dumps({"sources": []}), encoding="utf-8")
+
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    assert report["summary"] == {"total": 0, "completed": 0, "failed": 0, "non_completed": 0}
+    assert report["manifest_complete"] is False
+    assert report["decision"] == "review_required"
+
+
+def test_golden_manifest_declares_gd_01_to_gd_07_without_customer_data() -> None:
+    manifest = json.loads(
+        (Path(__file__).parents[1] / "tools/document_conversion_poc/golden_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    entries = manifest["sources"]
+    assert [entry["sample_id"] for entry in entries] == [f"GD-{index:02d}" for index in range(1, 8)]
+    required = {
+        "sample_id", "path", "mime", "sensitivity", "expected_route", "expected_status",
+        "expected_text", "expected_facts", "expected_provenance", "not_asserted",
+    }
+    assert all(required.issubset(entry) and entry["sensitivity"] == "synthetic" for entry in entries)
+
+
+def test_golden_fixture_materialization_is_byte_repeatable(tmp_path: Path) -> None:
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first = materialize_golden_fixtures(first_dir)
+    second = materialize_golden_fixtures(second_dir)
+
+    assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in first] == [
+        hashlib.sha256(path.read_bytes()).hexdigest() for path in second
+    ]
+
+
+def test_manifest_expectations_are_checked_and_sample_id_is_reported(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = _write_synthetic_docx(tmp_path / "sample.docx", "Synthetic manifest document")
+    manifest = tmp_path / "golden.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "sample_id": "GD-test",
+                        "path": str(source),
+                        "expected_route": "local",
+                        "expected_status": "completed",
+                        "expected_text": "expected text",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(harness_module, "convert_path", lambda path, *, allow_cloud: ConversionEnvelope.for_source(path, path.read_bytes()))
+
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    result = report["results"][0]
+    assert result["sample_id"] == "GD-test"
+    assert result["expected_mismatches"]
+    assert result["status"] == "failed"
+    assert report["decision"] == "review_required"
+
+
+def test_harness_canonical_digest_is_repeatable(tmp_path: Path, monkeypatch) -> None:
+    source = _write_synthetic_docx(tmp_path / "repeat.docx", "repeatable")
+    manifest = tmp_path / "repeat.json"
+    manifest.write_text(json.dumps({"sources": [{"sample_id": "GD-repeat", "path": str(source)}]}), encoding="utf-8")
+    monkeypatch.setattr(
+        harness_module,
+        "convert_path",
+        lambda path, *, allow_cloud: ConversionEnvelope(
+            source=ConversionEnvelope.for_source(path, path.read_bytes()).source,
+            created_at="fixed",
+            content=Content(value="stable"),
+        ),
+    )
+
+    first = run_manifest(manifest, tmp_path / "first.json", allow_cloud=False)
+    second = run_manifest(manifest, tmp_path / "second.json", allow_cloud=False)
+
+    assert first["canonical_result_sha256"] == second["canonical_result_sha256"]
+    assert "working_tree_dirty" in first

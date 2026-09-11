@@ -6,6 +6,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Protocol
 
+import fitz
+
 try:
     from markitdown import MarkItDown
 except ImportError:  # Optional POC dependency; production imports stay usable.
@@ -19,6 +21,21 @@ from .qwen_compatible import OcrRequestError
 class OcrClient(Protocol):
     def extract(self, image_bytes: bytes, mime_type: str) -> str:
         """Return OCR text for an already-approved image input."""
+
+
+def _ocr_inputs(path: Path, source_bytes: bytes) -> list[tuple[bytes, str, dict[str, int] | None]]:
+    """Render scanned PDF pages; never send PDF bytes as an image data URL."""
+    if path.suffix.lower() != ".pdf":
+        return [(source_bytes, "image/png" if path.suffix.lower() == ".png" else "image/jpeg", None)]
+    document = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        inputs = []
+        for page_number, page in enumerate(document, start=1):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            inputs.append((pixmap.tobytes("png"), "image/png", {"page": page_number}))
+        return inputs
+    finally:
+        document.close()
 
 
 def _markitdown_convert(path: Path) -> str:
@@ -36,6 +53,7 @@ def convert_path(
     allow_cloud: bool,
     converter: Callable[[Path], str] = _markitdown_convert,
     ocr: OcrClient | None = None,
+    max_retries: int = 1,
 ) -> ConversionEnvelope:
     source_bytes = path.read_bytes()
     envelope = ConversionEnvelope.for_source(path, source_bytes)
@@ -72,38 +90,47 @@ def convert_path(
         envelope.warnings.append("approved_ocr_client_not_configured")
         return envelope
 
-    started_at = perf_counter()
-    input_hash = hashlib.sha256(source_bytes).hexdigest()
     try:
-        text = ocr.extract(source_bytes, envelope.source.media_type or "application/octet-stream")
-    except OcrRequestError as exc:
-        duration_ms = round((perf_counter() - started_at) * 1000)
-        envelope.ocr_calls.append(
-            OcrCall(
-                provider=getattr(ocr, "provider", "injected-ocr"),
-                model=getattr(ocr, "model", "unknown"),
-                input_hash=input_hash,
-                status="failed",
-                duration_ms=duration_ms,
-                error=str(exc),
-            )
-        )
-        envelope.errors.append(
-            PocError(code="ocr_request_failed", message=str(exc), retryable=exc.retryable)
-        )
+        ocr_inputs = _ocr_inputs(path, source_bytes)
+    except Exception as exc:
+        envelope.errors.append(PocError(code="pdf_render_failed", message=str(exc), retryable=False))
         return envelope
 
-    duration_ms = round((perf_counter() - started_at) * 1000)
-    envelope.content = Content(format="text", value=text)
-    envelope.segments.append(Segment(segment_id="ocr-1", text=text, source_ref=None))
-    envelope.ocr_calls.append(
-        OcrCall(
-            provider=getattr(ocr, "provider", "injected-ocr"),
-            model=getattr(ocr, "model", "unknown"),
-            input_hash=input_hash,
-            status="completed",
-            duration_ms=duration_ms,
-        )
-    )
-    envelope.warnings.append("provenance_unavailable")
+    texts: list[str] = []
+    policy_version = decision.policy_version
+    for index, (image_bytes, mime_type, source_ref) in enumerate(ocr_inputs, start=1):
+        input_hash = hashlib.sha256(image_bytes).hexdigest()
+        for attempt in range(1, max(0, max_retries) + 2):
+            started_at = perf_counter()
+            try:
+                text = ocr.extract(image_bytes, mime_type)
+            except OcrRequestError as exc:
+                duration_ms = round((perf_counter() - started_at) * 1000)
+                envelope.ocr_calls.append(OcrCall(
+                    provider=getattr(ocr, "provider", "injected-ocr"), model=getattr(ocr, "model", "unknown"),
+                    input_hash=input_hash, status="failed", duration_ms=duration_ms, error=str(exc),
+                    policy_version=policy_version, allow_reason=decision.reason, attempt=attempt,
+                    source_ref=source_ref,
+                ))
+                if exc.retryable and attempt <= max_retries:
+                    continue
+                envelope.errors.append(PocError(code="ocr_request_failed", message=str(exc), retryable=exc.retryable))
+                break
+            else:
+                duration_ms = round((perf_counter() - started_at) * 1000)
+                texts.append(text)
+                envelope.segments.append(Segment(segment_id=f"ocr-{index}", text=text, source_ref=source_ref))
+                envelope.ocr_calls.append(OcrCall(
+                    provider=getattr(ocr, "provider", "injected-ocr"), model=getattr(ocr, "model", "unknown"),
+                    input_hash=input_hash, status="completed", duration_ms=duration_ms,
+                    policy_version=policy_version, allow_reason=decision.reason, attempt=attempt,
+                    source_ref=source_ref,
+                ))
+                break
+
+    envelope.content = Content(format="text", value="\n".join(texts))
+    if any(segment.source_ref is not None for segment in envelope.segments):
+        envelope.warnings.append("provenance_partial")
+    else:
+        envelope.warnings.append("provenance_unavailable")
     return envelope

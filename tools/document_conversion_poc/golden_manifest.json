@@ -1,0 +1,90 @@
+{
+  "manifest_version": "gd-1",
+  "description": "Synthetic golden cases for the document-conversion POC; no customer data.",
+  "sources": [
+    {
+      "sample_id": "GD-01",
+      "path": "tests/fixtures/document_conversion_poc/gd-01-text.pdf",
+      "mime": "application/pdf",
+      "sensitivity": "synthetic",
+      "expected_route": "local",
+      "expected_status": "completed",
+      "expected_text": null,
+      "not_asserted": ["text", "provenance"],
+      "expected_facts": [],
+      "expected_provenance": [null]
+    },
+    {
+      "sample_id": "GD-02",
+      "path": "tests/fixtures/document_conversion_poc/gd-02-scanned.pdf",
+      "mime": "application/pdf",
+      "sensitivity": "synthetic",
+      "expected_route": "ocr_candidate",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-03",
+      "path": "tests/fixtures/document_conversion_poc/gd-03-id.png",
+      "mime": "image/png",
+      "sensitivity": "synthetic",
+      "expected_route": "ocr_candidate",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-04",
+      "path": "tests/fixtures/document_conversion_poc/gd-04-contract.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "sensitivity": "synthetic",
+      "expected_route": "local",
+      "expected_status": "completed",
+      "expected_text": null,
+      "not_asserted": ["text", "provenance"],
+      "expected_facts": [],
+      "expected_provenance": [null]
+    },
+    {
+      "sample_id": "GD-05",
+      "path": "tests/fixtures/document_conversion_poc/gd-05-legacy.doc",
+      "mime": "application/msword",
+      "sensitivity": "synthetic",
+      "expected_route": "legacy_doc_external",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-06",
+      "path": "tests/fixtures/document_conversion_poc/gd-06-unsupported.bin",
+      "mime": "application/octet-stream",
+      "sensitivity": "synthetic",
+      "expected_route": "unsupported",
+      "expected_status": "unsupported",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-07",
+      "path": "tests/fixtures/document_conversion_poc/gd-07-partial.png",
+      "mime": "image/png",
+      "sensitivity": "synthetic",
+      "expected_route": "ocr_candidate",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    }
+  ]
+}
