@@ -204,7 +204,7 @@ Nếu không nhận được từ tiêu đề nhưng parse được ≥ 2 trong 
 
 ## Những gì KHÔNG làm
 
-- Không sửa OCR engine (Qwen, RapidOCR, VietOCR)
-- Không đổi tên endpoint, Celery task, DB schema
+- Không sửa Cloud OCR engine Qwen
+- Không đổi tên endpoint hoặc DB schema
 - `chu_su_dung` chưa persist vào DB / form fill
 - `text_lines` và `footer_date_rescue` KHÔNG xuất hiện trong API response (đang cần revert)

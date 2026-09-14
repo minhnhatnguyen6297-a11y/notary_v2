@@ -218,9 +218,14 @@ function findCustomerById(customerId) {
   return allCustomers.find((item) => String(item.id) === String(customerId)) || null;
 }
 
+function isCommittedStagePerson(customerId) {
+  return (window.getCommittedStageSnapshot?.() || []).some((person) => String(person?.id || "") === String(customerId || ""));
+}
+
 function resolveCustomerForDrop(rawPayload) {
   if (!rawPayload) return null;
   const explicitId = rawPayload.customerId || rawPayload.id;
+  if (!explicitId || !isCommittedStagePerson(explicitId)) return null;
   const resolved = explicitId ? findCustomerById(explicitId) : null;
   return normalizePersonPayload(resolved || rawPayload);
 }
@@ -343,13 +348,20 @@ function collectPrunableNodeIds(nodes, targetId) {
 }
 
 function collectRemovedPeople(nodes, targetId) {
-  const target = nodes.find((node) => node.id === targetId);
-  if (!target) return [];
-  if (!target.removable) return target.person ? [normalizePersonPayload(target.person)] : [];
   const ids = collectPrunableNodeIds(nodes, targetId);
   return nodes
     .filter((node) => ids.has(node.id) && node.person)
     .map((node) => normalizePersonPayload(node.person));
+}
+
+function clearAssignedNode(node) {
+  return {
+    ...node,
+    person: null,
+    isLandOwner: false,
+    willReceive: node.allowsShare !== false,
+    sharePercent: "0.00",
+  };
 }
 
 function bridgeWorkflowUpdates(transitions) {
@@ -410,7 +422,10 @@ function hydrateEngineStateNodes() {
   if (!initialEngineState || !Array.isArray(initialEngineState.nodes) || !initialEngineState.nodes.length) {
     return null;
   }
-  const nodes = initialEngineState.nodes.map((saved) => {
+  const nodes = initialEngineState.nodes.filter((saved) => {
+    const personId = String(saved?.personId || saved?.person?.id || "").trim();
+    return !personId || isCommittedStagePerson(personId);
+  }).map((saved) => {
     const personId = String(saved.personId || saved.person?.id || "").trim();
     const resolvedPerson = personId ? normalizePersonPayload(findCustomerById(personId) || saved.person || { id: personId }) : null;
     return createLogicalNode({
@@ -1948,10 +1963,13 @@ function FamilyTreeApp() {
     return nextNodes;
   }, [applyCommittedState, shareMode]);
 
-  const pruneLinkedNodes = useCallback((nodes, targetId) => {
+  const pruneLinkedNodes = useCallback((nodes, targetId, options = {}) => {
     if (targetId === "__noop__") return nodes.slice();
     const toRemove = collectPrunableNodeIds(nodes, targetId);
-    return nodes.filter((node) => !toRemove.has(node.id));
+    const keepTarget = options.keepTarget === true;
+    return nodes
+      .filter((node) => node.id === targetId ? keepTarget : !toRemove.has(node.id))
+      .map((node) => node.id === targetId ? clearAssignedNode(node) : node);
   }, []);
 
   const materializeGhostNode = useCallback((node, prevNodes, person, idOverride = "") => {
@@ -2017,9 +2035,7 @@ function FamilyTreeApp() {
       const target = prevNodes.find((node) => node.id === nodeId);
       if (!target) return prevNodes;
       if (!target.removable) {
-        return prevNodes.map((node) =>
-          node.id === nodeId ? { ...node, person: null, willReceive: false, sharePercent: "0.00" } : node
-        );
+        return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId, { keepTarget: true }));
       }
       return ensureSpareChildNode(pruneLinkedNodes(prevNodes, nodeId));
     });
@@ -2158,6 +2174,31 @@ function FamilyTreeApp() {
     window.addEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
     return () => window.removeEventListener("caseParticipantRecordUpdated", handleParticipantRecordUpdated);
   }, [commitLogicalNodes]);
+
+  useEffect(() => {
+    const handleStagePersonsCommitted = (evt) => {
+      const stageIds = new Set((evt?.detail?.stageIds || []).map(String));
+      const returned = new Map();
+      commitLogicalNodes((prevNodes) => {
+        let nextNodes = prevNodes;
+        prevNodes.forEach((node) => {
+          const personId = String(node.person?.id || "").trim();
+          if (!personId || stageIds.has(personId)) return;
+          collectRemovedPeople(nextNodes, node.id).forEach((person) => {
+            if (person?.id && stageIds.has(String(person.id))) returned.set(String(person.id), person);
+          });
+          nextNodes = pruneLinkedNodes(nextNodes, node.id, { keepTarget: node.removable === false });
+        });
+        return ensureSpareChildNode(nextNodes);
+      });
+      bridgeWorkflowUpdates(Array.from(returned.values()).map((person) => ({
+        id: person.id,
+        patch: { inDiagram: false, inTree: false, inPool: true },
+      })));
+    };
+    window.addEventListener("caseStagePersonsCommitted", handleStagePersonsCommitted);
+    return () => window.removeEventListener("caseStagePersonsCommitted", handleStagePersonsCommitted);
+  }, [commitLogicalNodes, pruneLinkedNodes]);
 
   const onGhostExpand = useCallback((nodeId) => {
     commitLogicalNodes((prevNodes) => {

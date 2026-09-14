@@ -36,8 +36,6 @@ function Test-OcrRelevantChange {
 
     $OcrRelevant = @(
         "routers/ocr_ai.py",
-        "routers/ocr_local.py",
-        "tasks.py",
         "tests/test_ocr_ai.py"
     )
 
@@ -67,7 +65,7 @@ function Invoke-VerifyStep {
 }
 
 Invoke-VerifyStep "py_compile core Python files" {
-    & $Python -m py_compile routers/ocr_ai.py routers/ocr_local.py tasks.py
+    & $Python -m py_compile routers/ocr_ai.py routers/cases.py routers/customers.py
 }
 
 & $Python -m ruff --version *> $null

@@ -10,8 +10,12 @@ from routers.customers import (
     as_input_value,
     download_template,
     normalize_excel_header,
+    consonant_skeleton,
+    header_matches_keyword,
     parse_date,
     validate_customer_form,
+    quick_update,
+    inline_create,
 )
 
 
@@ -29,6 +33,36 @@ class DummyDb:
 
 
 class CustomerExcelImportTests(unittest.TestCase):
+    def test_quick_update_empty_fields_clear_and_omitted_fields_remain(self):
+        customer = type("Customer", (), {"id": 1, "ho_ten": "A", "gioi_tinh": "Nam", "ngay_sinh": date(1990, 1, 1), "ngay_chet": None, "so_giay_to": "123", "ngay_cap": None, "dia_chi": "Old"})()
+        class Db:
+            def get(self, *_args): return customer
+            def commit(self): pass
+            def refresh(self, *_args): pass
+        quick_update(1, ho_ten="", gioi_tinh=None, ngay_sinh=None, ngay_chet=None, so_giay_to=None, ngay_cap=None, dia_chi="", db=Db())
+        self.assertEqual(customer.ho_ten, "")
+        self.assertIsNone(customer.dia_chi)
+        self.assertEqual(customer.gioi_tinh, "Nam")
+        self.assertEqual(customer.so_giay_to, "123")
+
+    def test_inline_create_existing_preserves_omitted_and_clears_submitted_empty(self):
+        customer = type("Customer", (), {"id": 1, "ho_ten": "Old", "gioi_tinh": "Nam", "ngay_sinh": date(1990, 1, 1), "ngay_chet": None, "so_giay_to": "123", "ngay_cap": date(2020, 1, 1), "dia_chi": "Old"})()
+        class Query:
+            def filter(self, *_args): return self
+            def first(self): return customer
+        class Db:
+            def query(self, *_args): return Query()
+            def commit(self): pass
+            def refresh(self, *_args): pass
+        inline_create(ho_ten="New", so_giay_to="123", gioi_tinh=None, ngay_sinh=None, ngay_chet=None, ngay_cap=None, dia_chi=None, db=Db())
+        self.assertEqual(customer.gioi_tinh, "Nam")
+        self.assertEqual(customer.dia_chi, "Old")
+        inline_create(ho_ten="New", so_giay_to="123", gioi_tinh="", ngay_sinh="", ngay_chet="", ngay_cap="", dia_chi="", db=Db())
+        self.assertIsNone(customer.gioi_tinh)
+        self.assertIsNone(customer.ngay_sinh)
+        self.assertIsNone(customer.ngay_cap)
+        self.assertIsNone(customer.dia_chi)
+
     def test_numeric_year_is_not_treated_as_excel_serial(self):
         self.assertEqual(parse_date(1995), date(1995, 1, 1))
         self.assertEqual(as_input_value(1995, is_date=True), "1995")
@@ -40,6 +74,11 @@ class CustomerExcelImportTests(unittest.TestCase):
         self.assertIn("ho va ten", normalize_excel_header("Họ và tên"))
         self.assertIn("ngay sinh", normalize_excel_header("Ngày sinh"))
         self.assertIn("so giay to", normalize_excel_header("Số giấy tờ"))
+
+    def test_garbled_headers_match_by_consonant_skeleton(self):
+        self.assertEqual(consonant_skeleton("H? v? t?n"), "hvtn")
+        self.assertTrue(header_matches_keyword("H? v? t?n", "ho va ten"))
+        self.assertTrue(header_matches_keyword("Gi?i t?nh", "gioi_tinh"))
 
     def test_missing_document_number_is_cleaned_to_none(self):
         cleaned, errors = validate_customer_form(

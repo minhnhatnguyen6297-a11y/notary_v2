@@ -158,19 +158,6 @@ class WordTemplate(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
-class OCRJob(Base):
-    """Tram kiem soat tien do OCR."""
-    __tablename__ = "ocr_jobs"
-
-    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    status = Column(String(20), nullable=False, default="queued")
-    temp_file_path = Column(Text, nullable=True)
-    result_json = Column(JSON, nullable=True)
-    error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-
 class ExtractedDocument(Base):
     """Kho luu tru du lieu da boc tach sau khi user xac nhan."""
     __tablename__ = "extracted_documents"

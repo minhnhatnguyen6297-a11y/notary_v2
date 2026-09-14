@@ -210,12 +210,16 @@ def _extract_diagram_participants(
     participants: list[SimpleNamespace] = []
 
     for node in diagram_state["nodes"]:
+        if _clean_text(node.get("kind")).lower() != "person":
+            continue
         person_id = _clean_text(node.get("personId"))
         if not person_id or node.get("hidden") or node.get("deleted"):
             continue
         active_person_ids.add(person_id)
 
     for node in diagram_state["nodes"]:
+        if _clean_text(node.get("kind")).lower() != "person":
+            continue
         person_id = _clean_text(node.get("personId"))
         if not person_id or node.get("hidden") or node.get("deleted"):
             continue
@@ -257,8 +261,11 @@ def _parse_case_diagram_payload(
     raw_payload: str,
     customers_by_id: dict[str, Customer],
     deceased_customer_id: str,
+    stage_ids: Optional[set[str]] = None,
 ) -> tuple[list[SimpleNamespace], set[int], str]:
     diagram_state = _normalize_diagram_payload(raw_payload)
+    if stage_ids is not None:
+        diagram_state = _prune_engine_state(diagram_state, stage_ids)
     participants, participant_ids = _extract_diagram_participants(
         diagram_state,
         customers_by_id=customers_by_id,
@@ -345,6 +352,29 @@ def _render_case_form(
     })
 
 
+def _derive_case_state_json_from_participants(participants: list[Any], deceased: Any = None) -> str:
+    stage = []
+    seen_ids: set[str] = set()
+    for customer in [deceased, *(getattr(participant, "customer", None) for participant in participants or [])]:
+        customer_id = _clean_text(getattr(customer, "id", "")) if customer else ""
+        if not customer_id or customer_id in seen_ids:
+            continue
+        seen_ids.add(customer_id)
+        stage.append({
+            "id": customer_id,
+            "ho_ten": _clean_text(getattr(customer, "ho_ten", "")),
+            "gioi_tinh": _clean_text(getattr(customer, "gioi_tinh", "")),
+            "ngay_sinh": _fmt_date(getattr(customer, "ngay_sinh", None)),
+            "ngay_chet": _fmt_date(getattr(customer, "ngay_chet", None)),
+            "so_giay_to": _clean_text(getattr(customer, "so_giay_to", "")),
+            "ngay_cap": _fmt_date(getattr(customer, "ngay_cap", None)),
+            "noi_cap": _clean_text(getattr(customer, "noi_cap", "")),
+            "dia_chi": _clean_text(getattr(customer, "dia_chi", "")),
+            "place_of_origin": _clean_text(getattr(customer, "place_of_origin", "")),
+        })
+    return _normalize_case_state_json(json.dumps({"schemaVersion": 1, "stage": stage, "diagram": {}}, ensure_ascii=False))
+
+
 def _validate_case_refs(
     *,
     nguoi_chet_id: str,
@@ -380,6 +410,7 @@ def _resolve_posted_participants(
     participant_receive: Optional[Union[List[str], str]],
     participant_parent_id: Optional[Union[List[str], str]],
     engine_state_json: str,
+    stage_ids: Optional[set[str]] = None,
 ) -> tuple[list[SimpleNamespace], set[int], Optional[str], str]:
     customers_by_id = {str(c.id): c for c in all_customers}
     raw_payload = _clean_text(diagram_payload)
@@ -388,6 +419,7 @@ def _resolve_posted_participants(
             raw_payload,
             customers_by_id=customers_by_id,
             deceased_customer_id=deceased_customer_id,
+            stage_ids=stage_ids,
         )
         return participants, participant_ids, normalized_engine_state, normalized_engine_state
 
@@ -399,7 +431,25 @@ def _resolve_posted_participants(
         participant_receive,
         participant_parent_id,
     )
+    if stage_ids is not None:
+        posted_participants = [
+            participant for participant in posted_participants
+            if _clean_text(participant.customer_id) in stage_ids
+        ]
+        for participant in posted_participants:
+            if (_clean_text(participant.parent_customer_id)
+                    and _clean_text(participant.parent_customer_id) not in stage_ids):
+                participant.parent_customer_id = None
+        posted_participant_ids = {participant.customer_id for participant in posted_participants}
     normalized_engine_state = _clean_text(engine_state_json) or None
+    if normalized_engine_state and stage_ids is not None:
+        try:
+            engine_state = json.loads(normalized_engine_state)
+        except Exception as exc:
+            raise DiagramPayloadValidationError([f"engine_state_json không phải JSON hợp lệ: {exc}"])
+        if not isinstance(engine_state, dict):
+            raise DiagramPayloadValidationError(["engine_state_json phải là object JSON."])
+        normalized_engine_state = json.dumps(_prune_engine_state(engine_state, stage_ids), ensure_ascii=False)
     return posted_participants, posted_participant_ids, normalized_engine_state, raw_payload
 
 
@@ -496,6 +546,11 @@ def create(
         errors=errors,
     )
     try:
+        form["case_state_json"], stage_ids, committed_diagram = _prepare_committed_case_state(
+            form["case_state_json"]
+        )
+        if committed_diagram is not None:
+            form["diagram_payload"] = committed_diagram
         posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
             all_customers=all_customers,
             deceased_customer_id=form["nguoi_chet_id"],
@@ -506,10 +561,10 @@ def create(
             participant_receive=participant_receive,
             participant_parent_id=participant_parent_id,
             engine_state_json=form["engine_state_json"],
+            stage_ids=stage_ids,
         )
         form["engine_state_json"] = normalized_engine_state or ""
         form["diagram_payload"] = normalized_payload or ""
-        form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -608,7 +663,7 @@ def edit_form(cid: int, request: Request, db: Session = Depends(get_db)):
         "ghi_chu": case.ghi_chu or "",
         "engine_state_json": case.engine_state_json or "",
         "diagram_payload": case.engine_state_json or "",
-        "case_state_json": case.case_state_json or "",
+        "case_state_json": case.case_state_json or _derive_case_state_json_from_participants(participants, case.nguoi_chet),
     }
     return _render_case_form(
         request,
@@ -670,6 +725,11 @@ def edit(
         errors=errors,
     )
     try:
+        form["case_state_json"], stage_ids, committed_diagram = _prepare_committed_case_state(
+            form["case_state_json"]
+        )
+        if committed_diagram is not None:
+            form["diagram_payload"] = committed_diagram
         posted_participants, posted_participant_ids, normalized_engine_state, normalized_payload = _resolve_posted_participants(
             all_customers=all_customers,
             deceased_customer_id=form["nguoi_chet_id"],
@@ -680,10 +740,10 @@ def edit(
             participant_receive=participant_receive,
             participant_parent_id=participant_parent_id,
             engine_state_json=form["engine_state_json"],
+            stage_ids=stage_ids,
         )
         form["engine_state_json"] = normalized_engine_state or ""
         form["diagram_payload"] = normalized_payload or ""
-        form["case_state_json"] = _normalize_case_state_json(form["case_state_json"])
     except DiagramPayloadValidationError as exc:
         errors.extend(exc.errors)
         if form["diagram_payload"]:
@@ -735,6 +795,44 @@ def edit(
             participant_ids=posted_participant_ids,
             case_property_ids=selected_property_ids,
         )
+
+
+@router.post("/{cid}/stage-update")
+def update_stage(cid: int, case_state_json: str = Form(...), db: Session = Depends(get_db)):
+    case = db.query(InheritanceCase).filter(InheritanceCase.id == cid).first()
+    if not case or case.is_locked:
+        raise HTTPException(400)
+    try:
+        normalized = _normalize_case_state_json(case_state_json)
+    except DiagramPayloadValidationError as exc:
+        return JSONResponse({"ok": False, "error": "; ".join(exc.errors), "errors": exc.errors}, status_code=400)
+    payload = _prune_case_state_diagram(json.loads(normalized))
+    normalized = _normalize_case_state_json(json.dumps(payload, ensure_ascii=False))
+    try:
+        case.case_state_json = normalized or None
+        current_engine_state = _clean_text(getattr(case, "engine_state_json", ""))
+        if current_engine_state:
+            engine_state = json.loads(current_engine_state)
+            if not isinstance(engine_state, dict):
+                raise DiagramPayloadValidationError(["engine_state_json phải là object JSON."])
+            stage_ids = {
+                _clean_text(person.get("id"))
+                for person in payload["stage"]
+                if isinstance(person, dict) and _clean_text(person.get("id"))
+            }
+            case.engine_state_json = json.dumps(_prune_engine_state(engine_state, stage_ids), ensure_ascii=False)
+        db.commit()
+    except DiagramPayloadValidationError as exc:
+        rollback = getattr(db, "rollback", None)
+        if rollback:
+            rollback()
+        return JSONResponse({"ok": False, "error": "; ".join(exc.errors), "errors": exc.errors}, status_code=400)
+    except Exception as exc:
+        rollback = getattr(db, "rollback", None)
+        if rollback:
+            rollback()
+        return JSONResponse({"ok": False, "error": f"stage_update_failed: {exc}"}, status_code=500)
+    return {"ok": True, "case_state_json": normalized, "engine_state_json": getattr(case, "engine_state_json", "") or ""}
 
 
 @router.post("/{cid}/lock")
@@ -1234,7 +1332,121 @@ def _normalize_case_state_json(raw_payload: str) -> str:
         raise DiagramPayloadValidationError(["case_state_json.stage phải là danh sách."])
     if not isinstance(diagram, dict):
         raise DiagramPayloadValidationError(["case_state_json.diagram phải là object JSON."])
+    errors = []
+    for index, item in enumerate(stage, start=1):
+        if not isinstance(item, dict):
+            errors.append(f"case_state_json.stage[{index}] phải là object JSON.")
+            continue
+        person_id = _clean_text(item.get("id"))
+        if not person_id:
+            errors.append(f"case_state_json.stage[{index}] thiếu id.")
+    if errors:
+        raise DiagramPayloadValidationError(errors)
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _prune_engine_state(engine_state: Any, stage_ids: set[str]) -> Any:
+    """Remove diagram records that can no longer point at committed Stage people."""
+    if not isinstance(engine_state, dict):
+        return engine_state
+    state = dict(engine_state)
+    raw_nodes = state.get("nodes", [])
+    nodes = []
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node = dict(raw_node)
+        embedded_person = node.get("person") if isinstance(node.get("person"), dict) else {}
+        person_id = _clean_text(node.get("personId") or embedded_person.get("id"))
+        if person_id and person_id not in stage_ids:
+            if not _clean_text(node.get("kind")) or _clean_text(node.get("kind")).lower() == "person":
+                continue
+            node["personId"] = None
+            if "person" in node:
+                node["person"] = None
+        nodes.append(node)
+
+    node_ids = {_clean_text(node.get("id")) for node in nodes if _clean_text(node.get("id"))}
+    active_people = {
+        _clean_text(node.get("personId") or (node.get("person") or {}).get("id"))
+        for node in nodes
+        if isinstance(node.get("person"), dict) or node.get("personId")
+    }
+    for node in nodes:
+        for key in ("parentPersonId", "parentId"):
+            if _clean_text(node.get(key)) and _clean_text(node.get(key)) not in active_people:
+                node[key] = None
+        for key in ("parentSlotId", "sourceId"):
+            if _clean_text(node.get(key)) and _clean_text(node.get(key)) not in node_ids:
+                node[key] = None
+    topology_changed = nodes != raw_nodes
+    state["nodes"] = nodes
+    if isinstance(state.get("edges"), list):
+        edges = [
+            edge for edge in state["edges"]
+            if isinstance(edge, dict)
+            and _clean_text(edge.get("source") or edge.get("sourceId")) in node_ids
+            and _clean_text(edge.get("target") or edge.get("targetId")) in node_ids
+        ]
+        topology_changed = topology_changed or edges != state["edges"]
+        state["edges"] = edges
+    for key in ("assetOwnerIds", "receiverIds", "participantIds"):
+        if isinstance(state.get(key), list):
+            values = [item for item in state[key] if _clean_text(item) in stage_ids]
+            topology_changed = topology_changed or values != state[key]
+            state[key] = values
+    if isinstance(state.get("allocations"), dict):
+        topology_changed = topology_changed or any(_clean_text(person_id) not in stage_ids for person_id in state["allocations"])
+    if topology_changed:
+        for key, empty in (("allocations", {}), ("trace", []), ("warnings", [])):
+            if key in state:
+                state[key] = empty
+    return state
+
+
+def _prune_case_state_diagram(payload: dict[str, Any]) -> dict[str, Any]:
+    stage_ids = {
+        _clean_text(person.get("id"))
+        for person in payload.get("stage", [])
+        if isinstance(person, dict) and _clean_text(person.get("id"))
+    }
+    result = dict(payload)
+    diagram = dict(payload.get("diagram") or {})
+    if "engineState" in diagram:
+        diagram["engineState"] = _prune_engine_state(diagram.get("engineState"), stage_ids)
+    engine_state = diagram.get("engineState")
+    node_ids = {
+        _clean_text(node.get("id")) for node in engine_state.get("nodes", [])
+        if isinstance(engine_state, dict) and isinstance(node, dict) and _clean_text(node.get("id"))
+    } if isinstance(engine_state, dict) else set()
+    if isinstance(diagram.get("assignments"), dict):
+        diagram["assignments"] = {
+            slot: person_id for slot, person_id in diagram["assignments"].items()
+            if _clean_text(person_id) in stage_ids and _clean_text(slot) in node_ids
+        }
+    result["diagram"] = diagram
+    return result
+
+
+def _prepare_committed_case_state(raw_payload: str) -> tuple[str, Optional[set[str]], Optional[str]]:
+    normalized = _normalize_case_state_json(raw_payload)
+    if not normalized:
+        return "", None, None
+    payload = _prune_case_state_diagram(json.loads(normalized))
+    stage_ids = {
+        _clean_text(person.get("id")) for person in payload["stage"]
+        if isinstance(person, dict) and _clean_text(person.get("id"))
+    }
+    diagram = payload["diagram"]
+    engine_state = diagram.get("engineState")
+    committed_diagram = None
+    if isinstance(engine_state, dict):
+        committed_diagram = json.dumps({
+            "version": 2,
+            "updatedAt": _clean_text(diagram.get("updatedAt") or engine_state.get("updatedAt")),
+            "engineState": engine_state,
+        }, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False), stage_ids, committed_diagram
 
 
 def _replace_text_placeholders(text: str, mapping: dict, normalized_mapping: dict) -> str:

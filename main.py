@@ -1,6 +1,5 @@
 import logging
 import os
-from contextlib import asynccontextmanager
 from time import perf_counter
 
 from dotenv import load_dotenv
@@ -17,7 +16,7 @@ from database import (
     migrate_properties_schema,
 )
 from observability import configure_process_logging
-from routers import cases, customers, ocr_ai, ocr_local, participants, properties
+from routers import cases, customers, ocr_ai, participants, properties
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
@@ -34,28 +33,9 @@ migrate_inheritance_case_properties_schema()
 Base.metadata.create_all(bind=engine)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    import warnings
-
-    warnings.filterwarnings("ignore")
-    try:
-        from routers.ocr_local import warmup_local_ocr
-
-        warmup_ok, warmup_error = warmup_local_ocr()
-        if warmup_ok:
-            app_logger.info("[startup] Local OCR warmup OK")
-        else:
-            app_logger.warning("[startup] Local OCR warmup skipped: %s", warmup_error or "unknown")
-    except Exception as e:
-        app_logger.exception("[startup] Local OCR warmup skipped: %s", e)
-    yield
-
-
 app = FastAPI(
     title="He thong Quan ly Ho so Cong chung",
     version="1.0.0",
-    lifespan=lifespan,
 )
 
 
@@ -103,7 +83,6 @@ app.include_router(properties.router, prefix="/properties", tags=["Tai san"])
 app.include_router(cases.router, prefix="/cases", tags=["Ho so thua ke"])
 app.include_router(participants.router, prefix="/participants", tags=["Nguoi tham gia"])
 app.include_router(ocr_ai.router, prefix="/api/ocr", tags=["OCR"])
-app.include_router(ocr_local.router, prefix="/api/ocr", tags=["OCR_Local"])
 
 
 @app.get("/")
