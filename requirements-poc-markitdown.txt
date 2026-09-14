@@ -1,0 +1,4 @@
+# Optional dependencies for the isolated document-conversion POC.
+markitdown
+markitdown-ocr
+openai
