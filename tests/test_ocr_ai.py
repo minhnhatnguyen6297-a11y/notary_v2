@@ -1,6 +1,7 @@
 import io
 import os
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from fastapi import HTTPException, UploadFile
@@ -13,6 +14,20 @@ def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
 
 
 class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
+    def test_active_cloud_path_has_no_document_qr(self):
+        server = Path("routers/ocr_ai.py").read_text(encoding="utf-8")
+        form = Path("frontend/templates/cases/form.html").read_text(encoding="utf-8")
+        cloud = form[
+            form.index("window.ocrExtractAll = async function") : form.index("window.ocrExtractLocal = async function")
+        ]
+
+        for symbol in ("zxing", "try_decode_qr", "parse_cccd_qr", "_append_qr_person", "source_priority"):
+            self.assertNotIn(symbol, server)
+        for symbol in ("tryQRScan", "parseQRToPerson", "ocr_qr_worker", "source: 'QR'", "sourceType === 'QR'"):
+            self.assertNotIn(symbol, cloud)
+        self.assertNotIn("parseQRToPerson", form)
+        self.assertIn("tryQRScan", form[form.index("window.ocrExtractLocal = async function") :])
+
     def test_normalize_property_doc_extracts_core_fields(self):
         lines = [
             "GIAY CHUNG NHAN",
@@ -262,44 +277,79 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(doc["side"], "front")
         self.assertEqual(doc["data"]["ngay_cap"], "")
 
-    async def test_analyze_images_prefers_qr_over_ai_result(self):
-        upload = make_upload("qr-card.jpg")
-        qr_data = {
-            "so_giay_to": "012345678901",
-            "ho_ten": "NGUYEN VAN AN",
-            "ngay_sinh": "01/02/1990",
-            "gioi_tinh": "Nam",
-            "dia_chi": "123 LE LOI",
-            "ngay_cap": "03/04/2021",
-            "ngay_het_han": "",
+    def test_shape_cached_ocr_preserves_contract_without_ocr_calls(self):
+        cached = {
+            "input_item_id": "item-1",
+            "filename": "source-name.jpg",
+            "source_display_name": "Nguồn A",
+            "sent_at": "2026-08-04T10:00:00Z",
+            "text_lines": ["So/No: 036080012689", "Ho va ten: NGUYEN VAN A"],
         }
+        with mock.patch.object(
+            ocr_ai,
+            "_call_qwen_native_ocr_single",
+            side_effect=AssertionError("must not call Qwen"),
+        ):
+            result = ocr_ai.shape_cached_ocr([cached])
+
+        self.assertEqual(
+            set(result),
+            {"persons", "properties", "marriages", "raw_results", "errors", "summary"},
+        )
+        self.assertEqual(result["persons"][0]["so_giay_to"], "036080012689")
+        self.assertEqual(result["errors"], [])
+        raw = result["raw_results"][0]
+        self.assertEqual(raw["input_item_id"], "item-1")
+        self.assertEqual(raw["source_display_name"], "Nguồn A")
+        self.assertEqual(raw["filename"], "item-1")
+        self.assertEqual(raw["source_type"], "AI")
+        self.assertEqual(raw["status"], "ok")
+        self.assertEqual(result["summary"]["model"], "cached")
+        self.assertEqual(result["summary"]["qr_hits"], 0)
+
+    def test_shape_cached_ocr_isolates_item_and_pair_errors(self):
+        cached = [
+            {"input_item_id": "good", "text_lines": ["So/No: 036080012689"]},
+            {"input_item_id": "bad", "text_lines": ["bad"]},
+        ]
+        original = ocr_ai._normalize_native_ocr_doc
+
+        def parse(lines, filename):
+            if filename == "bad":
+                raise ValueError("parse failed")
+            return original(lines, filename)
+
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", return_value="qr-text"),
-            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
+            mock.patch.object(ocr_ai, "_normalize_native_ocr_doc", side_effect=parse),
+            mock.patch.object(ocr_ai, "_pair_persons", side_effect=ValueError("pair failed")),
+        ):
+            result = ocr_ai.shape_cached_ocr(cached)
+
+        self.assertTrue(any(error["stage"] == "parse" and error["filename"] == "bad" for error in result["errors"]))
+        self.assertTrue(any(error["stage"] == "pair" for error in result["errors"]))
+        self.assertEqual(result["raw_results"][-1]["doc_type"], "unknown")
+
+    async def test_analyze_images_always_uses_qwen(self):
+        upload = make_upload("qr-card.jpg")
+        with (
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
-            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(return_value=["WRONG OCR"])),
+            mock.patch.object(
+                ocr_ai,
+                "_call_qwen_native_ocr_single",
+                new=mock.AsyncMock(return_value=["So/No: 012345678901", "Ho va ten: NGUYEN VAN AN"]),
+            ) as qwen,
         ):
             result = await ocr_ai.analyze_images([upload])
 
-        self.assertEqual(result["summary"]["qr_hits"], 1)
-        self.assertEqual(result["summary"]["ai_runs"], 0)
+        self.assertEqual(qwen.await_count, 1)
+        self.assertEqual(result["summary"]["qr_hits"], 0)
+        self.assertEqual(result["summary"]["ai_runs"], 1)
         self.assertEqual(len(result["persons"]), 1)
-        self.assertEqual(result["persons"][0]["source_type"], "QR")
-        self.assertEqual(result["persons"][0]["side"], "front")
-        self.assertIn("missing_back", result["persons"][0]["warnings"])
+        self.assertEqual(result["persons"][0]["source_type"], "AI")
 
-    async def test_analyze_images_qr_front_pairs_with_back_and_clears_missing_back(self):
+    async def test_analyze_images_pairs_qwen_front_and_back(self):
         front = make_upload("qr-front.jpg")
         back = make_upload("back.jpg")
-        qr_data = {
-            "so_giay_to": "036179009696",
-            "ho_ten": "DUONG THI XUAN",
-            "ngay_sinh": "20/01/1979",
-            "gioi_tinh": "Nữ",
-            "dia_chi": "Quyet Phong, Yen Ninh, Y Yen, Nam Dinh",
-            "ngay_cap": "",
-            "ngay_het_han": "",
-        }
         outputs = [
             [
                 "CAN CUOC CONG DAN",
@@ -319,8 +369,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             return outputs.pop(0)
 
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", side_effect=["qr-text", None]),
-            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
         ):
@@ -333,58 +381,35 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("missing_back", person["warnings"])
         self.assertEqual(person["ngay_cap"], "25/03/2021")
 
-    async def test_analyze_images_qr_back_uses_ai_side_hint_for_pairing(self):
-        front = make_upload("front.jpg", b"front-image")
-        back = make_upload("back-qr.jpg", b"back-image")
-        qr_data = {
-            "so_giay_to": "036065001407",
-            "ho_ten": "NGO VAN TAN",
-            "ngay_sinh": "17/06/1965",
-            "gioi_tinh": "Nam",
-            "dia_chi": "To dan pho so 8, TT. Lam, Y Yen, Nam Dinh",
-            "ngay_cap": "21/05/2025",
-            "ngay_het_han": "",
-        }
-
-        def fake_qr(file_bytes):
-            return "qr-text" if file_bytes == b"back-image" else None
-
-        async def fake_call(*args, **kwargs):
-            if kwargs["filename"] == "front.jpg":
-                return [
-                    "CAN CUOC",
-                    "So dinh danh ca nhan: 036065001407",
-                    "Ho va ten khai sinh / Full name: NGO VAN TAN",
-                    "Ngay, thang, nam sinh / Date of birth: 17/06/1965",
-                    "Gioi tinh / Sex: Nam",
-                ]
-            return [
-                "Noi cu tru / Place of residence: To dan pho so 8, TT. Lam, Y Yen, Nam Dinh",
-                "Ngay, thang, nam cap / Date of issue: 21/05/2025",
-                "IDVNM0650014079036065001407<<4",
-                "6506179M9912315VNM<<<<<<<<<<<8",
-                "NGO<<VAN<TAN<<<<<<<<<<<<<<<<<<",
-            ]
-
+    async def test_analyze_images_counts_every_qwen_attempt(self):
+        uploads = [make_upload("broken.jpg"), make_upload("good.jpg")]
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", side_effect=fake_qr),
-            mock.patch.object(ocr_ai, "parse_cccd_qr", return_value=qr_data),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
-            mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
+            mock.patch.object(
+                ocr_ai,
+                "_call_qwen_native_ocr_single",
+                new=mock.AsyncMock(
+                    side_effect=[
+                        HTTPException(status_code=502, detail="upstream error"),
+                        ["So/No: 036080012689", "Ho va ten: NGUYEN VAN A"],
+                    ]
+                ),
+            ) as qwen,
         ):
-            result = await ocr_ai.analyze_images([front, back])
+            result = await ocr_ai.analyze_images(uploads)
 
-        self.assertEqual(result["summary"]["qr_hits"], 1)
-        self.assertEqual(result["summary"]["persons"], 1)
-        person = result["persons"][0]
-        self.assertEqual(person["source_type"], "QR")
-        self.assertEqual(person["side"], "front_back")
-        self.assertTrue(person["paired"])
-        self.assertNotIn("missing_back", person["warnings"])
-        self.assertNotIn("missing_front", person["warnings"])
-        self.assertEqual(person["_files"], ["front.jpg", "back-qr.jpg"])
+        self.assertEqual(qwen.await_count, 2)
+        self.assertEqual(result["summary"]["ai_started"], 2)
+        self.assertEqual(result["summary"]["ai_runs"], 2)
+        self.assertEqual(result["summary"]["ocr_runs"], 2)
+        self.assertEqual(result["summary"]["ai_selected"], 1)
+        self.assertEqual(result["summary"]["ai_discarded_by_qr"], 0)
+        self.assertEqual(result["summary"]["qr_hits"], 0)
+        self.assertEqual(result["errors"][0]["filename"], "broken.jpg")
+        self.assertEqual(result["errors"][0]["stage"], "model")
+        self.assertEqual(len(result["persons"]), 1)
 
-    async def test_analyze_images_runs_native_ocr_for_non_qr_images(self):
+    async def test_analyze_images_runs_qwen_for_every_image(self):
         upload = make_upload("front.jpg")
         lines = [
             "So/No: 012345678901",
@@ -395,7 +420,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             "Ngay cap / Date of issue: 03/04/2021",
         ]
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(return_value=lines)),
         ):
@@ -412,7 +436,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
     async def test_analyze_images_collects_native_errors_per_file(self):
         upload = make_upload("broken.jpg")
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(
                 ocr_ai,
@@ -426,6 +449,7 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["errors"]), 1)
         self.assertEqual(result["errors"][0]["filename"], "broken.jpg")
         self.assertEqual(result["errors"][0]["error"], "upstream error")
+        self.assertEqual(result["errors"][0]["stage"], "model")
 
     async def test_analyze_images_pairs_front_back_by_id(self):
         front = make_upload("front.jpg")
@@ -448,7 +472,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             return outputs.pop(0)
 
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
         ):
@@ -485,7 +508,6 @@ class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
             return outputs.pop(0)
 
         with (
-            mock.patch.object(ocr_ai, "try_decode_qr", return_value=None),
             mock.patch.object(ocr_ai, "_get_api_key", return_value="test-key"),
             mock.patch.object(ocr_ai, "_call_qwen_native_ocr_single", new=mock.AsyncMock(side_effect=fake_call)),
         ):
