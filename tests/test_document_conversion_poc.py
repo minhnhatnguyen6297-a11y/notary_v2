@@ -1,11 +1,14 @@
 from pathlib import Path
+from dataclasses import replace
+from hashlib import sha256
 import json
 from unittest.mock import Mock
 
 import pytest
 
 from tools.document_conversion_poc.converter import convert_path
-from tools.document_conversion_poc.models import ConversionEnvelope
+from tools.document_conversion_poc.harness import _write_json_atomically, run_manifest
+from tools.document_conversion_poc.models import ContentRecord, ConversionEnvelope, PocError
 from tools.document_conversion_poc.policy import classify_source, decide_ocr
 from tools.document_conversion_poc.qwen_compatible import QwenCompatibleOcr
 
@@ -27,6 +30,41 @@ def write_png(path: Path) -> Path:
 
     path.write_bytes(b"\x89PNG\r\n\x1a\nsynthetic-image")
     return path
+
+
+def write_manifest(directory: Path, fixture_names: list[str]) -> Path:
+    """Create a strict, synthetic manifest whose paths are manifest-relative."""
+
+    fixtures = []
+    for name in fixture_names:
+        path = directory / name
+        if name.endswith(".docx"):
+            write_synthetic_docx(path, "synthetic fixture")
+            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            route = "local"
+        else:
+            path.write_bytes(b"unsupported synthetic fixture")
+            mime = "application/octet-stream"
+            route = "unsupported"
+        fixtures.append(
+            {
+                "sample_id": f"synthetic-{name}",
+                "path": name,
+                "sha256": sha256(path.read_bytes()).hexdigest(),
+                "mime": mime,
+                "sensitivity": "synthetic",
+                "expected_text": "",
+                "expected_facts": [],
+                "expected_route": route,
+                "required_provenance": False,
+            }
+        )
+    manifest = directory / "manifest.json"
+    manifest.write_text(
+        json.dumps({"fixtures": fixtures}),
+        encoding="utf-8",
+    )
+    return manifest
 
 
 class FakeCompletions:
@@ -197,3 +235,158 @@ def test_qwen_adapter_requires_all_environment_values(monkeypatch):
 
     assert "QWEN_COMPATIBLE_API_KEY" in str(exc_info.value)
     assert "QWEN_COMPATIBLE_MODEL" in str(exc_info.value)
+
+
+def test_harness_reports_partial_failure_without_aborting_batch(tmp_path, monkeypatch):
+    from tools.document_conversion_poc import harness
+
+    def fake_convert(path, *, allow_cloud):
+        envelope = ConversionEnvelope.for_source(path, path.read_bytes())
+        if path.name == "bad.bin":
+            return replace(
+                envelope,
+                errors=(PocError(code="synthetic_failure", message="expected"),),
+            )
+        return envelope
+
+    monkeypatch.setattr(harness, "convert_path", fake_convert)
+    report = run_manifest(
+        write_manifest(tmp_path, ["ok.docx", "bad.bin"]),
+        tmp_path / "report.json",
+        allow_cloud=False,
+    )
+
+    assert report["summary"] == {
+        "total": 2,
+        "completed": 1,
+        "failed": 1,
+        "passed": 1,
+        "not_passed": 1,
+    }
+    assert json.loads((tmp_path / "report.json").read_text(encoding="utf-8")) == report
+    assert report["fixtures"][0]["declared"]["sha256"]
+    assert report["fixtures"][0]["actual"]["route"] == "local"
+    assert report["fixtures"][0]["checks"]["facts"]["status"] == "not_applicable"
+    assert report["fixtures"][1]["partial_failure"]
+
+
+def test_harness_rejects_manifest_path_escape_and_top_level_list(tmp_path):
+    manifest = write_manifest(tmp_path, ["ok.docx"])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["fixtures"][0]["path"] = "../outside.docx"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="relative"):
+        run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    manifest.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="object"):
+        run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+
+def test_harness_rejects_hash_mismatch_without_converting(tmp_path, monkeypatch):
+    from tools.document_conversion_poc import harness
+
+    manifest = write_manifest(tmp_path, ["ok.docx"])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["fixtures"][0]["sha256"] = "0" * 64
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        harness,
+        "convert_path",
+        lambda *args, **kwargs: pytest.fail("hash-mismatched fixture was converted"),
+    )
+
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    assert report["summary"] == {
+        "total": 1,
+        "completed": 0,
+        "failed": 1,
+        "passed": 0,
+        "not_passed": 1,
+    }
+    assert report["fixtures"][0]["errors"][0]["code"] == "manifest_sha256_mismatch"
+
+
+def test_harness_rejects_mime_mismatch_and_marks_requested_facts_not_evaluable(
+    tmp_path, monkeypatch
+):
+    from tools.document_conversion_poc import harness
+
+    manifest = write_manifest(tmp_path, ["ok.docx"])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["fixtures"][0]["mime"] = "application/pdf"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        harness,
+        "convert_path",
+        lambda *args, **kwargs: pytest.fail("MIME-mismatched fixture was converted"),
+    )
+
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    assert report["fixtures"][0]["errors"][0]["code"] == "manifest_mime_mismatch"
+
+    payload["fixtures"][0]["mime"] = (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    payload["fixtures"][0]["expected_facts"] = [{"field": "cccd", "value": "synthetic"}]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        harness,
+        "convert_path",
+        lambda path, *, allow_cloud: ConversionEnvelope.for_source(path, path.read_bytes()),
+    )
+
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+
+    assert not report["fixtures"][0]["partial_failure"]
+    assert not report["fixtures"][0]["pass"]
+    assert report["fixtures"][0]["checks"]["facts"]["status"] == "not_evaluable"
+
+
+def test_atomic_report_write_preserves_existing_file_on_replace_failure(tmp_path, monkeypatch):
+    output_path = tmp_path / "report.json"
+    output_path.write_text('{"previous": true}\n', encoding="utf-8")
+
+    def fail_replace(self, target):
+        raise OSError("synthetic replacement failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="synthetic replacement failure"):
+        _write_json_atomically(output_path, {"new": True})
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == {"previous": True}
+    assert not list(tmp_path.glob(".report.json.*.tmp"))
+
+
+def test_harness_report_never_serializes_fixture_derived_or_expected_text_and_facts(
+    tmp_path, monkeypatch
+):
+    from tools.document_conversion_poc import harness
+
+    actual_secret = "runtime-text-cccd-987654321012"
+    expected_secret = "expected-text-cccd-012345678901"
+    expected_fact_secret = "expected-fact-serial-ABC-123"
+    manifest = write_manifest(tmp_path, ["ok.docx"])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["fixtures"][0]["expected_text"] = expected_secret
+    payload["fixtures"][0]["expected_facts"] = [{"serial": expected_fact_secret}]
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fake_convert(path, *, allow_cloud):
+        return replace(
+            ConversionEnvelope.for_source(path, path.read_bytes()),
+            content_record=ContentRecord(actual_secret),
+        )
+
+    monkeypatch.setattr(harness, "convert_path", fake_convert)
+    report = run_manifest(manifest, tmp_path / "report.json", allow_cloud=False)
+    serialized = json.dumps(report)
+
+    assert actual_secret not in serialized
+    assert expected_secret not in serialized
+    assert expected_fact_secret not in serialized
+    assert report["fixtures"][0]["checks"]["text"]["status"] == "failed"
+    assert report["fixtures"][0]["checks"]["facts"]["status"] == "not_evaluable"
