@@ -1,179 +1,78 @@
-# AGENTS.md - notary_v2
+# AGENTS.md — notary_v2
 
-Project authority, routing, stop conditions, and review gates only. Graphify
-describes code structure; routed specs define behavior.
+Quy định quyền quyết định, phạm vi, nơi tra cứu và điều kiện hoàn tất. Quy tắc nghiệp vụ nằm trong đặc tả, không chép lại ở đây.
 
-## Authority
+## 1. Quyền quyết định và phạm vi
 
-- Preserve user changes and external state. Do not modify, revert, commit, or
-  publish unrelated work.
-- Change behavior only inside the task explicitly authorized by the user.
-- Business rules, API/data contracts, DB schema, OCR flow, and shared behavior
-  require explicit scope covering every affected module.
-- A task/spec/contract/runtime conflict is evidence to report, not permission
-  to change any side. Stop and ask which source wins.
-- Completion claims require fresh verification evidence.
+- Giữ nguyên thay đổi của người dùng và trạng thái bên ngoài; không sửa, hoàn tác, commit hoặc xuất bản việc ngoài yêu cầu.
+- Chỉ thay đổi hành vi đã được người dùng cho phép. Nghiệp vụ, API/data contract, schema DB, luồng OCR và hành vi dùng chung phải có phạm vi rõ cho mọi mô-đun bị ảnh hưởng.
+- Nếu yêu cầu, đặc tả, contract hoặc hành vi thực tế mâu thuẫn: báo bằng chứng, dừng phần liên quan và hỏi người dùng nguồn nào được ưu tiên; không tự sửa một phía.
+- Trước khi sửa, xác định: mục tiêu, hành vi được phép, tệp/mô-đun dự kiến, ranh giới dùng chung và bằng chứng nghiệm thu; đánh dấu `SCOPE: LOCKED`.
+- Nếu cần mở rộng sang mô-đun, lõi dùng chung, contract hoặc nghiệp vụ khác: gửi `SCOPE BREAK REQUEST`, nêu phụ thuộc, hành vi ảnh hưởng và lý do không thể tiếp tục an toàn. Chỉ người dùng được mở rộng phạm vi; không sửa kế hoạch để hợp thức hóa việc đã làm.
+- Chỉ người dùng duyệt đặc tả nghiệp vụ. Thiếu đặc tả, còn nháp, mơ hồ hoặc lệch thực tế thì chưa được triển khai hành vi nghiệp vụ mới/thay đổi.
 
-## Task boundary
+## 2. Nguồn chuẩn và tài liệu tham chiếu
 
-Before editing, establish:
+Thứ tự: `AGENTS.md` → ADR đã chấp nhận → đặc tả nghiệp vụ đã duyệt → platform contract → tài liệu kỹ thuật/UX → kế hoạch đang làm → nghiên cứu/lịch sử.
 
-```text
-GOAL:
-AUTHORIZED BEHAVIOR:
-EXPECTED MODULES/FILES:
-KNOWN SHARED BOUNDARIES:
-ACCEPTANCE EVIDENCE:
-SCOPE: LOCKED
-```
+Chỉ đọc `docs/README.md` khi chưa rõ khu vực công việc; nếu đã rõ, đi thẳng tới:
 
-If another module, shared core, contract, or business rule becomes necessary,
-stop with `SCOPE BREAK REQUEST` naming the dependency, affected behavior, and
-why work cannot safely continue. Only the user may expand scope. Never rewrite
-a plan or brief to legitimize work already performed.
-
-## Sources of truth
-
-`AGENTS.md` -> accepted architecture ADR -> approved domain spec -> platform
-contract -> technical/UX docs -> active plan -> research/history.
-
-Use `docs/README.md` only when the task area is unclear. Otherwise route here:
-
-| Task area | Read first |
+| Công việc | Đọc trước |
 | --- | --- |
-| Inheritance rules and case UX | `docs/domains/inheritance/README.md` |
-| Cloud AI OCR and document intake | `docs/platform/document-intake/README.md` |
-| Local OCR | `docs/platform/document-intake/README.md`; separate scope required |
-| Shared Stage/Pool capability | `docs/platform/case-workspace/README.md` |
-| Word generation | `docs/platform/document-generation/README.md` |
-| Fast text audit | `docs/platform/fast-text-audit/README.md` |
-| Architecture decisions | `docs/architecture/README.md` |
+| Thừa kế và UX hồ sơ | `docs/domains/inheritance/README.md` |
+| Tiếp nhận tài liệu, Cloud AI OCR | `docs/platform/document-intake/README.md` |
+| OCR cục bộ — cần phạm vi riêng | `docs/platform/document-intake/README.md` |
+| Stage/Pool dùng chung | `docs/platform/case-workspace/README.md` |
+| Sinh văn bản Word | `docs/platform/document-generation/README.md` |
+| Kiểm tra văn bản nhanh | `docs/platform/fast-text-audit/README.md` |
+| Quyết định kiến trúc | `docs/architecture/README.md` |
 
-New or changed business behavior requires an approved spec. Missing, draft,
-ambiguous, or runtime-conflicting coverage blocks implementation until the user
-decides. Only the user approves business specs.
+- Tiếp tục việc gián đoạn/chuyển máy: đọc `memory-bank/CURRENT.md` trước, đối chiếu Git rồi chỉ theo liên kết liên quan. Memory Bank không thay thế nguồn chuẩn hoặc bằng chứng mới.
+- Issue và đặc tả cục bộ: `docs/agents/issue-tracker.md`; cách dùng domain docs và ADR: `docs/agents/domain.md`.
 
-For cross-machine continuation or interrupted work, read
-`memory-bank/CURRENT.md` first, verify it against Git, then follow only its
-relevant links. Memory Bank is operational context and cannot override the
-sources above or fresh evidence.
+### Tài liệu chung giữa các repo: chỉ đọc khi cần
 
-## Cross-product context (read only when needed)
+`D:\systemdocs` dùng chung cho `notary_v2`, `upload_lab`, `notaryoffice`; ba dự án sẽ dùng chung một DB.
 
-`D:\systemdocs` — parent docs for the notary product family
-(`notary_v2`, `upload_lab`, `notaryoffice`). Not needed for normal tasks.
+- Khi chạm ranh giới sản phẩm, khóa định danh chung (CCCD, số sê-ri GCN, thửa đất, số công chứng) hoặc tích hợp: chỉ đọc tệp cần thiết — `PROJECTS.md`, `contracts/entities.md` (chuẩn hóa khóa), `OPEN_DECISIONS.md` (không tự chốt).
+- Trước khi chọn công nghệ mới (nhà cung cấp OCR, ORM, hàng đợi, UI framework…) hoặc quyết định kiến trúc: bắt buộc đọc `D:\systemdocs\TECH_STACK.md`.
+- Tài liệu chung không ghi đè quy định nội bộ repo; gặp mâu thuẫn phải báo, không âm thầm chọn một bên.
 
-Read it only when the task touches: product boundaries, shared entity keys
-(CCCD / GCN serial / parcel / notarization number), or a cross-product
-integration. Then read only the file you need:
-`PROJECTS.md` (what the other repos are), `contracts/entities.md` (key
-normalization), `OPEN_DECISIONS.md` (do not decide these alone).
+## 3. Tra cứu mã và đánh giá ảnh hưởng
 
-MUST read before choosing a new technology (a different OCR provider, ORM,
-queue, or UI framework) or making an architecture decision: `TECH_STACK.md`.
-The three repos will merge onto one shared database; diverging now means
-rewriting later.
+- Biết file/symbol/chuỗi cần tìm: tìm, đọc có mục tiêu hoặc dùng LSP; không gọi graph/index cho sửa đổi cục bộ đã rõ vị trí.
+- Chưa rõ quan hệ giữa các file hoặc ownership: dùng graph Graphify hiện có, bắt đầu ở độ sâu 1–2 và chỉ mở rộng khi thiếu bằng chứng:
+  `D:\graphify\.venv\Scripts\graphify.exe query "<câu hỏi>" --graph graphify-out/graph.json`
+- Graph chỉ dẫn đường; luôn đọc mã hiện tại trước khi sửa hoặc kết luận hành vi. Graph thiếu/cũ/không đủ thì đọc mã trực tiếp; chỉ cập nhật khi cần, không dựng lại toàn bộ cho sửa đổi thường lệ.
+- Log/dữ liệu lớn: dùng `ctx_execute`/`ctx_batch_execute` nếu có để lọc, giữ exit code và đường dẫn tới dữ liệu đầy đủ. Kết quả nhỏ đọc trực tiếp; `ctx_search` chỉ dùng sau `ctx_index`.
 
-It does not override this file. On conflict, this repo wins for internal
-behavior; report the conflict instead of silently following either side.
+## 4. Quy trình thực hiện
 
-## Tool routing and impact discovery
+Chỉ dẫn repo/người dùng ưu tiên hơn skill. Ưu tiên thay đổi nhỏ nhất, giữ hành vi hiện có và tận dụng mã sẵn có.
 
-Tool selection:
-- Known file, symbol, or exact text: use targeted search/read or available LSP tools. For local, well-located edits, do not query graph or index data.
-- Cross-file relationships or unclear ownership: query the existing Graphify graph when available:
-  `D:\graphify\.venv\Scripts\graphify.exe query "<question>" --graph graphify-out/graph.json`
-- Start graph queries narrowly (depth 1–2); expand only when evidence is insufficient. Graphify is navigation evidence, not business authority. Read current source before editing or making behavioral claims.
-- Large logs/data: use context-mode when available (`ctx_execute`, `ctx_batch_execute`) to filter or aggregate before returning output; preserve exit status and a route to the full data.
-- Already-small tool results, including bounded graph results: consume directly.
-- Use `ctx_search` only for previously indexed content (`ctx_index`).
-- Missing, stale, or inconclusive graph: inspect current source directly; refresh only when needed. Do not rebuild the full graph for routine edits.
-- After code changes, run checks appropriate to the affected behavior and project requirements.
+- **Làm rõ yêu cầu (discovery)** (tính năng mới, tái cấu trúc lớn, yêu cầu chưa rõ): dùng `grill-with-docs` hoặc `grilling` + `domain-modeling`; không dùng `brainstorming` khi discovery theo Matt Pocock đang diễn ra. Có thể dùng `prototype`, nhưng phải xóa mã thử trước khi duyệt đặc tả và triển khai thật.
+- **Đặc tả**: kết thúc discovery bằng `to-spec`, lưu ở `docs/superpowers/specs/<feature>.md` hoặc issue. Người dùng duyệt tài liệu này là đủ điều kiện thiết kế; không làm lại discovery hoặc đổi nghiệp vụ đã duyệt nếu chưa được người dùng cho phép rõ ràng. Ưu tiên phiên mới/`handoff` sau khi lưu và được duyệt; tính năng lớn có thể dùng `to-tickets` để chia thành các task độc lập.
+- **Kế hoạch và triển khai**: dùng `writing-plans`, lưu bước TDD, đường dẫn chính xác, lệnh và tiêu chí kiểm chứng ở `docs/superpowers/plans/<feature>.md`; thực hiện bằng `subagent-driven-development` hoặc `executing-plans`.
+- **Workspace riêng và verification**: dùng `using-git-worktrees` khi cần workspace riêng; nếu Windows khóa tệp, dùng nhánh riêng. Tuân thủ `test-driven-development`, `systematic-debugging` khi sửa lỗi và `verification-before-completion`; dùng `finishing-a-development-branch` sau khi đã kiểm chứng xong.
+- **Sửa lỗi**: bỏ qua discovery; đi thẳng từ `systematic-debugging` → test hồi quy thất bại → sửa nguyên nhân gốc → kiểm chứng lại.
+- **Agent**: mặc định tắt `dispatching-parallel-agents` trừ khi được yêu cầu rõ; tối đa 2 subagent đồng thời và chỉ một bên ghi trên mỗi worktree/nhánh.
 
-## Review gate
+## 5. Review và hoàn tất
 
-Review every completed task/slice before dependent work or commit. Use an
-independent reviewer with fresh context; the implementer must not approve its
-own work. Review the original request, normative spec, base-to-head diff,
-affected production callers, and actual test output—not the implementer's
-summary.
+Mỗi task/slice hoàn thành phải được người hoặc agent độc lập, với context riêng, review trước khi làm phần phụ thuộc hoặc commit. Người thực hiện không tự duyệt. Reviewer phải đọc yêu cầu gốc, đặc tả có thẩm quyền, diff từ base đến bản hiện tại, production caller bị ảnh hưởng và kết quả kiểm tra thực tế; không chỉ dựa vào tóm tắt của người thực hiện.
+
+Review phải kết luận:
 
 ```text
-SCOPE: PASS/FAIL — missing, extra, or misunderstood behavior
-SPEC: PASS/FAIL — implementation matches normative behavior
-SHARED IMPACT: PASS/FAIL — affected consumers and contracts checked
-TEST EVIDENCE: SUFFICIENT/INSUFFICIENT — focused checks per affected module;
-  full-suite status reported separately
+SCOPE: PASS/FAIL — có thiếu, thừa hoặc hiểu sai yêu cầu không
+SPEC: PASS/FAIL — có khớp đặc tả không
+SHARED IMPACT: PASS/FAIL — đã kiểm tra consumer và contract bị ảnh hưởng chưa
+TEST EVIDENCE: SUFFICIENT/INSUFFICIENT — kiểm tra theo từng mô-đun; báo riêng full test suite
 VERDICT: APPROVE/BLOCK
 ```
 
-Unapproved behavior, unresolved shared impact, or spec/runtime conflict blocks
-the next task and commit even when tests pass.
+Hành vi chưa được duyệt, ảnh hưởng dùng chung chưa rõ hoặc mâu thuẫn đặc tả/thực tế đều chặn việc tiếp theo và commit, dù test đạt.
 
-## Completion
+Sau sửa mã, chạy kiểm tra/hồi quy liên quan; với sửa mã không đơn giản, chạy thêm `.\verify.bat` trừ khi ngoài phạm vi. Chỉ tuyên bố hoàn tất khi có bằng chứng mới; không gọi focused checks là full test suite đã đạt.
 
-Prefer the smallest behavior-preserving change and existing code. Run focused
-regressions, then `.\verify.bat` for non-trivial code unless out of scope.
-Never describe focused checks as a full-suite pass. Report:
-
-```text
-CHANGED FILES:
-SCOPE VERDICT:
-SHARED BEHAVIOR: YES/NO; AFFECTED MODULES:
-FOCUSED VERIFICATION:
-FULL-SUITE STATUS:
-REMAINING RISK:
-```
-
-Detailed business invariants belong in routed normative specs, not here.
-
-## Agent skills
-
-### Issue tracker
-
-GitHub Issues / local specs in `docs/superpowers/specs/`. See `docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-Modular domain specs and ADRs in `docs/architecture/decisions/`. See `docs/agents/domain.md`.
-
-## Hybrid engineering workflow
-
-This repository combines Matt Pocock Skills (product discovery & specification) with Superpowers (engineering execution discipline).
-
-### 1. Discovery & Specification (Matt Pocock)
-
-For a new feature, substantial refactoring, or unclear domain requirements:
-1. **Trigger**: Use Matt Pocock `grill-with-docs` (or `grilling` + `domain-modeling`).
-2. **Conflict Override**: Superpowers `brainstorming` is INACTIVE during this phase. Do not invoke `brainstorming` while a Matt discovery session is active.
-3. **Prototype / Spike**: Matt `prototype` is explicitly permitted to explore UX, state models, or architectural feasibility. Prototype code is throwaway and MUST be deleted before spec approval and production implementation.
-4. **Output**: Finish discovery with Matt `to-spec` (saving to `docs/superpowers/specs/<feature>.md` or issue tracker).
-5. **Approval Checkpoint**: An explicitly user-approved `to-spec` document satisfies Superpowers' requirement for an approved design/spec.
-6. **Context Refresh**: Once approved and saved, prefer starting a fresh session or running `handoff` for implementation to keep the execution context window clean.
-
-### 2. Macro Decomposition (Optional)
-
-- For large features spanning multiple independent parts, use Matt `to-tickets` after `to-spec` to divide the spec into vertical tracer-bullet slices.
-- Each ticket enters the Superpowers implementation workflow independently.
-
-### 3. Implementation Discipline (Superpowers)
-
-Once an approved spec exists:
-1. **No Re-brainstorming**: Do not re-brainstorm or alter approved business behavior without explicit user approval.
-2. **Plan**: Use Superpowers `writing-plans` to generate fine-grained TDD steps, exact file paths, commands, and verification criteria (saved in `docs/superpowers/plans/<feature>.md`).
-3. **Execute**: Use `subagent-driven-development` (or `executing-plans`).
-4. **Worktree Isolation**: Use `using-git-worktrees` where isolation is needed; fall back to a dedicated branch if file-locking occurs on Windows.
-5. **Quality Gates**: Follow strict `test-driven-development`, `systematic-debugging` (for bug fixes), and `verification-before-completion` (fresh verification evidence required).
-6. **Review**: Subagents requesting or conducting code reviews must evaluate work against both the approved spec and the Review Gate defined in this `AGENTS.md`.
-7. **Branch Finish**: Use `finishing-a-development-branch` when all tasks and tests are verified.
-
-### 4. Bug Fixing Fast-Path
-
-- Bugs bypass the discovery phase and route directly to Superpowers `systematic-debugging` -> failing regression test -> root cause fix -> `verification-before-completion`.
-
-### 5. Concurrency & Subagent Guardrails
-
-- `dispatching-parallel-agents` is DISABLED by default unless explicitly requested.
-- Maximum 2 concurrent subagents.
-- Single writer per worktree/branch.
-- Repository/user instructions in this `AGENTS.md` strictly take precedence over all skill systems.
+Báo cáo cuối phải nêu: **tệp đã đổi; phạm vi đạt/không đạt; có/không đổi hành vi dùng chung và mô-đun ảnh hưởng; focused checks; trạng thái full test suite; rủi ro còn lại.**
