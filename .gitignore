@@ -46,3 +46,6 @@ deploy/vps/ssh_credentials.env
 
 # Legacy accidental path after upload tool move
 tools/UPLOAD/
+
+# Local merge-test venv
+.venv-merge/
