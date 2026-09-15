@@ -100,7 +100,32 @@
           <button id="start-zalo-login" class="btn btn-primary btn-sm" type="button">Đăng nhập Zalo</button>
         </div>
         <div id="connector-login-notice" class="alert d-none" role="alert"></div>
+        <div id="consent-panel" class="border rounded p-3 mb-3">
+          <p class="small mb-2">Friends, groups và My Documents mặc định BẬT; Strangers mặc định TẮT. Nguồn bật lưu text và tải JPG/JPEG/PNG/PDF. Khi xác nhận lại chính sách mới, các mặc định này áp dụng cho toàn bộ nguồn hiện có chưa lưu lựa chọn rõ ràng.</p>
+          <button id="confirm-intake-consent" class="btn btn-primary btn-sm" type="button" disabled>Xác nhận cho phép nhận dữ liệu</button>
+        </div>
+        <div id="policy-status" class="alert alert-info d-none" role="status"></div>
+        <div class="border rounded p-3 mb-3">
+          <div class="d-flex justify-content-between align-items-center gap-3">
+            <span><strong>Data Sync</strong><br><small class="text-muted">Kết quả luôn best-effort và có thể thiếu.</small></span>
+            <button id="start-data-sync" class="btn btn-primary btn-sm text-nowrap" type="button" disabled>Đồng bộ dữ liệu</button>
+          </div>
+          <div id="data-sync-status" class="small fw-semibold mt-2" role="status"></div>
+          <div id="data-sync-counters" class="small text-muted mt-1"></div>
+          <div id="data-sync-window" class="small text-muted mt-1"></div>
+          <div id="data-sync-error" class="small text-danger mt-1"></div>
+        </div>
+        <div id="gap-warning" class="alert alert-warning d-none" role="alert"></div>
+        <div class="d-flex gap-2 mb-2">
+          <label class="visually-hidden" for="source-search">Tìm nguồn theo tên</label>
+          <input id="source-search" class="form-control form-control-sm" type="search" aria-label="Tìm nguồn theo tên" placeholder="Tìm nguồn theo tên">
+          <button id="refresh-sources" class="btn btn-outline-secondary btn-sm text-nowrap" type="button" disabled>Làm mới nguồn</button>
+        </div>
+        <div id="source-refresh-status" class="small text-muted mb-3" role="status" aria-live="polite"></div>
+        <h6>Friends, groups và My Documents</h6>
         <div id="source-list"></div>
+        <h6 class="mt-3">Strangers</h6>
+        <div id="stranger-source-list"></div>
       </div>
     </div>
   </div>

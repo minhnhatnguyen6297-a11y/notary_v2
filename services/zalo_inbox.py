@@ -5,6 +5,7 @@ import hmac
 import io
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -17,12 +18,15 @@ import fitz
 from fastapi import UploadFile
 from openpyxl import Workbook
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models import ZaloBatch, ZaloConnectorAccount, ZaloMedia, ZaloSource
+from models import ZaloBatch, ZaloConnectorAccount, ZaloDataSyncRun, ZaloMedia, ZaloMessageText, ZaloSource
 
 UTC = timezone.utc
 QR_TTL_SECONDS = 100
+MY_DOCUMENTS_REALTIME_VERIFIED = False
 SUPPORTED_MIME = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
 PERSON_FIELDS = (
     "ho_ten",
@@ -148,6 +152,118 @@ def connector_state(
     return "connected"
 
 
+SOURCE_TYPES = {"friend", "group", "stranger", "my_documents"}
+
+
+def _source_default(source_type: str | None) -> bool:
+    return source_type in {"friend", "group", "my_documents"}
+
+
+def _restage_policy_snapshot(db: Session, account: ZaloConnectorAccount) -> int:
+    db.execute(
+        update(ZaloConnectorAccount)
+        .where(ZaloConnectorAccount.id == account.id)
+        .values(policy_version=ZaloConnectorAccount.policy_version + 1)
+    )
+    db.flush()
+    db.refresh(account)
+    db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).update(
+        {ZaloSource.policy_version: account.policy_version}, synchronize_session=False
+    )
+    return account.policy_version
+
+
+def _account_or_error(db: Session, account_id: str) -> ZaloConnectorAccount:
+    account = db.query(ZaloConnectorAccount).filter(ZaloConnectorAccount.id == account_id).first()
+    if account is None:
+        raise InboxValidationError("connector_account_id chưa onboard")
+    return account
+
+
+def source_ready(source: ZaloSource) -> bool:
+    return (
+        source.acked_enabled is not None
+        and source.policy_version == source.policy_acked_version
+        and bool(source.enabled) == bool(source.acked_enabled)
+    )
+
+
+def apply_intake_consent(db: Session, account_id: str) -> int:
+    account = _account_or_error(db, account_id)
+    account.intake_consented_at = utcnow()
+    for source in db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).all():
+        if source.enabled_explicit is None:
+            source.enabled = _source_default(source.source_type)
+            source.enabled_explicit = False
+    _restage_policy_snapshot(db, account)
+    db.commit()
+    return account.policy_version
+
+
+def set_source_policy(db: Session, source_id: str, enabled: bool) -> int:
+    source = db.query(ZaloSource).filter(ZaloSource.id == source_id).first()
+    if source is None:
+        raise InboxValidationError("Không tìm thấy nguồn")
+    account = _account_or_error(db, source.connector_account_id)
+    source.enabled = bool(enabled)
+    source.enabled_explicit = True
+    _restage_policy_snapshot(db, account)
+    db.commit()
+    return account.policy_version
+
+
+def ack_policy(db: Session, account_id: str, policy_version: int) -> int:
+    account = _account_or_error(db, account_id)
+    if policy_version != account.policy_version:
+        raise InboxValidationError("policy_version không phải bản hiện hành")
+    if policy_version == account.policy_acked_version:
+        return policy_version
+    for source in db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id):
+        source.acked_enabled = bool(source.enabled)
+        source.policy_acked_version = policy_version
+    account.policy_acked_version = policy_version
+    db.commit()
+    return policy_version
+
+
+def request_source_sync(db: Session, account_id: str) -> int:
+    account = _account_or_error(db, account_id)
+    db.execute(
+        update(ZaloConnectorAccount)
+        .where(ZaloConnectorAccount.id == account.id)
+        .values(source_sync_request_version=ZaloConnectorAccount.source_sync_request_version + 1)
+    )
+    db.flush()
+    db.refresh(account)
+    db.commit()
+    return account.source_sync_request_version
+
+
+def ack_source_sync(db: Session, account_id: str, source_sync_request_version: int) -> int:
+    account = _account_or_error(db, account_id)
+    if source_sync_request_version != account.source_sync_request_version:
+        raise InboxValidationError("source_sync_request_version không phải bản hiện hành")
+    if source_sync_request_version == account.source_sync_acked_version:
+        return source_sync_request_version
+    account.source_sync_acked_version = source_sync_request_version
+    db.commit()
+    return source_sync_request_version
+
+
+def _ack_version(payload: dict[str, Any], field: str) -> int:
+    value = payload.get(field)
+    if isinstance(value, bool):
+        raise InboxValidationError(f"{field} không hợp lệ")
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError as exc:
+            raise InboxValidationError(f"{field} không hợp lệ") from exc
+    if not isinstance(value, int) or value < 0:
+        raise InboxValidationError(f"{field} không hợp lệ")
+    return value
+
+
 def apply_connector_report(
     account: ZaloConnectorAccount,
     reported_state: str,
@@ -159,7 +275,9 @@ def apply_connector_report(
     storage_full: bool | None = None,
     bound_zalo_id: str | None = None,
 ) -> bool:
-    if generation < (account.listener_generation or 0):
+    previous_generation = account.listener_generation or 0
+    was_receiving = account.session_state == "usable"
+    if generation < previous_generation:
         return False
     if reported_state not in {"connected", "login_required", "disconnected"}:
         raise InboxValidationError("Trạng thái connector không hợp lệ")
@@ -188,14 +306,20 @@ def apply_connector_report(
     if reported_state == "login_required":
         account.session_state = "login_required"
         account.last_seen_at = observed_at
+        if was_receiving and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         return True
     if account.session_state == "login_required" and not qr_login_success:
         return False
     if reported_state == "disconnected":
         account.session_state = "disconnected"
         account.last_seen_at = observed_at
+        if was_receiving and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         return True
     if reported_state == "connected":
+        if was_receiving and generation > previous_generation and account.gap_started_at is None:
+            account.gap_started_at = observed_at
         account.session_state = "usable"
         account.last_seen_at = observed_at
         if qr_login_success:
@@ -281,13 +405,27 @@ def resolve_media_object(
     return path
 
 
-def _source_from_payload(db: Session, payload: dict[str, Any]) -> ZaloSource:
+def _source_from_payload(db: Session, payload: dict[str, Any], *, require_source_type: bool = False) -> ZaloSource:
     account_id = str(payload.get("connector_account_id") or "")
     conversation_id = str(payload.get("conversation_id") or "")
     conversation_type = str(payload.get("conversation_type") or "")
     display_name = str(payload.get("source_display_name") or "").strip()
-    if not account_id or not conversation_id or conversation_type not in {"user", "group"} or not display_name:
+    source_type = str(payload.get("source_type") or "")
+    if (
+        not account_id
+        or not conversation_id
+        or conversation_type not in {"user", "group"}
+        or not display_name
+        or (require_source_type and source_type not in SOURCE_TYPES)
+    ):
+        if require_source_type and source_type not in SOURCE_TYPES:
+            raise InboxValidationError("source_type không hợp lệ")
         raise InboxValidationError("Metadata nguồn không hợp lệ")
+    last_activity_provided = "last_activity_at" in payload
+    last_activity = payload.get("last_activity_at")
+    if last_activity is not None:
+        last_activity = _parse_timestamp(last_activity)
+    account = _account_or_error(db, account_id)
     source = (
         db.query(ZaloSource)
         .filter(
@@ -297,20 +435,328 @@ def _source_from_payload(db: Session, payload: dict[str, Any]) -> ZaloSource:
         .first()
     )
     if source is None:
+        enabled = _source_default(source_type) if account.intake_consented_at and source_type else False
         source = ZaloSource(
             id=_uuid(),
             connector_account_id=account_id,
             conversation_id=conversation_id,
             conversation_type=conversation_type,
             display_name=display_name,
-            enabled=False,
+            source_type=source_type or None,
+            enabled=enabled,
+            enabled_explicit=False if account.intake_consented_at else None,
+            policy_version=account.policy_version,
+            last_activity_at=last_activity,
         )
         db.add(source)
         db.flush()
+        if account.intake_consented_at:
+            _restage_policy_snapshot(db, account)
+        if account.intake_consented_at is None:
+            db.query(ZaloSource).filter(ZaloSource.id == source.id).update(
+                {ZaloSource.enabled_explicit: None}, synchronize_session=False
+            )
+            db.refresh(source)
     else:
         source.display_name = display_name
         source.conversation_type = conversation_type
+        if last_activity_provided:
+            source.last_activity_at = last_activity
+        if source_type:
+            default_enabled = _source_default(source_type)
+            if account.intake_consented_at and source.enabled_explicit is not True and source.enabled != default_enabled:
+                source.enabled = default_enabled
+                _restage_policy_snapshot(db, account)
+            source.source_type = source_type
     return source
+
+
+def _positive_env_int(name: str) -> int:
+    try:
+        value = int(os.environ[name])
+    except (KeyError, ValueError) as exc:
+        raise InboxConfigurationError(f"{name} phải là số nguyên dương") from exc
+    if value <= 0:
+        raise InboxConfigurationError(f"{name} phải là số nguyên dương")
+    return value
+
+
+DATA_SYNC_COUNTERS = (
+    "received", "duplicates", "imported_text", "imported_media", "media_download_failures",
+)
+
+
+def start_data_sync(db: Session, account_id: str, now: datetime | None = None) -> ZaloDataSyncRun:
+    account = _account_or_error(db, account_id)
+    current = _aware(now) or utcnow()
+    sources = db.query(ZaloSource).filter(ZaloSource.connector_account_id == account.id).all()
+    if account.intake_consented_at is None:
+        raise InboxValidationError("Chưa đồng ý tiếp nhận dữ liệu")
+    if connector_state(account, now=current) != "connected":
+        raise InboxConflict("Connector chưa kết nối")
+    if account.policy_version != account.policy_acked_version or any(not source_ready(source) for source in sources):
+        raise InboxConflict("Chính sách nguồn đang chờ đồng bộ")
+    source_ids = sorted(
+        source.conversation_id for source in sources
+        if source.enabled and source.acked_enabled and source_ready(source)
+        and source.source_type != "my_documents"
+    )
+    if not source_ids:
+        raise InboxValidationError("Không có nguồn phù hợp để đồng bộ")
+    run = ZaloDataSyncRun(
+        id=_uuid(), connector_account_id=account.id, status="running",
+        cutoff_at=current,
+        deadline_at=current + timedelta(seconds=_positive_env_int("ZALO_DATA_SYNC_TIMEOUT_SECONDS")),
+        source_ids_json=source_ids,
+        counters_json={key: 0 for key in DATA_SYNC_COUNTERS},
+        started_at=current,
+    )
+    db.add(run)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if "zalo_data_sync_runs.connector_account_id" not in str(getattr(exc, "orig", exc)).lower():
+            raise
+        raise InboxConflict("Đang có Data Sync hoạt động") from exc
+    db.refresh(run)
+    return run
+
+
+def _timeout_data_sync_run(db: Session, run: ZaloDataSyncRun, account_id: str, current: datetime) -> bool:
+    return db.query(ZaloDataSyncRun).filter(
+            ZaloDataSyncRun.id == run.id,
+            ZaloDataSyncRun.connector_account_id == account_id,
+            ZaloDataSyncRun.status == "running",
+            ZaloDataSyncRun.deadline_at <= current,
+        ).update(
+            {
+                ZaloDataSyncRun.status: "error",
+                ZaloDataSyncRun.error_message: "timeout",
+                ZaloDataSyncRun.completed_at: current,
+            },
+            synchronize_session=False,
+        ) == 1
+
+
+def data_sync_command(db: Session, account_id: str, now: datetime | None = None) -> dict[str, Any] | None:
+    run = db.query(ZaloDataSyncRun).filter_by(connector_account_id=account_id, status="running").first()
+    if run is None:
+        return None
+    current = _aware(now) or utcnow()
+    if (_aware(run.deadline_at) or run.deadline_at) <= current:
+        if _timeout_data_sync_run(db, run, account_id, current):
+            db.commit()
+        else:
+            db.rollback()
+            db.expire_all()
+        return None
+    return {
+        "command_type": "data_sync", "run_id": run.id,
+        "cutoff_at": _iso(run.cutoff_at), "deadline_at": _iso(run.deadline_at),
+        "source_ids": run.source_ids_json,
+    }
+
+
+def apply_data_sync_report(db: Session, payload: dict[str, Any]) -> ZaloDataSyncRun:
+    event_type = payload.get("event_type")
+    expected = {"schema_version", "event_type", "connector_account_id", "run_id", "counters"}
+    if event_type == "data_sync_failed":
+        expected.add("error_code")
+    if payload.get("schema_version") != 1 or set(payload) != expected:
+        raise InboxValidationError("Data Sync report không hợp lệ")
+    if event_type not in {"data_sync_progress", "data_sync_complete", "data_sync_failed"}:
+        raise InboxValidationError("Data Sync event không hợp lệ")
+    counters = payload.get("counters")
+    if not isinstance(counters, dict) or set(counters) != set(DATA_SYNC_COUNTERS) or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counters.values()
+    ):
+        raise InboxValidationError("Data Sync counters không hợp lệ")
+    error_code = payload.get("error_code")
+    if event_type == "data_sync_failed" and (
+        not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code)
+    ):
+        raise InboxValidationError("Data Sync error_code không hợp lệ")
+    run_id = str(payload.get("run_id") or "")
+    account_id = str(payload.get("connector_account_id") or "")
+    terminal_status = {"data_sync_complete": "completed_best_effort", "data_sync_failed": "error"}.get(event_type)
+    for _attempt in range(3):
+        db.expire_all()
+        run = db.query(ZaloDataSyncRun).filter_by(id=run_id).first()
+        if run is None or run.connector_account_id != account_id:
+            raise InboxConflict("Data Sync report không khớp account/run")
+        if run.status != "running":
+            if terminal_status == run.status and run.counters_json == counters and run.error_message == error_code:
+                return run
+            raise InboxConflict("Data Sync run đã kết thúc")
+        current = utcnow()
+        if (_aware(run.deadline_at) or run.deadline_at) <= current:
+            if _timeout_data_sync_run(db, run, account_id, current):
+                db.commit()
+                raise InboxConflict("Data Sync run đã hết hạn")
+            db.rollback()
+            continue
+        prior_counters = dict(run.counters_json)
+        if any(counters[key] < prior_counters[key] for key in DATA_SYNC_COUNTERS):
+            raise InboxConflict("Data Sync counters không được giảm")
+        values = {ZaloDataSyncRun.counters_json: dict(counters)}
+        if terminal_status:
+            values.update({
+                ZaloDataSyncRun.status: terminal_status,
+                ZaloDataSyncRun.error_message: error_code,
+                ZaloDataSyncRun.completed_at: utcnow(),
+            })
+        updated = db.query(ZaloDataSyncRun).filter(
+            ZaloDataSyncRun.id == run_id,
+            ZaloDataSyncRun.connector_account_id == account_id,
+            ZaloDataSyncRun.status == "running",
+            ZaloDataSyncRun.counters_json == prior_counters,
+        ).update(values, synchronize_session=False)
+        if updated == 1:
+            db.commit()
+            db.expire_all()
+            return db.query(ZaloDataSyncRun).filter_by(id=run_id).one()
+        db.rollback()
+    raise InboxConflict("Data Sync report xung đột đồng thời")
+
+
+def ingest_message_envelope(db: Session, payload: dict[str, Any], storage_root: str | Path) -> dict[str, Any]:
+    required = ("connector_account_id", "conversation_id", "conversation_type", "source_type", "source_display_name", "msg_id", "sender_id", "sent_at")
+    if payload.get("schema_version") != 1 or payload.get("event_type") != "message" or any(payload.get(field) is None for field in required):
+        raise InboxValidationError("Message envelope thiếu field bắt buộc")
+    account_id = str(payload["connector_account_id"])
+    conversation_id = str(payload["conversation_id"])
+    msg_id = str(payload["msg_id"])
+    sender_id = str(payload["sender_id"])
+    if not account_id or not conversation_id or not msg_id or not sender_id:
+        raise InboxValidationError("Message envelope có định danh không hợp lệ")
+    account = _account_or_error(db, account_id)
+    sent_at = _parse_timestamp(payload["sent_at"])
+    raw_text = payload.get("raw_text")
+    if raw_text is not None and not isinstance(raw_text, str):
+        raise InboxValidationError("raw_text không hợp lệ")
+    attachments = payload.get("attachments", [])
+    if not isinstance(attachments, list):
+        raise InboxValidationError("attachments không hợp lệ")
+
+    checked: list[tuple[dict[str, Any], int, str]] = []
+    indexes: set[int] = set()
+    for attachment in attachments:
+        if not isinstance(attachment, dict) or any(attachment.get(field) is None for field in ("attachment_index", "media_object_key", "mime_type", "size_bytes")):
+            raise InboxValidationError("Attachment thiếu field bắt buộc")
+        index = attachment["attachment_index"]
+        size = attachment["size_bytes"]
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0 or index in indexes:
+            raise InboxValidationError("attachment_index không hợp lệ")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise InboxValidationError("size_bytes không hợp lệ")
+        indexes.add(index)
+        resolve_media_object(storage_root, account_id, str(attachment["media_object_key"]), str(attachment["mime_type"]), size)
+        component = {
+            "connector_account_id": account_id,
+            "conversation_id": conversation_id,
+            "msg_id": msg_id,
+            "attachment_index": index,
+            "media_object_key": str(attachment["media_object_key"]),
+            "mime_type": str(attachment["mime_type"]),
+            "size_bytes": size,
+            "sent_at": _iso(sent_at),
+        }
+        checked.append((component, index, _canonical_digest(component)))
+
+    text_component = {
+        "connector_account_id": account_id,
+        "conversation_id": conversation_id,
+        "msg_id": msg_id,
+        "sender_id": sender_id,
+        "sent_at": _iso(sent_at),
+        "raw_text": raw_text,
+    }
+    existing_text = None
+    if raw_text is not None:
+        existing_text = db.query(ZaloMessageText).filter_by(
+            connector_account_id=account_id, conversation_id=conversation_id, msg_id=msg_id
+        ).first()
+        if existing_text is not None and existing_text.payload_digest != _canonical_digest(text_component):
+            raise InboxConflict("Message text trùng khóa nhưng payload khác")
+    existing_media: dict[int, ZaloMedia] = {}
+    for _component, index, digest in checked:
+        row = db.query(ZaloMedia).filter_by(
+            connector_account_id=account_id, conversation_id=conversation_id, msg_id=msg_id, attachment_index=index
+        ).first()
+        if row is not None and row.payload_digest != digest:
+            raise InboxConflict("Message media trùng khóa nhưng payload khác")
+        if row is not None:
+            existing_media[index] = row
+
+    source_payload = dict(payload, last_activity_at=_iso(sent_at))
+    source = _source_from_payload(db, source_payload, require_source_type=True)
+    eligible = (
+        account.intake_consented_at is not None
+        and source_ready(source)
+        and bool(source.enabled)
+        and source.source_type != "stranger"
+        and (source.source_type != "my_documents" or MY_DOCUMENTS_REALTIME_VERIFIED)
+    )
+    text_status = "absent" if raw_text is None else ("duplicate" if existing_text is not None else "ignored")
+    media_statuses = [
+        {"attachment_index": index, "status": "duplicate" if index in existing_media else "ignored"}
+        for _component, index, _digest in checked
+    ]
+    text_id = existing_text.id if existing_text is not None else None
+    media_ids = [existing_media[index].id for _component, index, _digest in checked if index in existing_media]
+
+    if eligible:
+        if raw_text is not None and existing_text is None:
+            try:
+                quota = _positive_env_int("ZALO_INBOX_TEXT_QUOTA_BYTES")
+                retention = _positive_env_int("ZALO_INBOX_TEXT_RETENTION_HOURS")
+            except InboxConfigurationError:
+                account.text_storage_full = True
+            else:
+                cutoff = utcnow() - timedelta(hours=retention)
+                db.query(ZaloMessageText).filter(ZaloMessageText.received_at < cutoff).delete(synchronize_session=False)
+                rows = db.query(ZaloMessageText).filter(ZaloMessageText.connector_account_id == account_id).order_by(ZaloMessageText.received_at.asc()).all()
+                needed = len(raw_text.encode("utf-8"))
+                usage = sum(len(row.raw_text.encode("utf-8")) for row in rows)
+                if needed <= quota:
+                    for row in rows:
+                        if usage + needed <= quota:
+                            break
+                        usage -= len(row.raw_text.encode("utf-8"))
+                        db.delete(row)
+                if needed <= quota and usage + needed <= quota:
+                    text = ZaloMessageText(
+                        id=_uuid(), connector_account_id=account_id, source_id=source.id,
+                        conversation_id=conversation_id, msg_id=msg_id, sender_id=sender_id,
+                        sent_at=sent_at, received_at=utcnow(), raw_text=raw_text,
+                        payload_digest=_canonical_digest(text_component),
+                    )
+                    db.add(text)
+                    text_id = text.id
+                    text_status = "imported"
+                    account.text_storage_full = False
+                else:
+                    account.text_storage_full = True
+        for component, index, digest in checked:
+            if index in existing_media:
+                continue
+            media = ZaloMedia(
+                id=_uuid(), connector_account_id=account_id, source_id=source.id,
+                conversation_id=conversation_id, msg_id=msg_id, attachment_index=index,
+                media_object_key=component["media_object_key"], mime_type=component["mime_type"],
+                size_bytes=component["size_bytes"], sent_at=sent_at, payload_digest=digest,
+            )
+            db.add(media)
+            media_ids.append(media.id)
+            next(item for item in media_statuses if item["attachment_index"] == index)["status"] = "imported"
+    db.commit()
+    return {
+        "text_id": text_id,
+        "media_ids": media_ids,
+        "ignored": not eligible,
+        "components": {"text": text_status, "media": media_statuses},
+    }
 
 
 def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: str | Path) -> Any:
@@ -323,9 +769,21 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         raise InboxValidationError("connector_account_id chưa onboard")
 
     if event_type == "discovery":
-        source = _source_from_payload(db, payload)
+        source = _source_from_payload(db, payload, require_source_type=True)
         db.commit()
         return source
+    if event_type == "policy_ack":
+        if set(payload) != {"schema_version", "event_type", "connector_account_id", "policy_version"}:
+            raise InboxValidationError("policy_ack không hợp lệ")
+        return {"policy_version": ack_policy(db, account_id, _ack_version(payload, "policy_version"))}
+    if event_type == "source_sync_ack":
+        if set(payload) != {"schema_version", "event_type", "connector_account_id", "source_sync_request_version"}:
+            raise InboxValidationError("source_sync_ack không hợp lệ")
+        return {
+            "source_sync_request_version": ack_source_sync(
+                db, account_id, _ack_version(payload, "source_sync_request_version")
+            )
+        }
     if event_type in {"heartbeat", "state"}:
         _parse_timestamp(payload.get("observed_at"))
         received_at = utcnow()
@@ -341,6 +799,10 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         )
         db.commit()
         return {"changed": changed, "state": connector_state(account)}
+    if event_type == "message":
+        return ingest_message_envelope(db, payload, storage_root)
+    if event_type in {"data_sync_progress", "data_sync_complete", "data_sync_failed"}:
+        return apply_data_sync_report(db, payload)
     if event_type != "media":
         raise InboxValidationError("event_type không được hỗ trợ")
 
@@ -364,7 +826,7 @@ def ingest_webhook_event(db: Session, payload: dict[str, Any], *, storage_root: 
         return existing
 
     source = _source_from_payload(db, payload)
-    if not source.enabled:
+    if account.intake_consented_at is None or not source_ready(source) or not source.enabled:
         db.commit()
         return {"ignored": True}
     resolve_media_object(

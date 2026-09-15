@@ -9,6 +9,8 @@ def main() -> int:
     env_path = Path(sys.argv[1])
     quota_bytes = sys.argv[2]
     retention_hours = sys.argv[3]
+    text_quota_bytes = sys.argv[4]
+    text_retention_hours = sys.argv[5]
     text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
     values = {
         line.split("=", 1)[0]: line.split("=", 1)[1].strip()
@@ -20,6 +22,8 @@ def main() -> int:
         "ZALO_INBOX_WEBHOOK_SECRET": secrets.token_urlsafe(32),
         "ZALO_CONNECTOR_QUOTA_BYTES": quota_bytes,
         "ZALO_CONNECTOR_RETENTION_HOURS": retention_hours,
+        "ZALO_INBOX_TEXT_QUOTA_BYTES": text_quota_bytes,
+        "ZALO_INBOX_TEXT_RETENTION_HOURS": text_retention_hours,
     }
     additions = [f"{name}={value}" for name, value in defaults.items() if not values.get(name)]
     if additions:

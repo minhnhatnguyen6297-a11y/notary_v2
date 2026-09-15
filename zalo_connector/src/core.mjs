@@ -7,6 +7,26 @@ export function signBody(body, timestamp, secret) {
   return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
 }
 
+function exactAck(event, response) {
+  if (response?.ack !== true) return false;
+  if (event.event_type === 'policy_ack') return response.policy_version === event.policy_version;
+  if (event.event_type === 'source_sync_ack') return response.source_sync_request_version === event.source_sync_request_version;
+  if (event.event_type !== 'message') return true;
+  const components = response.components;
+  const textStatuses = event.raw_text == null ? new Set(['absent']) : new Set(['imported', 'duplicate', 'ignored']);
+  const mediaStatuses = new Set(['imported', 'duplicate', 'ignored']);
+  if (!components || !textStatuses.has(components.text) || !Array.isArray(components.media)) return false;
+  const expected = (event.attachments || []).map(({attachment_index}) => attachment_index);
+  return components.media.length === expected.length && components.media.every((item, index) => (
+    item?.attachment_index === expected[index] && mediaStatuses.has(item.status)
+  ));
+}
+
+function requireExactAck(event, response) {
+  if (!exactAck(event, response)) throw new Error('backend acknowledgement did not match event');
+  return response;
+}
+
 export class WebhookClient {
   constructor({baseUrl, secret, bootstrapSecret, fetchImpl = fetch, now = Date.now}) {
     this.baseUrl = String(baseUrl || '').replace(/\/$/, '');
@@ -24,7 +44,7 @@ export class WebhookClient {
     return this.#json(response);
   }
 
-  async sendEvent(event) {
+  async sendEvent(event, signal) {
     const body = JSON.stringify(event);
     const timestamp = String(Math.floor(this.now() / 1000));
     const response = await this.fetch(`${this.baseUrl}/zalo-inbox/api/webhook`, {
@@ -35,8 +55,27 @@ export class WebhookClient {
         'x-zalo-signature': signBody(body, timestamp, this.secret),
       },
       body,
+      ...(signal ? {signal} : {}),
     });
-    return this.#json(response);
+    return requireExactAck(event, await this.#json(response));
+  }
+
+  ackPolicy(accountId, policyVersion) {
+    return this.sendEvent({
+      schema_version: 1,
+      event_type: 'policy_ack',
+      connector_account_id: accountId,
+      policy_version: policyVersion,
+    });
+  }
+
+  ackSourceSync(accountId, sourceSyncRequestVersion) {
+    return this.sendEvent({
+      schema_version: 1,
+      event_type: 'source_sync_ack',
+      connector_account_id: accountId,
+      source_sync_request_version: sourceSyncRequestVersion,
+    });
   }
 
   async getConfig(accountId) {
@@ -48,6 +87,27 @@ export class WebhookClient {
       },
     });
     return this.#json(response);
+  }
+
+  async getNextCommand(accountId) {
+    const timestamp = String(Math.floor(this.now() / 1000));
+    const accountKeyHex = createHmac('sha256', this.secret).update(String(accountId)).digest('hex');
+    const response = await this.fetch(`${this.baseUrl}/zalo-inbox/api/connectors/${encodeURIComponent(accountId)}/commands/next`, {
+      headers: {
+        'x-zalo-timestamp': timestamp,
+        'x-zalo-signature': signBody('', timestamp, accountKeyHex),
+      },
+    });
+    if (response.status === 204) return null;
+    const command = await this.#json(response);
+    if (
+      command?.command_type !== 'data_sync'
+      || !String(command.run_id || '').trim()
+      || typeof command.cutoff_at !== 'string' || Number.isNaN(Date.parse(command.cutoff_at))
+      || typeof command.deadline_at !== 'string' || Number.isNaN(Date.parse(command.deadline_at))
+      || !Array.isArray(command.source_ids)
+    ) throw new Error('backend command is invalid');
+    return command;
   }
 
   async #json(response) {
@@ -88,26 +148,42 @@ function supportedAttachment(content) {
   return null;
 }
 
-export function attachmentEvents(message, enabledConversationIds, accountId, sourceDisplayName) {
-  if (!message || message.isSelf || !enabledConversationIds.has(String(message.threadId))) return [];
-  const attachment = supportedAttachment(message.data?.content);
-  if (!attachment) return [];
+export function normalizeMessage(message, accountId, source, send2meId) {
+  const threadId = String(message?.threadId || '');
+  if (!message || (message.isSelf && threadId !== String(send2meId || ''))) return null;
+  const content = message.data?.content;
+  const candidates = Array.isArray(message.data?.attachments)
+    ? message.data.attachments
+    : (content && typeof content === 'object' ? [content] : []);
+  const attachments = candidates
+    .map(supportedAttachment)
+    .filter(Boolean)
+    .map((attachment, attachmentIndex) => ({
+      attachment_index: attachmentIndex,
+      mime_type: attachment.mimeType,
+      download_url: attachment.url,
+      original_filename: attachment.title,
+    }));
+  const rawText = typeof content === 'string' && content.trim() ? content : null;
+  const messageId = String(message.data?.msgId || message.data?.cliMsgId || '').trim();
+  const senderId = String(message.data?.uidFrom || message.data?.senderId || '').trim();
+  if (!messageId || !senderId || (rawText === null && attachments.length === 0)) return null;
   const timestamp = Number(message.data?.ts);
   const sentAt = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date().toISOString();
-  return [{
+  return {
     schema_version: 1,
-    event_type: 'media',
+    event_type: 'message',
     connector_account_id: accountId,
-    conversation_id: String(message.threadId),
-    conversation_type: Number(message.type) === 1 ? 'group' : 'user',
-    source_display_name: sourceDisplayName,
-    msg_id: String(message.data?.msgId || message.data?.cliMsgId || ''),
-    attachment_index: 0,
-    mime_type: attachment.mimeType,
+    conversation_id: threadId,
+    conversation_type: source.source_type === 'group' ? 'group' : 'user',
+    source_type: source.source_type,
+    source_display_name: source.source_display_name,
+    msg_id: messageId,
+    sender_id: senderId,
     sent_at: sentAt,
-    download_url: attachment.url,
-    original_filename: attachment.title,
-  }];
+    raw_text: rawText,
+    attachments,
+  };
 }
 
 function safeKey(key) {
@@ -148,6 +224,7 @@ export class FileOutbox {
     const temporary = `${target}.${process.pid}.tmp`;
     await writeFile(temporary, JSON.stringify(event), {encoding: 'utf8', mode: 0o600});
     await rename(temporary, target);
+    return name;
   }
 
   async pending() {
@@ -167,9 +244,17 @@ export class FileOutbox {
     await unlink(path.join(this.root, name));
   }
 
+  async replace(name, event) {
+    if (path.basename(name) !== name || !name.endsWith('.json')) throw new Error('invalid outbox entry');
+    const target = path.join(this.root, name);
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(event), {encoding: 'utf8', mode: 0o600});
+    await rename(temporary, target);
+  }
+
   async flush(client) {
     for (const {name, event} of await this.entries()) {
-      await client.sendEvent(event);
+      requireExactAck(event, await client.sendEvent(event));
       await this.remove(name);
     }
   }
@@ -221,9 +306,10 @@ export class MediaStore {
     return target;
   }
 
-  async download(key, url, fetchImpl = fetch) {
+  async download(key, url, signal, fetchImpl = fetch) {
     const {target} = this.#target(key);
-    const response = await fetchImpl(url);
+    const response = await fetchImpl(url, signal ? {signal} : undefined);
+    signal?.throwIfAborted();
     if (!response.ok || !response.body) throw new Error(`attachment download returned HTTP ${response.status}`);
     const baseUsage = await this.#usage(target);
     const announced = Number(response.headers.get('content-length'));
@@ -234,10 +320,12 @@ export class MediaStore {
     let written = 0;
     try {
       for await (const chunk of response.body) {
+        signal?.throwIfAborted();
         written += chunk.length;
         if (baseUsage + written > this.quotaBytes) throw new Error('connector storage quota exceeded');
         await handle.write(chunk);
       }
+      signal?.throwIfAborted();
       await handle.close();
       await rename(temporary, target);
       return {path: target, sizeBytes: written};
