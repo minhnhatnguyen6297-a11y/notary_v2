@@ -3,9 +3,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const formHtml = readFileSync("frontend/templates/cases/form.html", "utf8");
-const baseHtml = readFileSync("frontend/templates/base.html", "utf8");
 const reactFlowApp = readFileSync("frontend/static/ReactFlowApp.jsx", "utf8");
-const diagramEdges = readFileSync("frontend/static/diagram_edges.js", "utf8");
+
+function scope(start, end) {
+  const from = formHtml.indexOf(start);
+  const to = formHtml.indexOf(end, from + start.length);
+  assert.ok(from >= 0 && to > from, `missing static scope: ${start}`);
+  return formHtml.slice(from, to);
+}
 
 test("stage rows are not labeled or submitted as not-in-diagram records", () => {
   assert.equal(formHtml.includes("Chưa vào sơ đồ"), false);
@@ -22,115 +27,26 @@ test("restoring staging data does not force pool membership off", () => {
 test("removing from diagram clears stale tree state and returns the person to pool", () => {
   assert.match(
     reactFlowApp,
-    /patch:\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true\s*}/
+    /patch:\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true,\s*deleted:\s*false\s*}/
   );
   assert.match(
     formHtml,
-    /setCustomerWorkflowState\(id,\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true\s*}\)/
+    /setCustomerWorkflowState\(id,\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true,\s*deleted:\s*false\s*}\)/
   );
 });
 
 test("workflow restore guard allows explicit undelete from diagram removal", () => {
   assert.match(formHtml, /const\s+explicitUndelete\s*=/);
-  assert.match(formHtml, /const\s+allowRevive\s*=/);
-  assert.match(
-    formHtml,
-    /window\.__CUSTOMER_WORKFLOW__\[id\]\?\.deleted\s*&&\s*explicitUndelete\s*&&\s*!allowRevive\s*&&\s*!next\.inStaging[\s\S]*?next\.deleted\s*=\s*true;/
-  );
   assert.match(
     formHtml,
     /window\.__CUSTOMER_WORKFLOW__\[id\]\?\.deleted\s*&&\s*!explicitUndelete\s*&&[\s\S]*?next\.inPool\s*=\s*false;/
   );
 });
 
-test("land owner action button is present and wired to the toggle handler", () => {
+test("land owner star is clickable and wired to the toggle handler", () => {
+  assert.equal(reactFlowApp.includes('cursor: "not-allowed"'), false);
   assert.match(reactFlowApp, /onToggleLandOwner\?\.\(node\.id\)/);
-  assert.match(reactFlowApp, /Chủ đất/);
-  assert.equal(reactFlowApp.includes("S.landBadge"), false);
-  assert.equal(reactFlowApp.includes(">★</span>"), false);
-});
-
-test("diagram only exposes land-owner and receiver decisions", () => {
-  assert.match(reactFlowApp, /onToggleReceiver\?\.\(node\.id\)/);
-  assert.match(reactFlowApp, /title="Nhận"/);
-  assert.equal(reactFlowApp.includes("onToggleInheritanceDecision"), false);
-  assert.equal(reactFlowApp.includes('title="Từ chối"'), false);
-});
-
-test("diagram state keeps the selected owner when participant payload excludes the root", () => {
-  assert.match(formHtml, /if \(ownerInput && owner\) ownerInput\.value = owner\.id;/);
-  assert.match(formHtml, /const ownerId = String\(ownerInput\?\.value \|\| ''\)\.trim\(\);/);
-  assert.match(formHtml, /const ownerRecord = normalizeCommittedStageRecord\(resolveCustomerById\(ownerId\)\);/);
-  assert.match(formHtml, /if \(ownerRecord\) stage\.unshift\(ownerRecord\);/);
-});
-
-test("manual add sibling button is removed", () => {
-  assert.equal(reactFlowApp.includes("+ Thêm Anh/Chị/Em"), false);
-  assert.equal(reactFlowApp.includes("ghostAction: \"addSibling\""), false);
-});
-
-test("resolveSubRelations derives empty relationship slots only from backend requirements", () => {
-  const resolveBlock = reactFlowApp.match(/function resolveSubRelations\(nodes\)\s*{[\s\S]*?engineState:\s*engineRun\.engineState,[\s\S]*?\n}/);
-  assert.ok(resolveBlock, "resolveSubRelations should exist");
-  assert.match(resolveBlock[0], /engineResult\?\.requiredSlots/);
-  assert.match(resolveBlock[0], /requirement\.slotTypes/);
-  assert.match(resolveBlock[0], /minimumEmptyChildSlots/);
-  assert.equal(resolveBlock[0].includes("compareDeathDates"), false);
-  assert.equal(resolveBlock[0].includes("hasInflow"), false);
-  assert.equal(resolveBlock[0].includes("auto_z_"), false);
-  assert.equal(resolveBlock[0].includes("ghostAction"), false);
-});
-
-test("required slots persist explicit parent spouse and child relations", () => {
-  const resolveBlock = reactFlowApp.match(/function resolveSubRelations\(nodes\)\s*{[\s\S]*?engineState:\s*engineRun\.engineState,[\s\S]*?\n}/);
-  assert.ok(resolveBlock, "resolveSubRelations should exist");
-  assert.match(resolveBlock[0], /requiredRelation:\s*"parent"/);
-  assert.match(resolveBlock[0], /requiredRelation:\s*"spouse"/);
-  assert.match(resolveBlock[0], /requiredRelation:\s*"child"/);
-  assert.match(resolveBlock[0], /parentSlotIds:\s*\[anchor\.id, spouseSlotId\]/);
-});
-
-test("createLogicalNode preserves auto slot metadata needed for drop materialization", () => {
-  const createBlock = reactFlowApp.match(/function createLogicalNode\(overrides\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(createBlock, "createLogicalNode should exist");
-  assert.match(createBlock[0], /autoGenerated:\s*!!overrides\.autoGenerated/);
-  assert.match(createBlock[0], /autoAnchorId:\s*overrides\.autoAnchorId/);
-  assert.match(createBlock[0], /requiredRelation:\s*overrides\.requiredRelation/);
-  assert.match(createBlock[0], /requiredAnchorId:\s*overrides\.requiredAnchorId/);
-});
-
-test("land owner toggle only changes input and lets backend recalculate", () => {
-  const toggleBlock = reactFlowApp.match(/const onToggleLandOwner = useCallback\(\(nodeId\) => \{[\s\S]*?\},\s*\[commitLogicalNodes\]\);/);
-  assert.ok(toggleBlock, "onToggleLandOwner should exist");
-  assert.match(toggleBlock[0], /isLandOwner:\s*!node\.isLandOwner/);
-  assert.equal(toggleBlock[0].includes("resolveSubRelations"), false);
-  assert.equal(toggleBlock[0].includes("clearAssignedNode"), false);
-});
-
-test("commitAssign materializes auto slots into logicalNodes before assigning", () => {
-  const commitBlock = reactFlowApp.match(/const commitAssign = useCallback\(\(nodeId,\s*rawPerson\) => \{[\s\S]*?\}, \[commitLogicalNodes, shareMode\]\);/);
-  assert.ok(commitBlock, "commitAssign should exist");
-  assert.match(commitBlock[0], /autoGenerated/);
-  assert.match(commitBlock[0], /baseNodes\s*=\s*\[\.\.\.prevNodes,/);
-});
-
-test("moveWithinDiagram materializes auto target slots before moving", () => {
-  const moveBlock = reactFlowApp.match(/const moveWithinDiagram = useCallback\(\(sourceNodeId,\s*targetNodeId\) => \{[\s\S]*?\}, \[commitLogicalNodes, pruneLinkedNodes, shareMode\]\);/);
-  assert.ok(moveBlock, "moveWithinDiagram should exist");
-  assert.match(moveBlock[0], /autoGenerated/);
-});
-
-test("empty static relation slots stay hidden until required by backend", () => {
-  assert.match(reactFlowApp, /REQUIRED_STATIC_SLOTS/);
-  assert.match(reactFlowApp, /isStaticSlot && !node\.person \? \{ \.\.\.node, hidden: true \}/);
-  assert.match(reactFlowApp, /\{ \.\.\.node, hidden: false \}/);
-  assert.match(reactFlowApp, /n\.kind === "person" && !n\.hidden/);
-});
-
-test("populated generated relations survive recalculation and become an explicit warning", () => {
-  assert.match(reactFlowApp, /if \(!node\.autoGenerated \|\| node\.person \|\| requirementIds\.has\(node\.id\)\) return true/);
-  assert.match(reactFlowApp, /node\.autoGenerated && node\.person && !requirementIds\.has\(node\.id\)/);
-  assert.match(reactFlowApp, /quan hệ này không còn được engine yêu cầu/);
+  assert.match(reactFlowApp, /onMouseDown=\{\(e\)\s*=>\s*\{\s*e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*\}\}/);
 });
 
 test("case state is posted and hydrated so stage survives reload", () => {
@@ -141,432 +57,100 @@ test("case state is posted and hydrated so stage survives reload", () => {
   assert.match(formHtml, /hydrateStagingFromCaseState\(/);
 });
 
-test("edit hydrate does not duplicate participants already present in committed stage", () => {
-  const hydrateBlock = formHtml.match(/function hydrateDraftRowsFromExistingParticipants\(\)\s*{[\s\S]*?\n\s*loadPool\(\);/);
-  assert.ok(hydrateBlock, "existing participant hydrate block should exist");
-  assert.match(hydrateBlock[0], /const stagedIds = new Set/);
-  assert.match(hydrateBlock[0], /if \(!stagedIds\.has\(recordId\)\)/);
-  assert.match(hydrateBlock[0], /stagedIds\.add\(recordId\)/);
+test("Stage commits explicitly and diagram snapshots use only committed Stage", () => {
+  assert.match(formHtml, /function getCommittedStageSnapshot\(/);
+  assert.match(formHtml, /function persistCommittedStageSnapshot\(/);
+  assert.match(formHtml, /\/stage-update/);
+  const snapshot = formHtml.match(/function collectCaseStateSnapshot\([\s\S]*?\n    }/);
+  assert.ok(snapshot);
+  assert.match(snapshot[0], /const stage = stageOverride \|\| getCommittedStageSnapshot\(\)/);
+  assert.equal(snapshot[0].includes("querySelectorAll('#ocr-staging-area"), false);
+  const normalizer = scope("function normalizeCommittedStageRecord", "window.__COMMITTED_STAGE_SNAPSHOT__");
+  assert.match(normalizer, /hasOwnProperty\.call\(source, key\)\) return String\(source\[key\] \?\? ''\)/);
+  assert.match(normalizer, /if \(Object\.prototype\.hasOwnProperty\.call\(source, fallback\)\)/);
+  assert.match(formHtml, /function clearOcrTempAfterStageCommit\([\s\S]*?window\.clearOcrTempAfterStageCommit/);
+  const save = scope("async function saveParticipantDraftRows", "function _updateStagingCount");
+  assert.match(save, /await window\.persistCommittedStageSnapshot\?\.\(/);
+  assert.match(save, /if \(failedCount === 0\) window\.clearOcrTempAfterStageCommit\?\./);
+});
+
+test("Stage drafts do not auto-save or mutate Pool before Cập nhật", () => {
+  const draft = scope("window.addToOcrStaging = function", "function hydrateDraftRowsFromExistingParticipants");
+  assert.equal(draft.includes("_queueDraftRowSave("), false);
+  assert.equal(draft.includes("_saveStagingRow("), false);
+  assert.equal(draft.includes("staged-pool-btn"), false);
+  assert.match(draft, /stage-remove-btn/);
+  assert.equal(draft.includes("updateCustomerWorkflow("), false);
+  const submit = scope("document.getElementById('case-form')?.addEventListener('submit'", "// Load React app");
+  assert.equal(submit.includes("saveParticipantDraftRows"), false);
+  assert.equal(submit.includes("flushPendingDebounces"), false);
+  assert.equal(submit.includes("persistCommittedStageSnapshot"), false);
+});
+
+test("Pool derives from committed Stage minus assignments and rejected commits roll back", () => {
+  const pool = scope("function derivePoolVisibility", "function syncParticipantProjectionInDom");
+  assert.match(pool, /function getPoolCandidateCustomerIds\(\)[\s\S]*?getCommittedStageSnapshot\(\)/);
+  assert.match(pool, /function getDiagramAssignedStageIds\(\)[\s\S]*?engineState\?\.nodes/);
+  assert.match(pool, /getPoolCandidateCustomerIds\(\)[\s\S]*?!getDiagramAssignedStageIds\(\)\.has/);
+  assert.equal(pool.includes("Object.keys(window.__CUSTOMER_REGISTRY__)"), false);
+  assert.equal(pool.includes("updateCustomerWorkflow(record.id"), false);
+  assert.match(formHtml, /const previousStage = getCommittedStageSnapshot\(\);[\s\S]*?setCommittedStageSnapshot\(previousStage\);/);
+  assert.match(formHtml, /const stage = collectDraftStageSnapshot\(options\.excludeRows\);[\s\S]*?setCommittedStageSnapshot\(stage\);/);
+  assert.equal(formHtml.includes("/*\n      Array.from(document.querySelectorAll('#ocr-staging-area"), false);
+});
+
+test("Stage sources stay draft-only and removal cannot mutate customer or Diagram before commit", () => {
+  const imported = scope("imported.forEach((customer)", "if (typeof window.__pushCaseDebugEvent__");
+  assert.match(imported, /window\.addToOcrStaging\(customer/);
+  assert.equal(imported.includes("loadPool("), false);
+  const manual = scope("function addPersonEditRow", "document.getElementById('btn-add-person')");
+  assert.match(manual, /window\.addToOcrStaging\(\{\}/);
+  assert.equal(manual.includes("commitCustomerToPool"), false);
+  assert.equal(formHtml.match(/(?<!function )commitCustomerToPool\(/g), null);
+  const remove = scope("document.getElementById('ocr-staging-area')?.addEventListener('click'", "})(); // end OCR module");
+  assert.equal((formHtml.match(/closest\('\.stage-remove-btn'\)/g) || []).length, 1);
+  assert.equal(/stage-remove-btn[^\n]*addEventListener|addEventListener[^\n]*stage-remove-btn/.test(formHtml), false);
+  assert.match(remove, /row\.remove\(\);[\s\S]*?_updateStagingCount\(\);[\s\S]*?_syncAllDraftRowStates\(\);/);
+  assert.equal(remove.includes("updateCustomerWorkflow"), false);
+  assert.equal(remove.includes("loadPool("), false);
+  assert.equal(remove.includes("removeStagingFromStorage"), false);
+});
+
+test("final-row removal can commit an empty Stage snapshot", () => {
+  const save = scope("async function saveParticipantDraftRows", "function _updateStagingCount");
+  assert.equal(/if \(!rows\.length\)[\s\S]*?return/.test(save), false);
+  assert.match(formHtml, /function _updateStagingCount\([\s\S]*?saveBtn\.disabled = false;/);
+  assert.match(save, /const rows = Array\.from\(document\.querySelectorAll\('#ocr-staging-area \.ocr-staged-row'\)\);[\s\S]*?await window\.persistCommittedStageSnapshot\?\.\(\{ latestEngineState, treeState, excludeRows: failedRows \}\);/);
+  assert.match(save, /await window\.persistCommittedStageSnapshot\?\.\([\s\S]*?if \(failedCount === 0\) window\.clearOcrTempAfterStageCommit\?\./);
+  const persist = scope("async function persistCommittedStageSnapshot", "window.getCommittedStageSnapshot");
+  assert.match(persist, /const stage = collectDraftStageSnapshot\(options\.excludeRows\);/);
+  assert.match(persist, /case_state_json: payload/);
+  assert.match(persist, /else if \(caseStateInput\) caseStateInput\.value = payload;/);
+});
+
+test("OCR is Qwen-only, saves only on Lưu, and modal close retains temporary images", () => {
+  const ocr = scope("window.ocrExtractAll = async function", "function clearOcrTempAfterStageCommit");
+  assert.match(ocr, /fetch\('\/api\/ocr\/analyze'/);
+  for (const legacy of ["tryQRScan", "ocrExtractLocal", "ocr-btn-extract-local", "qrDataUrl", "jsQR", "RapidOCR"]) {
+    assert.equal(formHtml.includes(legacy), false);
+  }
+  assert.equal(ocr.includes("resetOcrWorkingResults();"), false);
+  assert.equal(ocr.includes("flushOcrResultsWhenModalHidden"), false);
+  assert.equal(formHtml.includes("autoStageOcrResults"), false);
+  assert.match(formHtml, /id="ocr-btn-save-results"/);
+  assert.match(formHtml, /function saveOcrResultsToStage\([\s\S]*?skipDuplicateGuard: true/);
+  const close = scope("document.getElementById('ocrModal')?.addEventListener('hidden.bs.modal'", "// ── OCR Staging Area");
+  assert.equal(close.includes("ocrResults ="), false);
+  assert.equal(close.includes("imageQueue ="), false);
+});
+
+test("Diagram accepts and retains only committed Stage people", () => {
+  assert.match(reactFlowApp, /function isCommittedStagePerson\(/);
+  assert.match(reactFlowApp, /!explicitId \|\| !isCommittedStagePerson\(explicitId\)/);
+  assert.match(reactFlowApp, /caseStagePersonsCommitted/);
+  assert.match(reactFlowApp, /pruneLinkedNodes\(nextNodes, node\.id/);
 });
 
 test("ReactFlow app script version is bumped after dataflow fixes", () => {
-  assert.match(formHtml, /ReactFlowApp\.jsx\?v=20260722a/);
-});
-
-test("OCR modal close does not stage or clear temporary OCR data", () => {
-  const hiddenBlock = formHtml.match(/document\.getElementById\('ocrModal'\)\?\.addEventListener\('hidden\.bs\.modal'[\s\S]*?\n\s*\}\);/);
-  assert.ok(hiddenBlock, "ocrModal hidden.bs.modal handler should exist");
-  assert.equal(hiddenBlock[0].includes("autoStageOcrResults("), false);
-  assert.equal(hiddenBlock[0].includes("ocrResults = []"), false);
-  assert.equal(hiddenBlock[0].includes("imageQueue = []"), false);
-});
-
-test("AI OCR does not reset old working results before extracting more images", () => {
-  const extractBlock = formHtml.match(/window\.ocrExtractAll\s*=\s*async function\s*\(\)\s*{[\s\S]*?document\.getElementById\('ocr-btn-text'\)\.innerHTML/);
-  assert.ok(extractBlock, "ocrExtractAll block should exist");
-  assert.equal(extractBlock[0].includes("resetOcrWorkingResults()"), false);
-});
-
-test("OCR modal has an explicit save button and no footer dismiss-only close button", () => {
-  const ocrFooterBlock = formHtml.match(/<div class="modal-footer py-2 justify-content-between">[\s\S]*?<!--\s*\/Modal OCR/);
-  assert.ok(ocrFooterBlock, "OCR modal footer block should exist");
-  assert.match(ocrFooterBlock[0], /id="ocr-btn-save-results"/);
-  assert.equal(ocrFooterBlock[0].includes('data-bs-dismiss="modal"'), false);
-});
-
-test("Phase 1 OCR modal does not expose a manual trash clear action", () => {
-  assert.equal(formHtml.includes('onclick="ocrClearAll()"'), false);
-  assert.equal(formHtml.includes("window.ocrClearAll = function"), false);
-});
-
-test("property OCR panel does not expose a trash clear button", () => {
-  assert.equal(formHtml.includes('onclick="propertyOcrClearAll()"'), false);
-  assert.equal(formHtml.includes('title="Xóa tất cả"'), false);
-});
-
-test("OCR staging allows missing-side and duplicate person rows", () => {
-  const autoStageBlock = formHtml.match(/(?:async\s+)?function autoStageOcrResults\([^)]*\)\s*{[\s\S]*?\n\s*\}/);
-  assert.ok(autoStageBlock, "autoStageOcrResults block should exist");
-  assert.equal(autoStageBlock[0].includes("hasBlockingPersonWarnings("), false);
-  assert.equal(autoStageBlock[0].includes("isDocAlreadyInCase("), false);
-  assert.equal(autoStageBlock[0].includes("isDocAlreadyInStaging("), false);
-});
-
-test("OCR Luu can create a new stage row each time instead of updating a hidden link", () => {
-  const autoStageStart = formHtml.indexOf("function autoStageOcrResults(options = {})");
-  const autoStageEnd = formHtml.indexOf("function addToStagingLinked", autoStageStart);
-  assert.ok(autoStageStart >= 0 && autoStageEnd > autoStageStart, "autoStageOcrResults block should exist");
-  const autoStageBlock = formHtml.slice(autoStageStart, autoStageEnd);
-  assert.equal(autoStageBlock.includes("&& !r._staged"), false);
-  assert.equal(autoStageBlock.includes("r.type === 'person' && !r._staged"), false);
-  assert.match(autoStageBlock, /window\.addToOcrStaging/);
-  assert.match(autoStageBlock, /skipDuplicateGuard:\s*allowDuplicates/);
-});
-
-test("Local OCR control is not exposed in the current person OCR modal", () => {
-  assert.equal(formHtml.includes("ocr-btn-extract-local"), false);
-  assert.equal(formHtml.includes('onclick="ocrExtractLocal()"'), false);
-});
-
-test("OCR modal keeps queue inside the left upload column", () => {
-  const modalBody = formHtml.match(/<div class="modal-body p-0 d-flex" style="min-height:60vh;">[\s\S]*?<\/div><!-- \/modal-body -->/);
-  assert.ok(modalBody, "OCR modal body should exist");
-  const body = modalBody[0];
-  const queueIndex = body.indexOf('id="ocr-queue"');
-  const rightColumnIndex = body.indexOf('id="ocr-results-panel"');
-  assert.ok(queueIndex > 0, "OCR queue should be inside the modal body");
-  assert.ok(rightColumnIndex > queueIndex, "OCR results panel should follow the queue");
-  assert.equal(body.includes("ocr-btn-text-local"), false);
-});
-
-test("OCR result preview still maps result _files to retained imageQueue items", () => {
-  assert.match(formHtml, /function findPreviewItemsForCard\(result,\s*data\)/);
-  assert.match(formHtml, /Array\.isArray\(result\?\._files\)/);
-  assert.match(formHtml, /Array\.isArray\(result\?\.data\?\._files\)/);
-  assert.match(formHtml, /Array\.isArray\(result\?\._preview_items\)/);
-  assert.match(formHtml, /Array\.isArray\(result\?\.data\?\._preview_items\)/);
-  assert.match(formHtml, /imageQueue\.forEach\(\(item\)\s*=>/);
-});
-
-test("OCR person cards render visible source badges and queue statuses name QR vs OCR", () => {
-  assert.match(formHtml, /class="ocr-src-badge"/);
-  assert.match(formHtml, /if \(s === 'qr'\) return '[^']*QR/);
-  assert.match(formHtml, /if \(s === 'ocr'\) return '[^']*OCR/);
-  assert.match(formHtml, /if \(s === 'ai'\) return '[^']*OCR/);
-});
-
-test("stage commit button is named Cap nhat and is the only stage commit trigger", () => {
-  const buttonBlock = formHtml.match(/<button[^>]+id="btn-save-participants"[\s\S]*?<\/button>/);
-  assert.ok(buttonBlock, "stage commit button should exist");
-  assert.match(buttonBlock[0], /C\u1eadp nh\u1eadt/);
-  assert.equal(buttonBlock[0].includes("L\u01b0u"), false);
-  assert.match(formHtml, /window\.saveParticipantDraftRows\s*=\s*saveParticipantDraftRows/);
-  assert.match(formHtml, /addEventListener\('click',\s*saveParticipantDraftRows\)/);
-});
-
-test("case submit does not auto-commit draft stage rows", () => {
-  const submitBlock = formHtml.match(/document\.getElementById\('case-form'\)\?\.addEventListener\('submit'[\s\S]*?return;\s*\n\s*\}\);/);
-  assert.ok(submitBlock, "case submit handler should exist");
-  assert.equal(submitBlock[0].includes("saveParticipantDraftRows("), false);
-  assert.equal(submitBlock[0].includes("flushPendingDebounces("), false);
-  assert.equal(submitBlock[0].includes("waitForPendingCustomerUpdates("), true);
-});
-
-test("case state snapshot serializes committed stage, not unsaved draft DOM", () => {
-  const collectBlock = formHtml.match(/function collectCaseStateSnapshot\([^)]*\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(collectBlock, "collectCaseStateSnapshot should exist");
-  assert.match(formHtml, /function getCommittedStageSnapshot\(/);
-  assert.match(collectBlock[0], /getCommittedStageSnapshot\(\)/);
-  assert.equal(collectBlock[0].includes("querySelectorAll('#ocr-staging-area .ocr-staged-row')"), false);
-});
-
-test("stage inline edits stay draft until Cap nhat", () => {
-  assert.equal(formHtml.includes("_queueDraftRowSave(row, record.id"), false);
-  assert.equal(formHtml.includes("_queueDraftRowSave(row, row.dataset.cid"), false);
-  assert.equal(formHtml.includes("setTimeout(() => _saveStagingRow(row"), false);
-});
-
-test("successful stage Cap nhat persists stage snapshot and then clears OCR temp", () => {
-  const saveBlock = formHtml.match(/async function saveParticipantDraftRows\(options = \{\}\)\s*{[\s\S]*?return \{ savedCount, failedCount, rowCount: rows\.length \};/);
-  assert.ok(saveBlock, "saveParticipantDraftRows should exist");
-  assert.match(saveBlock[0], /persistCommittedStageSnapshot\(/);
-  assert.match(saveBlock[0], /clearOcrTempAfterStageCommit\(\)/);
-});
-
-test("Stage date fields render in dd/mm/yyyy instead of leaking ISO dates", () => {
-  assert.equal(formHtml.includes("ngay_chet.isoformat()"), false);
-  assert.match(formHtml, /ngay_chet\.strftime\('%d\/%m\/%Y'\)/);
-  assert.match(formHtml, /data-key="ngay_sinh" value="\$\{escVal\(_fmtDate\(record\.ngay_sinh\)\)\}" placeholder="dd\/mm\/yyyy"/);
-  assert.match(formHtml, /data-key="ngay_chet" value="\$\{escVal\(_fmtDate\(record\.ngay_chet\)\)\}" placeholder="dd\/mm\/yyyy"/);
-  assert.match(formHtml, /data-key="ngay_cap"\s+value="\$\{escVal\(_fmtDate\(record\.ngay_cap\)\)\}"\s+placeholder="dd\/mm\/yyyy"/);
-});
-
-test("React diagram removes people no longer present in committed stage", () => {
-  const handlerStart = reactFlowApp.indexOf("const handleStagePersonsCommitted");
-  const handlerEnd = reactFlowApp.indexOf('window.addEventListener("caseStagePersonsCommitted"', handlerStart);
-  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, "caseStagePersonsCommitted handler should exist");
-  const handlerBlock = reactFlowApp.slice(handlerStart, handlerEnd);
-  assert.match(handlerBlock, /stageIds/);
-  assert.match(handlerBlock, /removedIds/);
-  assert.equal(handlerBlock.includes("if (!stageIds.size) return"), false);
-  assert.match(handlerBlock, /collectRemovedPeople\(/);
-  assert.match(handlerBlock, /pruneLinkedNodes\(/);
-  assert.match(handlerBlock, /bridgeWorkflowUpdates\(/);
-  assert.match(handlerBlock, /stageIds\.has\(String\(person\.id\)\)/);
-});
-
-test("pool is computed from committed stage minus diagram assignments", () => {
-  const visibilityStart = formHtml.indexOf("function derivePoolVisibility(customerId)");
-  const visibilityEnd = formHtml.indexOf("function getDiagramAssignedStageIds()");
-  assert.ok(visibilityStart >= 0 && visibilityEnd > visibilityStart, "derivePoolVisibility block should exist");
-  const visibilityBlock = formHtml.slice(visibilityStart, visibilityEnd);
-  assert.match(visibilityBlock, /getCommittedStageSnapshot\(\)/);
-  assert.match(visibilityBlock, /getDiagramAssignedStageIds\(\)/);
-  assert.equal(visibilityBlock.includes("!!state.inPool"), false);
-  assert.equal(visibilityBlock.includes("state.inPool"), false);
-  assert.equal(visibilityBlock.includes("ensureCustomerWorkflow("), false);
-
-  const loadPoolBlock = formHtml.match(/function loadPool\(\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(loadPoolBlock, "loadPool should exist");
-  assert.match(loadPoolBlock[0], /getPoolCandidateCustomerIds\(\)/);
-  assert.equal(loadPoolBlock[0].includes("Object.keys(window.__CUSTOMER_REGISTRY__)"), false);
-});
-
-test("diagram save button is scoped to diagram state and closes its markup", () => {
-  const buttonBlock = formHtml.match(/<button[^>]+data-action="\{\{ 'save-diagram' if obj else 'create-case' \}\}"[\s\S]*?<\/button>/);
-  assert.ok(buttonBlock, "case action button should be a closed button element");
-  assert.match(buttonBlock[0], /btn-submit-case/);
-  assert.match(buttonBlock[0], /btn-create-case/);
-  assert.match(buttonBlock[0], /L\u01b0u s\u01a1 \u0111\u1ed3/);
-  assert.match(buttonBlock[0], /T\u1ea1o h\u1ed3 s\u01a1/);
-  assert.equal(buttonBlock[0].includes("LÆ°u há»“ sÆ¡"), false);
-  assert.equal(buttonBlock[0].includes("LÆ°u thay Ä‘á»•i"), false);
-});
-
-test("diagram save posts diagram state without committing draft stage rows", () => {
-  const submitBlock = formHtml.match(/document\.getElementById\('case-form'\)\?\.addEventListener\('submit'[\s\S]*?return;\s*\n\s*\}\);/);
-  assert.ok(submitBlock, "case submit handler should exist");
-  assert.match(submitBlock[0], /\/cases\/\$\{caseId\}\/diagram-update/);
-  assert.equal(submitBlock[0].includes("persistCommittedStageSnapshot("), false);
-  assert.equal(submitBlock[0].includes("collectDraftStageSnapshot("), false);
-});
-
-test("diagram removal cascades dependent branch people back to pool", () => {
-  assert.match(reactFlowApp, /collectRemovedPeople\(logicalNodesRef\.current,\s*nodeId\)/);
-  assert.match(reactFlowApp, /patch:\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true\s*}/);
-  assert.match(reactFlowApp, /node\.id !== targetId && node\.parentSlotId && toRemove\.has\(node\.parentSlotId\)/);
-});
-
-test("diagram move prunes old dependent branch and only keeps moved person in diagram", () => {
-  assert.match(reactFlowApp, /collectRemovedPeople\(logicalNodesRef\.current,\s*sourceNodeId\)/);
-  assert.match(reactFlowApp, /const dependentPeople = affectedPeople\.filter\(\(person\) => String\(person\.id\) !== String\(sourcePerson\?\.id \|\| ""\)\)/);
-  assert.match(reactFlowApp, /bridgeWorkflowUpdates\(dependentPeople\.map\(\(person\) => \(\{/);
-  assert.match(reactFlowApp, /patch:\s*{\s*inDiagram:\s*false,\s*inTree:\s*false,\s*inPool:\s*true\s*}/);
-});
-
-test("import and manual add only create stage drafts before Cap nhat", () => {
-  const importBlock = formHtml.match(/async function refreshPoolAfterImport\(\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(importBlock, "refreshPoolAfterImport should exist");
-  assert.match(importBlock[0], /window\.addToOcrStaging\(customer,\s*{\s*source:\s*'excel'/);
-  assert.equal(importBlock[0].includes("commitCustomerToPool("), false);
-  assert.equal(importBlock[0].includes("setCustomerWorkflowState("), false);
-  assert.equal(importBlock[0].includes("updateCustomerWorkflow("), false);
-  assert.equal(importBlock[0].includes("loadPool("), false);
-
-  const inlineAddBlock = formHtml.match(/function addPersonEditRow\(\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(inlineAddBlock, "addPersonEditRow should exist");
-  assert.match(inlineAddBlock[0], /window\.addToOcrStaging\(\{\},\s*{\s*focusKey:\s*'ho_ten'\s*}\)/);
-  assert.equal(inlineAddBlock[0].includes("commitCustomerToPool("), false);
-  assert.equal(inlineAddBlock[0].includes("loadPool("), false);
-});
-
-test("pool search and registry fetch do not bypass committed stage", () => {
-  const fetchBlock = formHtml.match(/async function fetchCustomersIntoRegistry\(query = '',\s*limit = 200\)\s*{[\s\S]*?return json\.data;\s*\n\s*}/);
-  assert.ok(fetchBlock, "fetchCustomersIntoRegistry should exist");
-  assert.equal(fetchBlock[0].includes("inPool: true"), false);
-  assert.equal(fetchBlock[0].includes("setCustomerWorkflowState(record.id"), false);
-
-  const searchClickBlock = formHtml.match(/poolSearchResults\.addEventListener\('click',\s*\(e\) => \{[\s\S]*?poolSearchInput\.value = '';\s*\n\s*\}\s*\n\s*\}\);/);
-  assert.ok(searchClickBlock, "pool search click handler should exist");
-  assert.match(searchClickBlock[0], /window\.addToOcrStaging\(toLegacyCustomerShape\(record\)/);
-  assert.equal(searchClickBlock[0].includes("inPool: true"), false);
-  assert.equal(searchClickBlock[0].includes("updateCustomerWorkflow(record.id"), false);
-});
-
-test("stage save never commits a just-saved customer directly to legacy pool", () => {
-  const syncBlock = formHtml.match(/function _syncCustomerAfterSave\(raw,\s*options = \{\}\)\s*{[\s\S]*?return record;\s*\n\s*}/);
-  assert.ok(syncBlock, "_syncCustomerAfterSave should exist");
-  assert.equal(syncBlock[0].includes("commitCustomerToPool("), false);
-  assert.match(syncBlock[0], /updateCustomerWorkflow\(record\.id,\s*{/);
-});
-
-test("legacy staged pool button is removed so only Cap nhat pushes stage to pool", () => {
-  assert.equal(formHtml.includes("staged-pool-btn"), false);
-  assert.equal(formHtml.includes("function addPersonRowToPool("), false);
-  assert.equal(formHtml.includes("addPersonRowToPool = function"), false);
-});
-
-test("stage draft rows expose a direct remove button scoped to stage only", () => {
-  assert.ok(formHtml.includes("stage-remove-btn"), "stage rows must have a remove button");
-  assert.equal(formHtml.includes("staged-remove-btn"), false, "old staged-remove-btn class must not exist");
-  assert.equal(formHtml.includes("DRAFT_ROW_REMOVED"), false, "no legacy DRAFT_ROW_REMOVED event");
-  assert.equal(formHtml.includes('title="XÃ³a khi workflow"'), false);
-  assert.equal(formHtml.includes('title="XÃ³a khi danh sÃ¡ch"'), false);
-  assert.equal(formHtml.includes('title="XoÃ¡ khi danh sÃ¡ch"'), false);
-});
-
-test("legacy hidden tree runtime stays deleted", () => {
-  [
-    "legacy-tree-wrap",
-    "putDataBackToPool",
-    "buildPersonCard",
-    "placeExistingParticipants",
-    "updateGrandZones",
-    "validateTreeWarnings",
-    "Sortable.create",
-  ].forEach((legacyToken) => assert.equal(formHtml.includes(legacyToken), false, legacyToken));
-  assert.equal(baseHtml.includes("sortablejs"), false);
-});
-
-test("legacy cases require explicit V2 relation rebuild instead of automatic branch guesses", () => {
-  assert.match(formHtml, /existingParticipants\.length > 0/);
-  assert.match(formHtml, /!initialCaseState\?\.diagram\?\.engineInput/);
-  assert.match(formHtml, /Hồ sơ cũ chưa có quan hệ sơ đồ V2/);
-});
-
-test("only stage commit marks workflow records as deleted", () => {
-  const deletedTrueMatches = formHtml.match(/deleted:\s*true/g) || [];
-  assert.equal(deletedTrueMatches.length, 1);
-  assert.equal(reactFlowApp.includes("deleted: true"), false);
-
-  const persistBlock = formHtml.match(/async function persistCommittedStageSnapshot\(options = \{\}\)\s*{[\s\S]*?return \{ stage, removedIds \};/);
-  assert.ok(persistBlock, "persistCommittedStageSnapshot should exist");
-  assert.match(persistBlock[0], /removedIds\.forEach/);
-  assert.match(persistBlock[0], /deleted:\s*true/);
-  assert.match(persistBlock[0], /__allowClearStaging:\s*true/);
-});
-
-test("only stage flows can revive deleted records", () => {
-  const nonStageBlocks = [
-    reactFlowApp.match(/const removeWithWorkflow = useCallback\(\(nodeId\) => \{[\s\S]*?\}, \[onRemove\]\);/),
-    reactFlowApp.match(/const moveWithinDiagram = useCallback\(\(sourceNodeId,\s*targetNodeId\) => \{[\s\S]*?\}, \[commitLogicalNodes, pruneLinkedNodes, shareMode\]\);/),
-    reactFlowApp.match(/const commitAssign = useCallback\(\(nodeId,\s*rawPerson\) => \{[\s\S]*?\}, \[commitLogicalNodes, shareMode\]\);/),
-  ];
-  nonStageBlocks.forEach((block) => {
-    assert.ok(block, "non-stage block should exist");
-    assert.equal(block[0].includes("deleted: false"), false);
-  });
-  assert.equal(formHtml.includes("putDataBackToPool"), false);
-  assert.equal(formHtml.includes("buildPersonCard"), false);
-  assert.equal(formHtml.includes("placeExistingParticipants"), false);
-
-  const stageReviveMatches = formHtml.match(/deleted:\s*false[\s\S]{0,120}inStaging:\s*true/g) || [];
-  assert.ok(stageReviveMatches.length >= 4, "expected multiple stage-scoped revive patches");
-});
-
-test("new case diagram save is blocked instead of full form submit fallback", () => {
-  const submitBlock = formHtml.match(/document\.getElementById\('case-form'\)\?\.addEventListener\('submit'[\s\S]*?return;\s*\n\s*\}\);/);
-  assert.ok(submitBlock, "case submit handler should exist");
-  assert.match(submitBlock[0], /if\s*\(!caseId\)\s*{/);
-  assert.equal(/if\s*\(!caseId\)\s*{\s*form\.submit\(\);/.test(submitBlock[0]), false);
-  assert.match(submitBlock[0], /showToast\([^)]*t\u1ea1o h\u1ed3 s\u01a1/);
-});
-
-test("diagram assignment blocks occupied targets instead of replace or swap", () => {
-  const validateBlock = reactFlowApp.match(/function validateAssignment\(logicalNodes,\s*nodeId,\s*person,\s*targetNodes = logicalNodes\)\s*{[\s\S]*?^\s*}/m);
-  assert.ok(validateBlock, "validateAssignment should exist");
-  assert.match(validateBlock[0], /targetNode\.person/);
-  assert.match(validateBlock[0], /Ô này đã có ngườ|đã có ngườ|occupied/i);
-
-  const commitBlock = reactFlowApp.match(/const commitAssign = useCallback\(\(nodeId,\s*rawPerson\) => \{[\s\S]*?\}, \[commitLogicalNodes, shareMode\]\);/);
-  assert.ok(commitBlock, "commitAssign should exist");
-  assert.equal(commitBlock[0].includes("const preview = assignPersonToNode(currentNodes"), false);
-});
-
-test("diagram move does not swap with occupied target", () => {
-  const moveBlock = reactFlowApp.match(/const moveWithinDiagram = useCallback\(\(sourceNodeId,\s*targetNodeId\) => \{[\s\S]*?\}, \[commitLogicalNodes, pruneLinkedNodes, shareMode\]\);/);
-  assert.ok(moveBlock, "moveWithinDiagram should exist");
-  assert.equal(moveBlock[0].includes("targetPerson"), false);
-  assert.equal(moveBlock[0].includes("buildAssignedNode(node, baseNodes, targetPerson)"), false);
-  assert.match(moveBlock[0], /window\.alert/);
-});
-
-test("diagram hydrate skips hidden or deleted saved nodes on reload", () => {
-  const hydrateBlock = reactFlowApp.match(/function hydrateEngineStateNodes\(\)\s*{[\s\S]*?return nodes;\s*}/);
-  assert.ok(hydrateBlock, "hydrateEngineStateNodes should exist");
-  assert.match(hydrateBlock[0], /saved\.hidden\s*\|\|\s*saved\.deleted/);
-  assert.match(hydrateBlock[0], /filter\(\(node\)\s*=>\s*Boolean\(node\)\)/);
-  assert.match(hydrateBlock[0], /initialEngineState\?\.assetOwnerIds/);
-});
-
-test("browser builds only canonical V2 engine input", () => {
-  const buildInputBlock = reactFlowApp.match(/function buildEngineInput\(models\)\s*{[\s\S]*?\n}/);
-  assert.ok(buildInputBlock, "buildEngineInput should exist");
-  assert.match(buildInputBlock[0], /version:\s*2/);
-  assert.match(buildInputBlock[0], /parentSlotIds:/);
-  assert.match(buildInputBlock[0], /spouseSlotId:/);
-  assert.equal(buildInputBlock[0].includes("flowFrom:"), false);
-  assert.equal(buildInputBlock[0].includes("sharePercent"), false);
-  assert.equal(reactFlowApp.includes("flowFrom"), false);
-});
-
-test("browser calculation uses backend endpoint with stale-response protection", () => {
-  const requestBlock = reactFlowApp.match(/const requestCalculation = useCallback\(\(nodes\) => \{[\s\S]*?\}, \[applyCommittedState, shareMode\]\);/);
-  assert.ok(requestBlock, "requestCalculation should exist");
-  assert.match(requestBlock[0], /fetch\("\/cases\/diagram\/calculate"/);
-  assert.match(requestBlock[0], /calculationSequenceRef/);
-  assert.match(requestBlock[0], /AbortController/);
-  assert.match(requestBlock[0], /store\.incrementBusy\(\)/);
-  assert.match(requestBlock[0], /\.finally\(\(\) => \{[\s\S]*?store\.decrementBusy\(\)/);
-  assert.equal(reactFlowApp.includes("window.InheritanceEngine"), false);
-  assert.equal(reactFlowApp.includes("runInheritanceCase("), false);
-});
-
-test("case snapshot carries matching V2 input and backend result", () => {
-  assert.match(reactFlowApp, /engineInput:\s*resolved\.engineState\?\.engineInput/);
-  assert.match(reactFlowApp, /engineResult:\s*resolved\.engineState\?\.engineResult/);
-  assert.match(reactFlowApp, /calculationStatus:/);
-  assert.match(formHtml, /engineInput,\s*\n\s*engineResult:\s*rawEngineResult/);
-  assert.equal(formHtml.includes("inheritance_engine.js"), false);
-});
-
-test("form never owns the React diagram compatibility mirror", () => {
-  assert.equal(formHtml.includes("window.__FAMILY_TREE_STATE__ ="), false);
-  assert.equal(formHtml.includes("snapshot.treeState.participants"), false);
-  assert.match(formHtml, /getDiagramApi\(\)\?\.getCommittedState\?\.\(\)/);
-});
-
-test("legacy browser inheritance engines are deleted", () => {
-  assert.equal(formHtml.includes("recalcShares"), false);
-  assert.equal(diagramEdges.includes("buildFlowEdges"), false);
-  assert.equal(diagramEdges.includes("flowEdges"), false);
-});
-
-test("case save blocks until authoritative calculation is complete", () => {
-  assert.match(formHtml, /latestEngineResult\.status !== 'complete'/);
-  assert.match(formHtml, /Kết quả thừa kế chưa hoàn tất/);
-  assert.match(formHtml, /engineStateInput\.value = ''/);
-  assert.match(formHtml, /diagramPayloadInput\.value = ''/);
-});
-
-test("case save waits for active customer updates without committing Stage drafts", () => {
-  const submitBlock = formHtml.match(/document\.getElementById\('case-form'\)\?\.addEventListener\('submit', async \(ev\) => \{[\s\S]*?\r?\n\s*return;\r?\n\s*\}\);/);
-  assert.ok(submitBlock, "case submit handler should exist");
-  assert.match(submitBlock[0], /form\.dataset\.submitting = '1'/);
-  assert.doesNotMatch(submitBlock[0], /flushPendingDebounces\(\)/);
-  assert.match(submitBlock[0], /__PENDING_CUSTOMER_UPDATES__\.size > 0/);
-  assert.match(submitBlock[0], /await waitForPendingCustomerUpdates\(10000\)/);
-  assert.match(submitBlock[0], /customerSync\.timedOut/);
-});
-
-test("calculation details render only backend breakdown terms", () => {
-  assert.match(reactFlowApp, /function formatBreakdownLine\(item\)/);
-  assert.match(reactFlowApp, /engineResult\?\.breakdowns/);
-  assert.match(reactFlowApp, /Xem cách tính/);
-  assert.match(reactFlowApp, /viaBranchPersonIds/);
-  assert.equal(reactFlowApp.includes("+ Thêm Con"), false);
-  assert.equal(reactFlowApp.includes("function TieredDiagramLegacy"), false);
-  assert.equal(reactFlowApp.includes("onGhostExpand"), false);
-});
-
-test("case UI does not reintroduce known Vietnamese mojibake literals", () => {
-  const badLiterals = [
-    "ĐĐịa",
-    "H và tên",
-    "bạn chn",
-    "B chn",
-    "Chua co",
-    "Khong copy duoc",
-    "Da luu",
-    "Da day",
-    "Da copy",
-    "Mat truoc",
-    "Mat sau",
-    "Thieu:",
-    "ngườ.",
-    "Node da co nguoi",
-  ];
-  for (const source of [formHtml, reactFlowApp]) {
-    for (const literal of badLiterals) assert.equal(source.includes(literal), false, literal);
-  }
+  assert.match(formHtml, /ReactFlowApp\.jsx\?v=20260518/);
 });

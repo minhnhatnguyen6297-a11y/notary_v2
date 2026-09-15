@@ -13,18 +13,14 @@ def make_upload(filename: str, content: bytes = b"fake-image") -> UploadFile:
 
 
 class AnalyzeImagesTests(unittest.IsolatedAsyncioTestCase):
-    def test_active_cloud_path_has_no_qr_decoder_or_client_prescan(self):
+    def test_active_cloud_path_is_qwen_only(self):
         server = Path("routers/ocr_ai.py").read_text(encoding="utf-8")
         form = Path("frontend/templates/cases/form.html").read_text(encoding="utf-8")
-        cloud = form[form.index("window.ocrExtractAll = async function") : form.index("window.ocrExtractLocal = async function")]
 
         self.assertNotIn("zxing", server.lower())
-        self.assertNotIn("try_decode_qr", server)
         self.assertNotIn("source_priority", server)
-        self.assertNotIn("tryQRScan", cloud)
-        self.assertNotIn("ocr_qr_worker", cloud)
-        self.assertNotIn("jsQR", cloud)
-        self.assertIn("tryQRScan", form[form.index("window.ocrExtractLocal = async function") :])
+        for legacy in ("try_decode_qr", "tryQRScan", "ocr_qr_worker", "jsQR", "ocrExtractLocal", "RapidOCR"):
+            self.assertNotIn(legacy, form)
 
     def test_normalize_property_doc_extracts_core_fields(self):
         lines = [

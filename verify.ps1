@@ -36,8 +36,6 @@ function Test-OcrRelevantChange {
 
     $OcrRelevant = @(
         "routers/ocr_ai.py",
-        "routers/ocr_local.py",
-        "tasks.py",
         "tests/test_ocr_ai.py"
     )
 
@@ -122,7 +120,7 @@ function Invoke-VerifyStep {
 }
 
 Invoke-VerifyStep "py_compile core Python files" {
-    & $Python -m py_compile routers/ocr_ai.py routers/ocr_local.py tasks.py
+    & $Python -m py_compile routers/ocr_ai.py routers/cases.py routers/customers.py main.py
     if (Test-Path "services/fast_audit") {
         $FastAuditFiles = @(Get-ChildItem -Path "services/fast_audit" -Filter "*.py" | Select-Object -ExpandProperty FullName)
         if ($FastAuditFiles.Count -gt 0) {

@@ -26,9 +26,6 @@ zxing-cpp
 # ---------- Audit / Soat chinh ta ----------
 rapidfuzz==3.9.0
 
-# ---------- Background jobs ----------
-celery[sqlalchemy]==5.3.6
-
 # ---------- Testing ----------
 playwright
 pytest
