@@ -59,6 +59,35 @@ untouched until containment and explicit cleanup approval.
   `codex/zalo-document-inbox-v2` at `12b8695` with fresh dirty
   `routers/ocr_ai.py` and `tests/test_ocr_ai.py`.
 
+## Branch dispositions (user decisions 2026-09-14)
+
+- `feature/ai-ocr-qr-mrz-first` — LEGACY, development stopped; keep on remote
+  for reference only. Original QR/MRZ-first AI OCR POC (Apr 2026); concepts
+  since evolved into `routers/ocr_ai.py` on main. One unmerged defensive fix
+  (`872ff2b`, parent_cid validation) likely moot after the cases.py rework.
+  Do not resume, do not delete.
+- Active branches kept: `codex/inheritance-diagram-v2` (main business),
+  `codex/zalo-document-inbox-v2` (Zalo feature in development),
+  `codex/markitdown-qwen-poc` (Electron shell + MarkItDown integration),
+  `codex/ocr-stage-pool-diagram-v1` (handoff `a800406`, Stage/Pool/UI +
+  local-OCR removal not present anywhere else).
+- `codex/zalo-module` — DELETED on remote 2026-09-14 per user decision. It held
+  one unmerged commit `fffdd3f` (properties multi-land-rows UI/validation/
+  tests, 2026-07-29; no Zalo code despite the name). That commit is now
+  unreferenced; recover by SHA `fffdd3f3454c3f164e243398b28a524eec46ae40` if
+  the feature is ever wanted back.
+- DELETED on remote 2026-09-14 after merge verification: all
+  `codex/zalo-task-*` branches, `codex/phase-2-stage`,
+  `codex/parent-agent-workflow`, `codex/local-ocr-legacy`,
+  `codex/main-integration-20260813`, `codex/ocr-stage-pool-diagram-v2`, and
+  `claude/review-ocr-implementation-tDmZt`.
+- `codex/ocr-stage-pool-diagram-v1` head `a800406` was pushed from another PC
+  as a handoff: removes the whole local OCR stack (routers/ocr_local.py,
+  tasks.py, celery_app.py, ocr_qr_worker.js, GPU reqs) and adds the explicit
+  Stage commit flow (POST /cases/{cid}/stage-update, case_state/engine_state
+  pruning, rewritten cases/form.html) plus garbled-Excel-header matching and
+  new tests. None of this is on main or the other kept branches — keep.
+
 ## Authority
 
 - [`AGENTS.md`](../AGENTS.md)
