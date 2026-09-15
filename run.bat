@@ -14,6 +14,7 @@ if not exist "%PYTHON%" (
 )
 
 if not exist ".env" if exist ".env.example" copy ".env.example" ".env" >nul
+"%PYTHON%" scripts\ensure_zalo_env.py ".env" 5368709120 168 104857600 168
 
 echo Server: http://127.0.0.1:8000
 "%PYTHON%" -m uvicorn main:app --host 127.0.0.1 --port 8000
