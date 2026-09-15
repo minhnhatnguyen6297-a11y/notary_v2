@@ -1128,7 +1128,6 @@ def test_main_lifespan_stops_the_managed_connector(monkeypatch):
     import main
 
     stopped = []
-    monkeypatch.setattr(main.ocr_local, "warmup_local_ocr", lambda: (True, None))
     monkeypatch.setattr(main.zalo_inbox, "_terminate_connector_process", lambda: stopped.append(True))
 
     async def exercise():

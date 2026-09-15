@@ -2582,37 +2582,58 @@ async def _process_single_property_image(
 
 
 def shape_cached_ocr(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rebuild the OCR response from stored Qwen documents without a model call."""
     persons: list[dict[str, Any]] = []
     properties: list[dict[str, Any]] = []
+    marriages: list[dict[str, Any]] = []
     shaped_raw: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
-    for cached in raw_results:
-        filename = str(cached.get("input_item_id") or cached.get("filename") or "unknown")
-        lines = cached.get("text_lines") if isinstance(cached.get("text_lines"), list) else []
+
+    for raw in raw_results:
+        if not isinstance(raw, dict):
+            errors.append({"filename": "unknown", "error": "Invalid cached OCR result", "stage": "parse"})
+            continue
+        filename = _clean_text(raw.get("input_item_id") or raw.get("filename")) or "unknown"
+        lines = raw.get("text_lines") if isinstance(raw.get("text_lines"), list) else []
         try:
             doc = _normalize_native_ocr_doc(lines, filename)
             _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=shaped_raw)
+            shaped_raw[-1] = {**raw, **shaped_raw[-1], "filename": filename, "source_type": "AI", "status": "ok"}
         except Exception as exc:
             shaped_raw.append(
-                {"filename": filename, "doc_type": "unknown", "text_lines": lines, "status": "error", "source_type": "AI"}
+                {**raw, "filename": filename, "doc_type": "unknown", "text_lines": lines, "status": "error", "source_type": "AI"}
             )
             errors.append({"filename": filename, "error": str(exc), "stage": "parse"})
+
     try:
         persons = _pair_persons(persons)
     except Exception as exc:
         errors.append({"filename": "batch", "error": str(exc), "stage": "pair"})
+    unknowns = sum(1 for item in shaped_raw if item.get("doc_type") == "unknown")
     return {
         "persons": persons,
         "properties": properties,
-        "marriages": [],
+        "marriages": marriages,
         "raw_results": shaped_raw,
         "errors": errors,
         "summary": {
-            "total_images": len(raw_results),
+            "total_images": len(shaped_raw),
+            "model": "cached",
+            "qr_hits": 0,
+            "ai_runs": 0,
+            "ocr_runs": 0,
+            "ai_started": 0,
+            "ai_selected": 0,
+            "ai_discarded_by_qr": 0,
             "persons": len(persons),
-            "properties": len(properties),
             "paired_persons": sum(1 for person in persons if person.get("paired")),
-            "cache_reparse": True,
+            "properties": len(properties),
+            "marriages": len(marriages),
+            "unknowns": unknowns,
+            "ocr_native_ms": 0.0,
+            "backend_parse_ms": 0.0,
+            "pair_ms": 0.0,
+            "total_ms": 0.0,
         },
     }
 
@@ -2654,7 +2675,8 @@ async def analyze_images(files: list[UploadFile] = File(...)):
                 results.append(item)
 
     ocr_native_ms = perf_counter() - t_ocr_start
-    ai_runs = 0
+    ai_started = len(files)
+    ai_selected = 0
 
     t_parse_start = perf_counter()
     for item in results:
@@ -2676,7 +2698,7 @@ async def analyze_images(files: list[UploadFile] = File(...)):
 
         doc = item.get("ai_doc")
         if isinstance(doc, dict):
-            ai_runs += 1
+            ai_selected += 1
             _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=raw_results)
         else:
             errors.append({"filename": filename, "error": "No OCR result"})
@@ -2702,7 +2724,7 @@ async def analyze_images(files: list[UploadFile] = File(...)):
         ocr_native_ms=_ms(ocr_native_ms),
         backend_parse_ms=_ms(backend_parse_ms),
         pair_ms=_ms(pair_ms),
-        ai_runs=ai_runs,
+        ai_runs=ai_selected,
         errors=len(errors),
     )
 
@@ -2716,8 +2738,11 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             "total_images": len(files),
             "model": model,
             "qr_hits": 0,
-            "ai_runs": ai_runs,
-            "ocr_runs": ai_runs,
+            "ai_runs": ai_started,
+            "ocr_runs": ai_started,
+            "ai_started": ai_started,
+            "ai_selected": ai_selected,
+            "ai_discarded_by_qr": 0,
             "persons": len(persons),
             "paired_persons": paired_count,
             "properties": len(properties),

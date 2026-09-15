@@ -26,7 +26,6 @@ LEGACY_DOC_DIRS = (
     "docs/issues",
     "docs/changelog",
     "docs/learning",
-    "docs/superpowers",
     "docs/research",
 )
 
@@ -62,11 +61,11 @@ def test_module_readme_markdown_targets_exist():
 def test_agents_routed_markdown_exists():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     section = re.search(
-        r"^## Sources of truth[ \t]*\n(?P<body>.*?)(?=^## Impact discovery\b)",
+        r"^## 2\. Nguồn chuẩn và tài liệu tham chiếu[ \t]*\n(?P<body>.*?)(?=^## 3\. Tra cứu mã\b)",
         agents,
         re.MULTILINE | re.DOTALL,
     )
-    assert section is not None, "AGENTS.md must contain Sources of truth before Impact discovery"
+    assert section is not None, "AGENTS.md must contain the routed sources-of-truth section"
     routed = set(re.findall(r"`(docs/[^ `]+\.md)`", section.group("body")))
     missing = sorted(path for path in routed if not (ROOT / path).is_file())
     assert missing == []
