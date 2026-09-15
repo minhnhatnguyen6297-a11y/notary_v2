@@ -1,0 +1,18 @@
+{
+  "name": "notary-zalo-receive-connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Receive-only zca-js connector for the local Zalo document inbox",
+  "type": "module",
+  "scripts": {
+    "start": "node bin/run.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/core.mjs && node --check src/connector.mjs && node --check bin/run.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zca-js": "2.1.2"
+  }
+}

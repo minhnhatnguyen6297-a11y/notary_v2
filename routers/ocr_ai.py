@@ -3,10 +3,10 @@ AI OCR router (cloud path) with native Qwen OCR task.
 
 Design goals:
 1) Keep API contract stable: POST /api/ocr/analyze, GET /api/ocr/config.
-2) Every accepted image uses Qwen OCR.
-3) Field parsing, MRZ parsing, side detection, and pairing are deterministic in
-   backend.
-4) No fallback waves (no rescue AI or chat prompt reasoning loop).
+2) Qwen-only: every accepted image is sent through native Qwen OCR.
+3) AI is text-only OCR. Field parsing, MRZ parsing, side detection, and pairing
+   are deterministic in backend.
+4) No fallback waves (no MRZ rescue AI, no chat prompt reasoning loop).
 """
 
 from __future__ import annotations
@@ -170,6 +170,153 @@ def _normalize_person_data(data: dict[str, Any]) -> dict[str, str]:
 
 def _field_sources(data: dict[str, str], source: str) -> dict[str, str]:
     return {k: source for k, v in data.items() if _clean_text(v)}
+
+
+def parse_cccd_qr(text: str) -> dict[str, str] | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    parts = [p.strip() for p in re.split(r"[|\r\n;]+", raw) if p and p.strip()]
+    if not parts:
+        return None
+
+    now_year = datetime.now().year
+
+    def collect_dates(part: str) -> list[str]:
+        out: list[str] = []
+        compact = re.sub(r"\s+", "", part or "")
+        for m in re.findall(r"\d{1,2}[/-]\d{1,2}[/-]\d{4}", compact):
+            d = _normalize_date(m)
+            if d:
+                out.append(d)
+        for m in re.findall(r"\d{8}", compact):
+            ddmmyyyy = f"{m[0:2]}/{m[2:4]}/{m[4:8]}"
+            parsed = _normalize_date(ddmmyyyy)
+            if parsed:
+                out.append(parsed)
+        return out
+
+    cccd = ""
+    for part in parts:
+        m = re.search(r"(?<!\d)(\d{12})(?!\d)", part)
+        if m:
+            cccd = m.group(1)
+            break
+    if not cccd:
+        return None
+
+    name = ""
+    birth = ""
+    issue = ""
+    expiry = ""
+    gender = ""
+    address = ""
+
+    for idx, part in enumerate(parts):
+        folded = _fold_text(part)
+        after_colon = part.split(":", 1)[1].strip() if ":" in part else part
+
+        if not name and _looks_like_label(part, ["ho va ten", "ho ten", "full name"]):
+            if after_colon and not re.search(r"\d", after_colon):
+                name = after_colon
+            elif idx + 1 < len(parts) and not re.search(r"\d", parts[idx + 1]):
+                name = parts[idx + 1]
+
+        if not gender:
+            if re.search(r"\b(nam|male)\b", folded):
+                gender = "Nam"
+            elif re.search(r"\b(nu|female)\b", folded):
+                gender = "Nữ"
+
+        if not address and _looks_like_label(part, ["noi thuong tru", "noi cu tru", "place of residence"]):
+            if after_colon:
+                address = after_colon
+            elif idx + 1 < len(parts):
+                address = parts[idx + 1]
+
+        dates = collect_dates(part)
+        if dates:
+            if not birth and _looks_like_label(part, ["ngay sinh", "date of birth"]):
+                birth = dates[0]
+            if not issue and _looks_like_label(part, ["ngay cap", "date of issue"]):
+                issue = dates[0]
+            if not expiry and _looks_like_label(part, ["co gia tri den", "ngay het han", "date of expiry"]):
+                expiry = dates[-1]
+
+    # Canonical CCCD QR payload is often positional without labels:
+    # new_id|old_id|name|dob(ddmmyyyy)|gender|address|issue(ddmmyyyy)|...
+    has_pipe_style = "|" in raw and len(parts) >= 6
+    if has_pipe_style:
+        if not name and len(parts) >= 3 and not re.search(r"\d", parts[2]):
+            name = _clean_text(parts[2])
+        if not birth and len(parts) >= 4:
+            compact_dob = re.sub(r"\s+", "", parts[3] or "")
+            if re.fullmatch(r"\d{8}", compact_dob):
+                birth = _normalize_date(f"{compact_dob[0:2]}/{compact_dob[2:4]}/{compact_dob[4:8]}")
+        if not gender and len(parts) >= 5:
+            g = _normalize_gender(parts[4])
+            if g:
+                gender = g
+        if not address and len(parts) >= 6:
+            candidate_addr = _clean_text(parts[5])
+            if candidate_addr and not _looks_like_label(candidate_addr, ["bo cong an", "ministry", "public security"]):
+                address = candidate_addr
+        if not issue and len(parts) >= 7:
+            compact_issue = re.sub(r"\s+", "", parts[6] or "")
+            if re.fullmatch(r"\d{8}", compact_issue):
+                issue = _normalize_date(f"{compact_issue[0:2]}/{compact_issue[2:4]}/{compact_issue[4:8]}")
+
+    all_dates: list[str] = []
+    for part in parts:
+        all_dates.extend(collect_dates(part))
+    all_dates = list(dict.fromkeys(all_dates))
+
+    def year_of(d: str) -> int:
+        if not d:
+            return 0
+        try:
+            return int(d.split("/")[-1])
+        except Exception:
+            return 0
+
+    if all_dates and not birth:
+        candidates = [d for d in all_dates if 1900 <= year_of(d) <= now_year]
+        if candidates:
+            birth = sorted(candidates, key=year_of)[0]
+    if all_dates and not issue:
+        candidates = [d for d in all_dates if 2000 <= year_of(d) <= now_year + 1 and d != birth]
+        if candidates:
+            issue = sorted(candidates, key=year_of)[0]
+    if all_dates and not expiry:
+        candidates = [d for d in all_dates if year_of(d) >= now_year]
+        if candidates:
+            expiry = sorted(candidates, key=year_of)[-1]
+
+    if not address:
+        for part in parts:
+            candidate = _clean_text(part)
+            if not candidate:
+                continue
+            folded = _fold_text(candidate)
+            if re.search(r"\b(thon|to|to dan pho|tt|xa|phuong|huyen|quan|tinh|thanh pho|tp)\b", folded) or "," in candidate:
+                if not re.search(r"bo cong an|ministry|public security|cong hoa|socialist", folded):
+                    address = candidate
+                    break
+
+    result = _normalize_person_data(
+        {
+            "ho_ten": name,
+            "so_giay_to": cccd,
+            "ngay_sinh": birth,
+            "gioi_tinh": gender,
+            "dia_chi": address,
+            "ngay_cap": issue,
+            "ngay_het_han": expiry,
+        }
+    )
+    if not result["so_giay_to"]:
+        return None
+    return result
 
 
 def _prepare_ai_image_bytes(file_bytes: bytes, max_px: int = AI_MAX_IMAGE_PX) -> bytes:
@@ -1913,12 +2060,15 @@ def _merge_property_pair(front_doc: dict[str, Any], back_doc: dict[str, Any]) ->
 
 
 def _labeled_value(lines: list[str], labels: list[str]) -> str:
+    folded_labels = [_ascii_text(label) for label in labels]
     for index, line in enumerate(lines):
-        if not _looks_like_label(line, labels):
+        folded = _ascii_text(line)
+        if not any(label in folded for label in folded_labels):
             continue
-        value = _clean_text(line.split(":", 1)[1] if ":" in line else "")
-        if value:
-            return value
+        if ":" in line:
+            value = _clean_text(line.split(":", 1)[1])
+            if value:
+                return value
         if index + 1 < len(lines):
             return _clean_text(lines[index + 1])
     return ""
@@ -1930,15 +2080,19 @@ def _looks_like_death_certificate(lines: list[str]) -> bool:
 
 
 def _normalize_death_certificate_doc(lines: list[str], filename: str) -> dict[str, Any]:
+    name = _labeled_value(lines, ["ho, chu dem, ten nguoi chet", "ho va ten nguoi chet"])
+    birth = _labeled_value(lines, ["ngay sinh", "ngay, thang, nam sinh"])
     identity = _labeled_value(lines, ["giay to tuy than", "so dinh danh ca nhan"])
+    address = _labeled_value(lines, ["noi cu tru cuoi cung", "noi cu tru"])
+    death = _labeled_value(lines, ["da chet vao ngay", "ngay, thang, nam chet", "ngay chet"])
     identity_match = re.search(r"(?<!\d)(\d{9,12})(?!\d)", identity)
     data = _normalize_person_data(
         {
-            "ho_ten": _labeled_value(lines, ["ho, chu dem, ten nguoi chet", "ho va ten nguoi chet"]),
+            "ho_ten": name,
             "so_giay_to": identity_match.group(1) if identity_match else "",
-            "ngay_sinh": _labeled_value(lines, ["ngay sinh", "ngay, thang, nam sinh"]),
-            "dia_chi": _labeled_value(lines, ["noi cu tru cuoi cung", "noi cu tru"]),
-            "ngay_chet": _labeled_value(lines, ["da chet vao ngay", "ngay, thang, nam chet", "ngay chet"]),
+            "ngay_sinh": birth,
+            "dia_chi": address,
+            "ngay_chet": death,
         }
     )
     warnings = []
@@ -2041,6 +2195,7 @@ def _append_ai_doc(
             "source_type": "AI",
             "side": doc.get("side", "unknown"),
             "_files": [doc.get("filename") or "unknown"],
+            "_qr": False,
             "field_sources": _field_sources(data, "ai"),
             "warnings": list(doc.get("warnings") or []),
             "_raw_text": "\n".join(doc.get("text_lines") or []),
@@ -2144,6 +2299,7 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
         "source_type": "AI",
         "side": "unknown",
         "_files": [],
+        "_qr": False,
         "field_sources": {},
         "warnings": [],
         "paired": False,
@@ -2177,11 +2333,12 @@ def _merge_person_group(group: list[dict[str, Any]]) -> dict[str, Any]:
                 continue
             if len(incoming) > len(current):
                 merged[key] = incoming
+                merged["field_sources"][key] = src.lower()
 
-    # Prefer front-side Vietnamese names over MRZ-style back-side ASCII.
+    # Prefer front over unknown/back, then Vietnamese diacritics over MRZ-style ASCII.
     best_name = ""
     best_name_source = ""
-    best_name_score = (-1, -1, -1, -1)
+    best_name_score = (-1, -1, -1)
     for item in group:
         name = _clean_text(item.get("ho_ten"))
         if not name:
@@ -2278,63 +2435,6 @@ def _pair_persons(persons: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged_final + passthrough
 
 
-def shape_cached_ocr(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Rebuild the OCR response from stored Qwen documents without a model call."""
-    persons: list[dict[str, Any]] = []
-    properties: list[dict[str, Any]] = []
-    marriages: list[dict[str, Any]] = []
-    shaped_raw: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-
-    for raw in raw_results:
-        if not isinstance(raw, dict):
-            errors.append({"filename": "unknown", "error": "Invalid cached OCR result", "stage": "parse"})
-            continue
-        filename = _clean_text(raw.get("input_item_id") or raw.get("filename")) or "unknown"
-        lines = raw.get("text_lines") if isinstance(raw.get("text_lines"), list) else []
-        try:
-            doc = _normalize_native_ocr_doc(lines, filename)
-            _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=shaped_raw)
-            shaped_raw[-1] = {**raw, **shaped_raw[-1], "filename": filename, "source_type": "AI", "status": "ok"}
-        except Exception as exc:
-            shaped_raw.append(
-                {**raw, "filename": filename, "doc_type": "unknown", "text_lines": lines, "status": "error", "source_type": "AI"}
-            )
-            errors.append({"filename": filename, "error": str(exc), "stage": "parse"})
-
-    try:
-        persons = _pair_persons(persons)
-    except Exception as exc:
-        errors.append({"filename": "batch", "error": str(exc), "stage": "pair"})
-    unknowns = sum(1 for item in shaped_raw if item.get("doc_type") == "unknown")
-    return {
-        "persons": persons,
-        "properties": properties,
-        "marriages": marriages,
-        "raw_results": shaped_raw,
-        "errors": errors,
-        "summary": {
-            "total_images": len(shaped_raw),
-            "model": "cached",
-            "qr_hits": 0,
-            "ai_runs": 0,
-            "ocr_runs": 0,
-            "ai_started": 0,
-            "ai_selected": 0,
-            "ai_discarded_by_qr": 0,
-            "persons": len(persons),
-            "paired_persons": sum(1 for person in persons if person.get("paired")),
-            "properties": len(properties),
-            "marriages": len(marriages),
-            "unknowns": unknowns,
-            "ocr_native_ms": 0.0,
-            "backend_parse_ms": 0.0,
-            "pair_ms": 0.0,
-            "total_ms": 0.0,
-        },
-    }
-
-
 async def _process_single_image(
     upload: UploadFile,
     *,
@@ -2345,20 +2445,33 @@ async def _process_single_image(
 ) -> dict[str, Any]:
     filename = upload.filename or "unknown"
     file_bytes = await upload.read()
-
-    if not api_key:
-        raise HTTPException(status_code=500, detail="Missing API key for OCR AI model")
-    image_jpeg = _prepare_ai_image_bytes(file_bytes)
-    image_b64 = base64.b64encode(image_jpeg).decode()
-    async with ai_semaphore:
-        lines = await _call_qwen_native_ocr_single(
-            client,
-            api_key=api_key,
-            model=model,
-            image_b64=image_b64,
-            filename=filename,
-        )
-    return {"filename": filename, "ai_doc": _normalize_native_ocr_doc(lines, filename)}
+    lines: list[str] = []
+    try:
+        if not api_key:
+            raise HTTPException(status_code=500, detail="Missing API key for OCR AI model")
+        image_jpeg = _prepare_ai_image_bytes(file_bytes)
+        image_b64 = base64.b64encode(image_jpeg).decode()
+        async with ai_semaphore:
+            lines = await _call_qwen_native_ocr_single(
+                client,
+                api_key=api_key,
+                model=model,
+                image_b64=image_b64,
+                filename=filename,
+            )
+    except Exception as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        return {"filename": filename, "raw_lines": [], "ai_doc": None, "error": str(detail), "error_stage": "model"}
+    try:
+        return {
+            "filename": filename,
+            "raw_lines": lines,
+            "ai_doc": _normalize_native_ocr_doc(lines, filename),
+            "error": None,
+            "error_stage": None,
+        }
+    except Exception as exc:
+        return {"filename": filename, "raw_lines": lines, "ai_doc": None, "error": str(exc), "error_stage": "parse"}
 
 
 async def _process_single_property_image(
@@ -2468,6 +2581,42 @@ async def _process_single_property_image(
     }
 
 
+def shape_cached_ocr(raw_results: list[dict[str, Any]]) -> dict[str, Any]:
+    persons: list[dict[str, Any]] = []
+    properties: list[dict[str, Any]] = []
+    shaped_raw: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for cached in raw_results:
+        filename = str(cached.get("input_item_id") or cached.get("filename") or "unknown")
+        lines = cached.get("text_lines") if isinstance(cached.get("text_lines"), list) else []
+        try:
+            doc = _normalize_native_ocr_doc(lines, filename)
+            _append_ai_doc(doc=doc, persons=persons, properties=properties, raw_results=shaped_raw)
+        except Exception as exc:
+            shaped_raw.append(
+                {"filename": filename, "doc_type": "unknown", "text_lines": lines, "status": "error", "source_type": "AI"}
+            )
+            errors.append({"filename": filename, "error": str(exc), "stage": "parse"})
+    try:
+        persons = _pair_persons(persons)
+    except Exception as exc:
+        errors.append({"filename": "batch", "error": str(exc), "stage": "pair"})
+    return {
+        "persons": persons,
+        "properties": properties,
+        "marriages": [],
+        "raw_results": shaped_raw,
+        "errors": errors,
+        "summary": {
+            "total_images": len(raw_results),
+            "persons": len(persons),
+            "properties": len(properties),
+            "paired_persons": sum(1 for person in persons if person.get("paired")),
+            "cache_reparse": True,
+        },
+    }
+
+
 @router.post("/analyze")
 async def analyze_images(files: list[UploadFile] = File(...)):
     if not files:
@@ -2498,25 +2647,33 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             )
             for upload in files
         ]
-        for upload, item in zip(files, await asyncio.gather(*tasks, return_exceptions=True)):
+        for item in await asyncio.gather(*tasks, return_exceptions=True):
             if isinstance(item, Exception):
-                detail = item.detail if isinstance(item, HTTPException) else str(item)
-                errors.append({"filename": upload.filename or "unknown", "error": str(detail), "stage": "model"})
+                errors.append({"filename": "unknown", "error": str(item)})
             else:
                 results.append(item)
 
     ocr_native_ms = perf_counter() - t_ocr_start
-
-    ai_started = len(files)
     ai_runs = 0
+
     t_parse_start = perf_counter()
     for item in results:
         filename = item["filename"]
         if item.get("error"):
-            errors.append({"filename": filename, "error": str(item["error"]), "stage": str(item.get("error_stage") or "model")})
+            stage = str(item.get("error_stage") or "model")
+            errors.append({"filename": filename, "error": str(item["error"]), "stage": stage})
             if item.get("raw_lines"):
-                raw_results.append({"filename": filename, "doc_type": "unknown", "text_lines": list(item["raw_lines"]), "source_type": "AI", "status": "error"})
+                raw_results.append(
+                    {
+                        "filename": filename,
+                        "doc_type": "unknown",
+                        "text_lines": list(item["raw_lines"]),
+                        "source_type": "AI",
+                        "status": "error",
+                    }
+                )
             continue
+
         doc = item.get("ai_doc")
         if isinstance(doc, dict):
             ai_runs += 1
@@ -2559,11 +2716,8 @@ async def analyze_images(files: list[UploadFile] = File(...)):
             "total_images": len(files),
             "model": model,
             "qr_hits": 0,
-            "ai_runs": ai_started,
-            "ocr_runs": ai_started,
-            "ai_started": ai_started,
-            "ai_selected": ai_runs,
-            "ai_discarded_by_qr": 0,
+            "ai_runs": ai_runs,
+            "ocr_runs": ai_runs,
             "persons": len(persons),
             "paired_persons": paired_count,
             "properties": len(properties),
@@ -2818,7 +2972,7 @@ async def ocr_config():
     return {
         "configured": configured,
         "model": model,
-        "provider": "qwen_native_ocr",
+        "provider": "qwen_native_ocr" if "qwen" in model.lower() else "other",
         "max_image_px": AI_MAX_IMAGE_PX,
         "ocr_ai_concurrency": OCR_AI_CONCURRENCY,
         "qwen_ocr": {

@@ -5,6 +5,7 @@ Current only after the implementation and its tests are committed and verificati
 Verification evidence: `../research/`
 
 If this target contract conflicts with business rules, do not resolve the conflict by guessing; ask the user. `../spec.md` is a non-normative draft until approved.
+Known conflicts between this contract and that draft are listed in `../spec.md` §11.2 (status enum, `willReceive` default, representation depth, base-ownership ratios, date layers, per-estate conservation). Do not resolve them from this file alone.
 UI/UX is governed by `../ux.md`; verification scenarios and evidence live in
 `../research/case-catalog.md`, `../research/validation-matrix.md`, and
 `../research/validation-issues.md`.

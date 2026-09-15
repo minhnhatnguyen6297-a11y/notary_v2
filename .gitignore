@@ -21,6 +21,7 @@ tools/upload_lab/nd_storage_state.json
 .claude/
 .hermes/
 .superpowers/
+.worktrees/
 .understand-anything/
 graphify-out/
 
@@ -36,6 +37,7 @@ benchmark_qr.py
 
 # Runtime dirs
 runtime/
+zalo_connector/node_modules/
 
 # Never track VPS credentials
 deploy/vps/ssh_credentials.env

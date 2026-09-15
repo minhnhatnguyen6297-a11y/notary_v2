@@ -15,9 +15,10 @@ from database import (
     migrate_inheritance_case_properties_schema,
     migrate_inheritance_cases_schema,
     migrate_properties_schema,
+    migrate_zalo_schema,
 )
 from observability import configure_process_logging
-from routers import cases, customers, ocr_ai, ocr_local, participants, properties
+from routers import cases, customers, ocr_ai, ocr_local, participants, properties, zalo_inbox
 
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
@@ -31,6 +32,7 @@ migrate_customers_nullable()
 migrate_inheritance_cases_schema()
 migrate_properties_schema()
 migrate_inheritance_case_properties_schema()
+migrate_zalo_schema()
 Base.metadata.create_all(bind=engine)
 
 
@@ -49,7 +51,10 @@ async def lifespan(app: FastAPI):
             app_logger.warning("[startup] Local OCR warmup skipped: %s", warmup_error or "unknown")
     except Exception as e:
         app_logger.exception("[startup] Local OCR warmup skipped: %s", e)
-    yield
+    try:
+        yield
+    finally:
+        zalo_inbox._terminate_connector_process()
 
 
 app = FastAPI(
@@ -104,6 +109,7 @@ app.include_router(cases.router, prefix="/cases", tags=["Ho so thua ke"])
 app.include_router(participants.router, prefix="/participants", tags=["Nguoi tham gia"])
 app.include_router(ocr_ai.router, prefix="/api/ocr", tags=["OCR"])
 app.include_router(ocr_local.router, prefix="/api/ocr", tags=["OCR_Local"])
+app.include_router(zalo_inbox.router)
 
 
 @app.get("/")
