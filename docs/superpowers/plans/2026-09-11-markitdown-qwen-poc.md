@@ -121,10 +121,13 @@ Expected: FAIL because policy functions do not exist.
 
 - [ ] **Step 3: Implement the minimal route policy**
 
-Route DOCX/XLSX and text-bearing PDF locally; raster signatures become
-`ocr_candidate`; all other types are unsupported. Deny all cloud calls unless
-the candidate route has `allow_cloud=True`; denied paths record a reason and no
-provider call.
+Route DOCX/XLSX and PDF whose extracted text is non-empty locally; PDF with no
+extractable text and raster signatures become `ocr_candidate`. `.doc` is
+`legacy_doc_external`: `notary_v2` has no IFilter adapter, so the POC must emit
+a handoff/warning rather than pretend it converted it; Windows IFilter remains
+the `upload_lab` owner path. All other types are unsupported. Deny all cloud
+calls unless the candidate route has `allow_cloud=True`; denied paths record a
+reason and no provider call.
 
 - [ ] **Step 4: Run focused tests**
 

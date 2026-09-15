@@ -1,5 +1,1 @@
-"""Isolated, non-production document-conversion proof of concept."""
-
-from .models import ConversionEnvelope
-
-__all__ = ["ConversionEnvelope"]
+"""Isolated MIN-50 document-conversion proof of concept."""

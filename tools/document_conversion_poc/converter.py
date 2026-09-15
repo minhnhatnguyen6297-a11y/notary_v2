@@ -1,189 +1,160 @@
-"""Local MarkItDown conversion for the isolated document-conversion POC."""
-
 from __future__ import annotations
 
-from dataclasses import replace
+from collections.abc import Callable
+import hashlib
 from pathlib import Path
-from typing import Callable, Protocol
+from time import perf_counter
+from typing import Protocol
 
-from .models import (
-    ContentRecord,
-    ConversionEnvelope,
-    ConversionSegment,
-    ConverterRecord,
-    OcrCall,
-    PocError,
-)
+import fitz
+
+try:
+    from markitdown import MarkItDown
+except ImportError:  # Optional POC dependency; production imports stay usable.
+    MarkItDown = None  # type: ignore[assignment,misc]
+
+from .models import Content, Converter, ConversionEnvelope, OcrCall, PocError, Segment
 from .policy import classify_source, decide_ocr
-from .qwen_compatible import QwenCompatibleOcrError
+from .qwen_compatible import OcrRequestError
 
 
 class OcrClient(Protocol):
-    """Explicitly policy-gated OCR boundary for raster candidates."""
-
     def extract(self, image_bytes: bytes, mime_type: str) -> str:
-        """Extract text without exposing provider transport to the router."""
+        """Return OCR text for an already-approved image input."""
+
+
+def _ocr_inputs(path: Path, source_bytes: bytes) -> list[tuple[bytes, str, dict[str, int] | None]]:
+    """Render scanned PDF pages; never send PDF bytes as an image data URL."""
+    if path.suffix.lower() != ".pdf":
+        return [(source_bytes, "image/png" if path.suffix.lower() == ".png" else "image/jpeg", None)]
+    document = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        inputs = []
+        for page_number, page in enumerate(document, start=1):
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            inputs.append((pixmap.tobytes("png"), "image/png", {"page": page_number}))
+        return inputs
+    finally:
+        document.close()
+
+
+def _markitdown_convert(path: Path) -> str:
+    if MarkItDown is None:
+        raise RuntimeError(
+            "markitdown is not installed; install requirements-poc-markitdown.txt"
+        )
+    result = MarkItDown(enable_plugins=False).convert(str(path))
+    return result.markdown
+
+
+def _local_pdf_page_segments(source_bytes: bytes) -> list[Segment]:
+    """Return page-addressable plain-text segments without changing Markdown content."""
+    document = fitz.open(stream=source_bytes, filetype="pdf")
+    try:
+        return [
+            Segment(
+                segment_id=f"page-{page_number}",
+                text=page.get_text("text"),
+                source_ref={"page": page_number},
+            )
+            for page_number, page in enumerate(document, start=1)
+        ]
+    finally:
+        document.close()
 
 
 def convert_path(
     path: Path,
     *,
     allow_cloud: bool,
-    converter: Callable[[Path], str] | None = None,
+    converter: Callable[[Path], str] = _markitdown_convert,
     ocr: OcrClient | None = None,
+    max_retries: int = 1,
 ) -> ConversionEnvelope:
-    """Convert a source through a local route or an explicit OCR allow decision."""
-
     source_bytes = path.read_bytes()
     envelope = ConversionEnvelope.for_source(path, source_bytes)
     route = classify_source(path, source_bytes)
-    if route == "ocr_candidate":
-        return _convert_ocr_candidate(
-            envelope,
-            source_bytes=source_bytes,
-            allow_cloud=allow_cloud,
-            ocr=ocr,
-        )
-    if route != "local":
-        return replace(
-            envelope,
-            errors=(
-                PocError(
-                    code="route_not_supported",
-                    message=f"Route {route!r} is not handled by local conversion.",
-                ),
-            ),
-        )
-
-    active_converter = converter or _convert_with_markitdown
-    try:
-        text = active_converter(path)
-    except Exception as exc:
-        return replace(
-            envelope,
-            converter=ConverterRecord("markitdown"),
-            errors=(
-                PocError(
-                    code="local_conversion_failed",
-                    message=f"Local conversion failed: {type(exc).__name__}",
-                ),
-            ),
-        )
-
-    return replace(
-        envelope,
-        converter=ConverterRecord("markitdown"),
-        content_record=ContentRecord(text),
-        segments=(ConversionSegment(text=text, source_ref=None),),
-        warnings=("provenance_unavailable",),
+    envelope.converter = Converter(
+        name="markitdown" if converter is _markitdown_convert else "injected-test-converter",
+        version="0.1.7" if converter is _markitdown_convert else "test",
+        config_fingerprint="plugins-disabled",
     )
 
+    if route == "local":
+        try:
+            text = converter(path)
+        except Exception as exc:
+            envelope.errors.append(
+                PocError(code="local_conversion_failed", message=str(exc), retryable=False)
+            )
+            return envelope
+        envelope.content = Content(format="markdown", value=text)
+        if path.suffix.lower() == ".pdf":
+            try:
+                segments = _local_pdf_page_segments(source_bytes)
+            except Exception:
+                segments = []
+            if segments:
+                envelope.segments.extend(segments)
+                return envelope
+        envelope.segments.append(Segment(segment_id="segment-1", text=text, source_ref=None))
+        envelope.warnings.append("provenance_unavailable")
+        return envelope
 
-def _convert_ocr_candidate(
-    envelope: ConversionEnvelope,
-    *,
-    source_bytes: bytes,
-    allow_cloud: bool,
-    ocr: OcrClient | None,
-) -> ConversionEnvelope:
-    decision = decide_ocr(
-        "ocr_candidate", policy_version="poc-1", allow_cloud=allow_cloud
-    )
+    if route == "legacy_doc_external":
+        envelope.warnings.append("legacy_doc_requires_upload_lab_ifilter")
+        return envelope
+
+    decision = decide_ocr(route, policy_version="poc-1", allow_cloud=allow_cloud)
     if not decision.allow:
-        return replace(
-            envelope,
-            errors=(
-                PocError(code="ocr_not_permitted", message=decision.reason),
-            ),
-        )
-    if ocr is None:
-        return replace(
-            envelope,
-            errors=(
-                PocError(
-                    code="ocr_client_unavailable",
-                    message="No OCR client was configured for an allowed request.",
-                ),
-            ),
-        )
+        envelope.warnings.append(decision.reason)
+        return envelope
 
-    mime_type = _raster_mime_type(source_bytes)
-    if mime_type is None:
-        # This adapter sends image_url data URLs.  A PDF (or any other
-        # non-raster OCR candidate) must not be sent with an invalid MIME type.
-        return replace(
-            envelope,
-            errors=(
-                PocError(
-                    code="ocr_input_not_supported",
-                    message="OCR adapter accepts raster image inputs only.",
-                ),
-            ),
-        )
+    if ocr is None:
+        envelope.warnings.append("approved_ocr_client_not_configured")
+        return envelope
 
     try:
-        text = ocr.extract(source_bytes, mime_type)
-    except QwenCompatibleOcrError as exc:
-        return replace(
-            envelope,
-            converter=ConverterRecord("qwen_compatible"),
-            ocr_calls=(exc.ocr_call,),
-            errors=(exc.error,),
-        )
-    except Exception:
-        # This fallback keeps alternate injected test adapters from leaking an
-        # exception's potentially sensitive request/response text into a report.
-        return replace(
-            envelope,
-            converter=ConverterRecord("qwen_compatible"),
-            errors=(
-                PocError(
-                    code="ocr_request_failed",
-                    message="OCR request failed.",
-                    retryable=False,
-                ),
-            ),
-        )
+        ocr_inputs = _ocr_inputs(path, source_bytes)
+    except Exception as exc:
+        envelope.errors.append(PocError(code="pdf_render_failed", message=str(exc), retryable=False))
+        return envelope
 
-    ocr_call = getattr(ocr, "last_ocr_call", None)
-    if not isinstance(ocr_call, OcrCall):
-        ocr_call = OcrCall(
-            provider="injected_ocr",
-            status="completed",
-            input_sha256=envelope.source.sha256,
-        )
-    return replace(
-        envelope,
-        converter=ConverterRecord("qwen_compatible"),
-        content_record=ContentRecord(text),
-        segments=(ConversionSegment(text=text, source_ref=None),),
-        ocr_calls=(ocr_call,),
-        warnings=("provenance_unavailable",),
-    )
+    texts: list[str] = []
+    policy_version = decision.policy_version
+    for index, (image_bytes, mime_type, source_ref) in enumerate(ocr_inputs, start=1):
+        input_hash = hashlib.sha256(image_bytes).hexdigest()
+        for attempt in range(1, max(0, max_retries) + 2):
+            started_at = perf_counter()
+            try:
+                text = ocr.extract(image_bytes, mime_type)
+            except OcrRequestError as exc:
+                duration_ms = round((perf_counter() - started_at) * 1000)
+                envelope.ocr_calls.append(OcrCall(
+                    provider=getattr(ocr, "provider", "injected-ocr"), model=getattr(ocr, "model", "unknown"),
+                    input_hash=input_hash, status="failed", duration_ms=duration_ms, error=str(exc),
+                    policy_version=policy_version, allow_reason=decision.reason, attempt=attempt,
+                    source_ref=source_ref,
+                ))
+                if exc.retryable and attempt <= max_retries:
+                    continue
+                envelope.errors.append(PocError(code="ocr_request_failed", message=str(exc), retryable=exc.retryable))
+                break
+            else:
+                duration_ms = round((perf_counter() - started_at) * 1000)
+                texts.append(text)
+                envelope.segments.append(Segment(segment_id=f"ocr-{index}", text=text, source_ref=source_ref))
+                envelope.ocr_calls.append(OcrCall(
+                    provider=getattr(ocr, "provider", "injected-ocr"), model=getattr(ocr, "model", "unknown"),
+                    input_hash=input_hash, status="completed", duration_ms=duration_ms,
+                    policy_version=policy_version, allow_reason=decision.reason, attempt=attempt,
+                    source_ref=source_ref,
+                ))
+                break
 
-
-def _raster_mime_type(data: bytes) -> str | None:
-    """Return an image MIME validated by content, never by filename suffix."""
-
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if data.startswith(b"BM"):
-        return "image/bmp"
-    if data.startswith((b"II*\x00", b"MM\x00*")):
-        return "image/tiff"
-    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
-
-
-def _convert_with_markitdown(path: Path) -> str:
-    """Convert through MarkItDown without enabling unclassified plugins."""
-
-    from markitdown import MarkItDown
-
-    result = MarkItDown(enable_plugins=False).convert(path)
-    return result.markdown
+    envelope.content = Content(format="text", value="\n".join(texts))
+    if any(segment.source_ref is not None for segment in envelope.segments):
+        envelope.warnings.append("provenance_partial")
+    else:
+        envelope.warnings.append("provenance_unavailable")
+    return envelope

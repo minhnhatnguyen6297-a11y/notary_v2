@@ -1,98 +1,81 @@
-"""JSON-safe, immutable records for the document-conversion POC."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from hashlib import sha256
+import hashlib
 import mimetypes
 from pathlib import Path
+from typing import Any, Mapping
 
 
 CONTRACT_VERSION = "v0.experimental"
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-@dataclass(frozen=True, slots=True)
-class SourceRecord:
-    path: str
+@dataclass(frozen=True)
+class Source:
+    source_id: str
     sha256: str
+    media_type: str | None
     size_bytes: int
-    mime_hint: str
-    captured_at: str
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "path": self.path,
+            "source_id": self.source_id,
             "sha256": self.sha256,
+            "media_type": self.media_type,
             "size_bytes": self.size_bytes,
-            "mime_hint": self.mime_hint,
-            "captured_at": self.captured_at,
         }
 
 
-@dataclass(frozen=True, slots=True)
-class ConverterRecord:
-    name: str
-    version: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {"name": self.name, "version": self.version}
-
-
-@dataclass(frozen=True, slots=True)
-class ContentRecord:
+@dataclass(frozen=True)
+class Segment:
+    segment_id: str
     text: str
-    mime_type: str = "text/markdown"
+    source_ref: Mapping[str, Any] | None
 
-    def to_dict(self) -> dict[str, str]:
-        return {"text": self.text, "mime_type": self.mime_type}
-
-
-@dataclass(frozen=True, slots=True)
-class ConversionSegment:
-    text: str
-    source_ref: str | None = None
-
-    def to_dict(self) -> dict[str, str | None]:
-        return {"text": self.text, "source_ref": self.source_ref}
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "segment_id": self.segment_id,
+            "text": self.text,
+            "source_ref": None if self.source_ref is None else dict(self.source_ref),
+        }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OcrCall:
     provider: str
+    model: str
+    input_hash: str
     status: str
-    input_sha256: str
     duration_ms: int | None = None
+    error: str | None = None
+    policy_version: str = "unknown"
+    allow_reason: str = "unknown"
+    attempt: int = 1
+    source_ref: Mapping[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, str | int | None]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
+            "model": self.model,
+            "input_hash": self.input_hash,
             "status": self.status,
-            "input_sha256": self.input_sha256,
             "duration_ms": self.duration_ms,
+            "error": self.error,
+            "policy_version": self.policy_version,
+            "allow_reason": self.allow_reason,
+            "attempt": self.attempt,
+            "source_ref": None if self.source_ref is None else dict(self.source_ref),
         }
 
 
-@dataclass(frozen=True, slots=True)
-class PocWarning:
-    code: str
-    detail: str | None = None
-
-    def to_dict(self) -> dict[str, str | None]:
-        return {"code": self.code, "detail": self.detail}
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class PocError:
     code: str
     message: str
-    retryable: bool = False
+    retryable: bool
 
-    def to_dict(self) -> dict[str, str | bool]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "code": self.code,
             "message": self.message,
@@ -100,42 +83,61 @@ class PocError:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class ConversionEnvelope:
-    source: SourceRecord
-    converter: ConverterRecord = field(default_factory=lambda: ConverterRecord("unassigned"))
-    content_record: ContentRecord = field(default_factory=lambda: ContentRecord(""))
-    segments: tuple[ConversionSegment, ...] = ()
-    ocr_calls: tuple[OcrCall, ...] = ()
-    warnings: tuple[str, ...] = ()
-    errors: tuple[PocError, ...] = ()
-    created_at: str = field(default_factory=_utc_now)
-    contract_version: str = CONTRACT_VERSION
+@dataclass(frozen=True)
+class Converter:
+    name: str = "unassigned"
+    version: str = "unknown"
+    config_fingerprint: str = "unconfigured"
 
-    @property
-    def content(self) -> str:
-        return self.content_record.text
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "version": self.version,
+            "config_fingerprint": self.config_fingerprint,
+        }
+
+
+@dataclass(frozen=True)
+class Content:
+    format: str = "markdown"
+    value: str = ""
+
+    def to_dict(self) -> dict[str, str]:
+        return {"format": self.format, "value": self.value}
+
+
+@dataclass
+class ConversionEnvelope:
+    source: Source
+    created_at: str
+    converter: Converter = field(default_factory=Converter)
+    content: Content = field(default_factory=Content)
+    segments: list[Segment] = field(default_factory=list)
+    ocr_calls: list[OcrCall] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    errors: list[PocError] = field(default_factory=list)
 
     @classmethod
     def for_source(cls, source_path: Path, source_bytes: bytes) -> "ConversionEnvelope":
-        mime_hint, _ = mimetypes.guess_type(source_path.name)
+        media_type, _ = mimetypes.guess_type(str(source_path))
+        digest = hashlib.sha256(source_bytes).hexdigest()
         return cls(
-            source=SourceRecord(
-                path=source_path.name,
-                sha256=sha256(source_bytes).hexdigest(),
+            source=Source(
+                source_id=f"sha256:{digest}",
+                sha256=digest,
+                media_type=media_type,
                 size_bytes=len(source_bytes),
-                mime_hint=mime_hint or "application/octet-stream",
-                captured_at=_utc_now(),
-            )
+            ),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "contract_version": self.contract_version,
-            "created_at": self.created_at,
+            "contract_version": CONTRACT_VERSION,
             "source": self.source.to_dict(),
+            "created_at": self.created_at,
             "converter": self.converter.to_dict(),
-            "content": self.content_record.to_dict(),
+            "content": self.content.to_dict(),
             "segments": [segment.to_dict() for segment in self.segments],
             "ocr_calls": [call.to_dict() for call in self.ocr_calls],
             "warnings": list(self.warnings),

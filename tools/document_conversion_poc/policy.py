@@ -1,70 +1,74 @@
-"""Deterministic source routing and explicit cloud OCR permission for the POC."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
+from typing import Literal
+
+import fitz
+
+Route = Literal["local", "ocr_candidate", "legacy_doc_external", "unsupported"]
 
 
-_ZIP_SIGNATURE = b"PK\x03\x04"
-_PDF_SIGNATURE = b"%PDF-"
-_RASTER_SIGNATURES = (
-    b"\x89PNG\r\n\x1a\n",
-    b"\xff\xd8\xff",
-    b"GIF87a",
-    b"GIF89a",
-    b"BM",
-    b"II*\x00",
-    b"MM\x00*",
-)
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OcrDecision:
-    """A policy result required before an OCR provider may be called."""
-
     allow: bool
     reason: str
     policy_version: str
 
 
-def classify_source(path: Path, data: bytes) -> str:
-    """Classify a source without converting it or contacting any provider."""
+def classify_source(path: Path, data: bytes) -> Route:
+    """Classify only the formats the POC is allowed to handle.
+
+    This intentionally makes no conversion decision from a filename alone: ZIP
+    signatures are required for Office files, PDF magic is required for PDF and
+    raster magic is required for image OCR candidates.
+    """
 
     suffix = path.suffix.lower()
-    if suffix in {".docx", ".xlsx"} and data.startswith(_ZIP_SIGNATURE):
+    if suffix in {".docx", ".xlsx"} and data.startswith(b"PK\x03\x04"):
         return "local"
-    if data.startswith(_PDF_SIGNATURE):
-        return "local" if _has_pdf_text(data) else "ocr_candidate"
-    if any(data.startswith(signature) for signature in _RASTER_SIGNATURES) or _is_webp(data):
+    if suffix == ".pdf" and data.startswith(b"%PDF-"):
+        try:
+            document = fitz.open(stream=data, filetype="pdf")
+            try:
+                has_text = any(page.get_text("text").strip() for page in document)
+            finally:
+                document.close()
+        # PyMuPDF exposes version-specific parser exceptions (for example
+        # FzErrorFormat). This boundary handles only untrusted PDF parsing;
+        # malformed input must not abort a batch.
+        except Exception:
+            return "unsupported"
+        return "local" if has_text else "ocr_candidate"
+    if suffix == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "ocr_candidate"
+    if suffix in {".jpg", ".jpeg"} and data.startswith(b"\xff\xd8\xff"):
+        return "ocr_candidate"
+    if suffix == ".doc" and data.startswith(b"\xd0\xcf\x11\xe0"):
+        return "legacy_doc_external"
     return "unsupported"
 
 
 def decide_ocr(
-    route: str, *, policy_version: str, allow_cloud: bool
+    route: Route,
+    *,
+    policy_version: str,
+    allow_cloud: bool,
 ) -> OcrDecision:
-    """Allow cloud OCR only for an explicitly opted-in raster candidate."""
-
     if route != "ocr_candidate":
-        return OcrDecision(False, "route_not_ocr_candidate", policy_version)
+        return OcrDecision(
+            allow=False,
+            reason="route_not_ocr_candidate",
+            policy_version=policy_version,
+        )
     if not allow_cloud:
-        return OcrDecision(False, "cloud_not_permitted", policy_version)
-    return OcrDecision(True, "cloud_permitted", policy_version)
-
-
-def _has_pdf_text(data: bytes) -> bool:
-    """Use a conservative, dependency-free text hint for the isolated POC."""
-
-    payload = data[len(_PDF_SIGNATURE) :]
-    if payload.split(b"\n", 1)[-1].strip() == b"text":
-        # Keep the synthetic classifier fixture small while avoiding a parser.
-        return True
-    return bool(
-        re.search(rb"\bBT\b.*?\bET\b|\([^)]*\)\s*(?:Tj|TJ|['\"])", payload, re.DOTALL)
+        return OcrDecision(
+            allow=False,
+            reason="cloud_not_authorized",
+            policy_version=policy_version,
+        )
+    return OcrDecision(
+        allow=True,
+        reason="explicit_cloud_authorization",
+        policy_version=policy_version,
     )
-
-
-def _is_webp(data: bytes) -> bool:
-    return len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP"

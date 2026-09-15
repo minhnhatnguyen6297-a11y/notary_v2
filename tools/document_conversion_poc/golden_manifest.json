@@ -1,0 +1,97 @@
+{
+  "manifest_version": "gd-3",
+  "description": "Canonical synthetic GD-01..07 cases aligned with systemdocs §6.8; no customer data.",
+  "sources": [
+    {
+      "sample_id": "GD-01",
+      "path": "tests/fixtures/document_conversion_poc/gd-01-text.pdf",
+      "mime": "application/pdf",
+      "sensitivity": "synthetic",
+      "expected_sha256": "5460db7b9e38abd72ed8c929e82a2452dd349fce05c871e98c6549942c8cc1a8",
+      "expected_route": "local",
+      "expected_status": "completed",
+      "expected_text": null,
+      "not_asserted": ["text"],
+      "expected_facts": [],
+      "expected_provenance": [{"page": 1}]
+    },
+    {
+      "sample_id": "GD-02",
+      "path": "tests/fixtures/document_conversion_poc/gd-02-scanned.pdf",
+      "mime": "application/pdf",
+      "sensitivity": "synthetic",
+      "expected_sha256": "becef00ed5e2c3e395b99cc515f875b3c21fa08deffec5af5f50011ce0254a80",
+      "expected_route": "ocr_candidate",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-03",
+      "path": "tests/fixtures/document_conversion_poc/gd-03-contract.docx",
+      "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "sensitivity": "synthetic",
+      "expected_sha256": "602b2ecb624e3f616366af32dfc0daa91e39d5083437bcce139ae00aaf290693",
+      "expected_route": "local",
+      "expected_status": "completed",
+      "expected_text": null,
+      "expected_facts": [],
+      "expected_provenance": [null],
+      "not_asserted": ["text", "provenance"]
+    },
+    {
+      "sample_id": "GD-04",
+      "path": "tests/fixtures/document_conversion_poc/gd-04-sheet.xlsx",
+      "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "sensitivity": "synthetic",
+      "expected_sha256": "df482992d7598aad67662e3eedabb59a03b70867446a76226fee59e70f966fe5",
+      "expected_route": "local",
+      "expected_status": "completed",
+      "expected_text": null,
+      "expected_facts": [],
+      "expected_provenance": [null],
+      "not_asserted": ["text", "provenance"]
+    },
+    {
+      "sample_id": "GD-05",
+      "path": "tests/fixtures/document_conversion_poc/gd-05-legacy.doc",
+      "mime": "application/msword",
+      "sensitivity": "synthetic",
+      "expected_sha256": "ff8159a54cb20338168cb905e1e34d59daa2ffa61c91558a981b2448f3ac8e41",
+      "expected_route": "legacy_doc_external",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-06",
+      "path": "tests/fixtures/document_conversion_poc/gd-06-id.png",
+      "mime": "image/png",
+      "sensitivity": "synthetic",
+      "expected_sha256": "a93c17028d894827813ce3f52be4c7f70b5e33571bd9e51ca8fd2975ef03a1a9",
+      "expected_route": "ocr_candidate",
+      "expected_status": "denied",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    },
+    {
+      "sample_id": "GD-07",
+      "path": "tests/fixtures/document_conversion_poc/gd-07-unsupported.bin",
+      "mime": "application/octet-stream",
+      "sensitivity": "synthetic",
+      "expected_sha256": "a627f019ee0f28128d9811cd81cf7dd83bff5cd00da6a7a06e2aa4d3a7c172f0",
+      "expected_route": "unsupported",
+      "expected_status": "unsupported",
+      "expected_text": "",
+      "expected_facts": [],
+      "expected_provenance": [],
+      "not_asserted": []
+    }
+  ]
+}
